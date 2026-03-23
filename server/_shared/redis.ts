@@ -9,6 +9,14 @@ type CacheBackend = 'sidecar' | 'local-file' | 'upstash' | 'none';
 
 function getCacheBackend(): CacheBackend {
   if (process.env.LOCAL_API_MODE === 'tauri-sidecar') return 'sidecar';
+  
+  // Vercel Edge Functions don't support Node.js fs/path modules
+  if (process.env.VERCEL || process.env.VERCEL_ENV) {
+    const url = process.env.UPSTASH_REDIS_REST_URL;
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+    if (url && token) return 'upstash';
+    return 'none';
+  }
 
   const configuredBackend = (process.env.WM_CACHE_BACKEND || '').trim().toLowerCase();
   if (configuredBackend === 'local-file') return 'local-file';
