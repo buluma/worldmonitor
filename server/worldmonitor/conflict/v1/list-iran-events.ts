@@ -7,7 +7,8 @@ import type {
 
 import { UPSTREAM_TIMEOUT_MS } from './_shared';
 
-const REDIS_KEY = 'conflict:iran-events:v1';
+// Redis key kept for reference (used by seed scripts)
+// const REDIS_KEY = 'conflict:iran-events:v1';
 
 // Location coordinates for geocoding
 const LOCATION_COORDS: Record<string, { lat: number; lon: number }> = {
@@ -238,11 +239,11 @@ async function fetchLiveUamapEvents(): Promise<IranEvent[]> {
         id: e.id,
         title: e.title.slice(0, 500),
         category: cat,
-        sourceUrl: e.link || '',
+        sourceUrl: e.link ?? '',
         latitude: geo.lat,
         longitude: geo.lon,
         locationName: geo.locationName,
-        timestamp: String(parseRelativeTime(e.time || '')),
+        timestamp: String(parseRelativeTime(e.time ?? '')),
         severity: categorizeSeverity(e.title),
       };
     });

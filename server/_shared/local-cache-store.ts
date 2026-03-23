@@ -31,6 +31,7 @@ const DEFAULT_STORE: LocalCacheStoreShape = {
   hashes: {},
   geos: {},
 };
+// Note: DEFAULT_STORE is used as a reference for cloning when initializing the cache
 
 let cachedStorePath: string | null = null;
 let cachedStore: LocalCacheStoreShape | null = null;
