@@ -25,13 +25,8 @@ type LocalCacheStoreShape = {
   geos: Record<string, LocalGeo>;
 };
 
-const DEFAULT_STORE: LocalCacheStoreShape = {
-  kv: {},
-  zsets: {},
-  hashes: {},
-  geos: {},
-};
-// Note: DEFAULT_STORE is used as a reference for cloning when initializing the cache
+// Note: cloneDefaultStore() is used to initialize the cache store
+
 
 let cachedStorePath: string | null = null;
 let cachedStore: LocalCacheStoreShape | null = null;
@@ -63,7 +58,8 @@ async function resolveStorePath(): Promise<string> {
 
   const path = await getNodePath();
   const configured = process.env.WM_LOCAL_CACHE_FILE?.trim();
-  cachedStorePath = configured || path.resolve(process.cwd(), '.worldmonitor-cache.json');
+  const cwd = typeof (process as any).cwd === 'function' ? (process as any).cwd() : '.';
+  cachedStorePath = configured || path.resolve(cwd, '.worldmonitor-cache.json');
   return cachedStorePath;
 }
 
