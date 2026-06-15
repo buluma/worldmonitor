@@ -132,6 +132,6 @@
   },
   "overrides": {
     "fast-xml-parser": "^5.3.7",
-    "serialize-javascript": "^7.0.4"
+    "serialize-javascript": "^7.0.5"
   }
 }
