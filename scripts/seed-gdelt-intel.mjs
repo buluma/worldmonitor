@@ -80,7 +80,7 @@ async function fetchWithRetry(topic, maxRetries = 3) {
         return { id: topic.id, articles: [], fetchedAt: new Date().toISOString(), exhausted: is429 };
       }
       // Exponential backoff: 60s, 120s, 240s — GDELT rate limit windows exceed 50s
-      const backoff = 60_000 * Math.pow(2, attempt);
+      const backoff = 60_000 * 2 ** attempt;
       console.log(`    429 rate-limited, waiting ${backoff / 1000}s... (attempt ${attempt + 1}/${maxRetries + 1})`);
       await sleep(backoff);
     }

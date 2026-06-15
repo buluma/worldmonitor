@@ -283,7 +283,7 @@ async function fetchMacroSignals() {
   }
 
   let btcPrices = btcChart ? extractClosePrices(btcChart) : [];
-  let btcAligned = btcChart ? extractAlignedPriceVolume(btcChart) : [];
+  const btcAligned = btcChart ? extractAlignedPriceVolume(btcChart) : [];
   if (btcPrices.length === 0) {
     console.log('  BTC: Yahoo unavailable, falling back to Finnhub crypto/candle');
     btcPrices = await fetchFinnhubCandles('crypto/candle', 'BINANCE:BTCUSDT');

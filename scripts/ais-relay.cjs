@@ -1709,7 +1709,7 @@ async function seedCryptoSectors() {
   }
   const byId = new Map(data.map((c) => [c.id, c.price_change_percentage_24h]));
   const sectors = SECTORS_LIST.map((sector) => {
-    const changes = sector.tokens.map((id) => byId.get(id)).filter((v) => typeof v === 'number' && isFinite(v));
+    const changes = sector.tokens.map((id) => byId.get(id)).filter((v) => typeof v === 'number' && Number.isFinite(v));
     const change = changes.length > 0 ? changes.reduce((a, b) => a + b, 0) / changes.length : 0;
     return { id: sector.id, name: sector.name, change };
   });
