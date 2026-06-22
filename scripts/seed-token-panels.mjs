@@ -120,8 +120,8 @@ runSeed('market', 'token-panels', DEFI_KEY, fetchTokenPanels, {
   recordCount: (data) => data.total,
   publishTransform: (data) => data.defi,
   extraKeys: [
-    { key: AI_KEY, transform: (data) => data.ai, ttl: CACHE_TTL },
-    { key: OTHER_KEY, transform: (data) => data.other, ttl: CACHE_TTL },
+    { key: AI_KEY, transform: (data) => data.ai, ttl: CACHE_TTL, declareRecords: (d) => Array.isArray(d?.tokens) ? d.tokens.length : 0, skipWhenEmpty: true },
+    { key: OTHER_KEY, transform: (data) => data.other, ttl: CACHE_TTL, declareRecords: (d) => Array.isArray(d?.tokens) ? d.tokens.length : 0, skipWhenEmpty: true },
   ],
 }).catch((err) => {
   const _cause = err.cause ? ` (cause: ${err.cause.message || err.cause.code || err.cause})` : '';

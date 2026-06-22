@@ -566,7 +566,14 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     // Write extra keys (e.g., bootstrap hydration keys)
     if (extraKeys) {
       for (const ek of extraKeys) {
-        await writeExtraKey(ek.key, ek.transform ? ek.transform(data) : data, ek.ttl || ttlSeconds);
+        const ekData = ek.transform ? ek.transform(data) : data;
+        const ekCount = ek.declareRecords ? ek.declareRecords(ekData) : -1;
+        if (ek.skipWhenEmpty && ekCount === 0) {
+          await extendExistingTtl([ek.key], ek.ttl || ttlSeconds || 600);
+          console.log(`  [extraKey] ${ek.key} empty — skipped write, extended TTL`);
+          continue;
+        }
+        await writeExtraKey(ek.key, ekData, ek.ttl || ttlSeconds);
       }
     }
 
