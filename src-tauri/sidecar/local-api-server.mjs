@@ -1538,6 +1538,23 @@ export async function createLocalApiServer(options = {}) {
       const address = server.address();
       const boundPort = typeof address === 'object' && address?.port ? address.port : context.port;
       context.port = boundPort;
+      const extraAllowedPrivateOrigins = [];
+      if (context.mode === 'docker' && process.env.UPSTASH_REDIS_REST_URL) {
+        try {
+          extraAllowedPrivateOrigins.push(new URL(process.env.UPSTASH_REDIS_REST_URL).origin);
+        } catch (err) {
+          context.logger.warn(
+            `[local-api] UPSTASH_REDIS_REST_URL is not a valid URL; not added to the private-fetch allowlist (Redis calls will be SSRF-blocked): ${err.message}`,
+          );
+        }
+      }
+      if (context.allowPrivateRemoteBase) {
+        try { extraAllowedPrivateOrigins.push(new URL(context.remoteBase).origin); } catch {}
+      }
+      for (const origin of context.allowPrivateFetchOrigins) {
+        try { extraAllowedPrivateOrigins.push(new URL(origin).origin); } catch {}
+      }
+      unregisterSelfFetchOrigins = registerSidecarAllowedPrivateFetchOrigins(boundPort, extraAllowedPrivateOrigins);
 
       const portFile = process.env.LOCAL_API_PORT_FILE;
       if (portFile) {

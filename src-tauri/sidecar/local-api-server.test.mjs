@@ -499,7 +499,349 @@ test('returns local handler error when fetch(Request) uses a consumed body', asy
   }
 });
 
-test('replaces browser origin headers with trusted origin when proxying to cloud fallback', async () => {
+test('blocks handler global fetches to private network targets (#3549)', async () => {
+  let upstreamHits = 0;
+
+  const upstream = createServer((_req, res) => {
+    upstreamHits += 1;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  const upstreamPort = await listen(upstream);
+  process.env.WM_TEST_UPSTREAM = `http://127.0.0.1:${upstreamPort}/secret?token=super-secret`;
+
+  const localApi = await setupApiDir({
+    'private-proxy.js': `
+      export default async function handler() {
+        const upstream = await fetch(process.env.WM_TEST_UPSTREAM);
+        const payload = await upstream.text();
+        return new Response(payload, {
+          status: upstream.status,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    `,
+  });
+
+  const app = await createLocalApiServer({
+    port: 0,
+    apiDir: localApi.apiDir,
+    logger: { log() { }, warn() { }, error() { } },
+  });
+  const { port } = await app.start();
+
+  try {
+    const response = await authFetch(`http://127.0.0.1:${port}/api/private-proxy`);
+    assert.equal(response.status, 502);
+    const body = await response.json();
+    assert.equal(body.error, 'Local handler error');
+    assert.match(body.reason, /SSRF blocked/);
+    assert.doesNotMatch(body.reason, /super-secret/);
+    assert.equal(upstreamHits, 0);
+  } finally {
+    delete process.env.WM_TEST_UPSTREAM;
+    await app.close();
+    await localApi.cleanup();
+    await new Promise((resolve, reject) => {
+      upstream.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test('allows only Docker mode to fetch configured private Redis REST origin', async () => {
+  const originalRedisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const originalRedisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  let upstreamHits = 0;
+
+  const upstream = createServer((_req, res) => {
+    upstreamHits += 1;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  });
+  const upstreamPort = await listen(upstream);
+  const redisOrigin = `http://127.0.0.1:${upstreamPort}`;
+
+  const localApi = await setupApiDir({
+    'redis-probe.js': `
+      export default async function handler() {
+        const upstream = await fetch(process.env.UPSTASH_REDIS_REST_URL + '/ping', {
+          headers: { Authorization: 'Bearer ' + process.env.UPSTASH_REDIS_REST_TOKEN },
+        });
+        const payload = await upstream.text();
+        return new Response(payload, {
+          status: upstream.status,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    `,
+  });
+
+  async function runProbe(mode) {
+    const app = await createLocalApiServer({
+      port: 0,
+      apiDir: localApi.apiDir,
+      mode,
+      logger: { log() { }, warn() { }, error() { } },
+    });
+    const { port } = await app.start();
+    try {
+      return await authFetch(`http://127.0.0.1:${port}/api/redis-probe`);
+    } finally {
+      await app.close();
+    }
+  }
+
+  process.env.UPSTASH_REDIS_REST_URL = redisOrigin;
+  process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+
+  try {
+    const dockerResponse = await runProbe('docker');
+    assert.equal(dockerResponse.status, 200);
+    assert.deepEqual(await dockerResponse.json(), { ok: true });
+    assert.equal(upstreamHits, 1);
+
+    const desktopResponse = await runProbe('desktop-sidecar');
+    assert.equal(desktopResponse.status, 502);
+    const desktopBody = await desktopResponse.json();
+    assert.equal(desktopBody.error, 'Local handler error');
+    assert.match(desktopBody.reason, /SSRF blocked/);
+    assert.equal(upstreamHits, 1);
+  } finally {
+    if (originalRedisUrl === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = originalRedisUrl;
+    if (originalRedisToken === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = originalRedisToken;
+    await localApi.cleanup();
+    await new Promise((resolve, reject) => {
+      upstream.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+});
+
+test('blocks handler global fetches to non-global IPv4 special ranges', async () => {
+  const originalHttpRequest = http.request;
+  const blockedUrls = [
+    'http://100.64.0.1/secret',
+    'http://198.18.0.1/secret',
+    'http://192.0.0.1/secret',
+    'http://192.0.2.1/secret',
+    'http://192.88.99.1/secret',
+    'http://198.51.100.1/secret',
+    'http://203.0.113.1/secret',
+    'http://240.0.0.1/secret',
+  ];
+  let outboundHits = 0;
+
+  http.request = (options, onResponse) => {
+    if (options.hostname === '127.0.0.1') {
+      return originalHttpRequest.call(http, options, onResponse);
+    }
+
+    outboundHits += 1;
+    const req = new EventEmitter();
+    req.setTimeout = () => {};
+    req.write = () => {};
+    req.destroy = (error) => {
+      if (error) req.emit('error', error);
+    };
+    req.end = () => {
+      setImmediate(() => req.emit('error', new Error(`unexpected outbound request to ${options.hostname}`)));
+    };
+    return req;
+  };
+
+  const localApi = await setupApiDir({
+    'special-range-proxy.js': `
+      export default async function handler(request) {
+        const url = new URL(request.url);
+        const upstream = await fetch(url.searchParams.get('target'));
+        const payload = await upstream.text();
+        return new Response(payload, {
+          status: upstream.status,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    `,
+  });
+
+  const app = await createLocalApiServer({
+    port: 0,
+    apiDir: localApi.apiDir,
+    logger: { log() { }, warn() { }, error() { } },
+  });
+  const { port } = await app.start();
+
+  try {
+    for (const blockedUrl of blockedUrls) {
+      const response = await authFetch(`http://127.0.0.1:${port}/api/special-range-proxy?target=${encodeURIComponent(blockedUrl)}`);
+      assert.equal(response.status, 502, blockedUrl);
+      const body = await response.json();
+      assert.equal(body.error, 'Local handler error', blockedUrl);
+      assert.match(body.reason, /SSRF blocked/, blockedUrl);
+    }
+    assert.equal(outboundHits, 0);
+  } finally {
+    http.request = originalHttpRequest;
+    await app.close();
+    await localApi.cleanup();
+  }
+});
+
+test('uses asynchronous pinned lookup callback for handler global fetches (#3549)', async () => {
+  const originalHttpsRequest = https.request;
+  const envSnapshot = {
+    GROQ_API_KEY: process.env.GROQ_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    OLLAMA_API_URL: process.env.OLLAMA_API_URL,
+    LLM_API_URL: process.env.LLM_API_URL,
+  };
+  let lookupCallbackWasSync = null;
+
+  delete process.env.GROQ_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.OLLAMA_API_URL;
+  delete process.env.LLM_API_URL;
+
+  https.request = (options, onResponse) => {
+    assert.equal(options.hostname, '93.184.216.34');
+    assert.equal(typeof options.lookup, 'function');
+
+    let sync = true;
+    options.lookup(options.hostname, { family: 4 }, (error, address, family) => {
+      assert.ifError(error);
+      assert.equal(address, '93.184.216.34');
+      assert.equal(family, 4);
+      lookupCallbackWasSync = sync;
+    });
+    sync = false;
+
+    const req = new EventEmitter();
+    req.setTimeout = () => {};
+    req.write = () => {};
+    req.destroy = (error) => {
+      if (error) req.emit('error', error);
+    };
+    req.end = () => {
+      setImmediate(() => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        res.statusMessage = 'OK';
+        res.headers = { 'content-type': 'application/json' };
+        onResponse(res);
+        res.emit('data', Buffer.from(JSON.stringify({ ok: true })));
+        res.emit('end');
+      });
+    };
+    return req;
+  };
+
+  const localApi = await setupApiDir({
+    'public-proxy.js': `
+      export default async function handler() {
+        const upstream = await fetch('https://93.184.216.34/data');
+        const payload = await upstream.text();
+        return new Response(payload, {
+          status: upstream.status,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    `,
+  });
+
+  const app = await createLocalApiServer({
+    port: 0,
+    apiDir: localApi.apiDir,
+    logger: { log() { }, warn() { }, error() { } },
+  });
+  const { port } = await app.start();
+
+  try {
+    const response = await authFetch(`http://127.0.0.1:${port}/api/public-proxy`);
+    assert.equal(response.status, 200);
+    assert.equal(lookupCallbackWasSync, false);
+  } finally {
+    https.request = originalHttpsRequest;
+    for (const [key, value] of Object.entries(envSnapshot)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await app.close();
+    await localApi.cleanup();
+  }
+});
+
+test('uses IPv4 sidecar fetch for allowed private-network LLM probes (#3549)', async () => {
+  const originalHttpRequest = http.request;
+  const envSnapshot = {
+    GROQ_API_KEY: process.env.GROQ_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    OLLAMA_API_URL: process.env.OLLAMA_API_URL,
+    LLM_API_URL: process.env.LLM_API_URL,
+  };
+  let sawOllamaProbe = false;
+
+  delete process.env.GROQ_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.LLM_API_URL;
+  process.env.OLLAMA_API_URL = 'http://ollama.test:11434';
+
+  http.request = (options, onResponse) => {
+    if (options.hostname !== 'ollama.test') {
+      return originalHttpRequest.call(http, options, onResponse);
+    }
+
+    sawOllamaProbe = true;
+    assert.equal(options.family, 4);
+    assert.equal(options.path, '/');
+
+    const req = new EventEmitter();
+    req.setTimeout = () => {};
+    req.write = () => {};
+    req.destroy = (error) => {
+      if (error) req.emit('error', error);
+    };
+    req.end = () => {
+      setImmediate(() => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        res.statusMessage = 'OK';
+        res.headers = { 'content-type': 'application/json' };
+        onResponse(res);
+        res.emit('data', Buffer.from(JSON.stringify({ ok: true })));
+        res.emit('end');
+      });
+    };
+    return req;
+  };
+
+  const localApi = await setupApiDir({});
+  const app = await createLocalApiServer({
+    port: 0,
+    apiDir: localApi.apiDir,
+    logger: { log() { }, warn() { }, error() { } },
+  });
+  const { port } = await app.start();
+
+  try {
+    const response = await getJsonViaHttp(`http://127.0.0.1:${port}/api/llm-health`);
+    assert.equal(response.status, 200);
+    assert.equal(response.json.available, true);
+    assert.deepEqual(response.json.providers, [
+      { name: 'ollama', url: 'http://ollama.test:11434', available: true },
+    ]);
+    assert.equal(sawOllamaProbe, true);
+  } finally {
+    http.request = originalHttpRequest;
+    for (const [key, value] of Object.entries(envSnapshot)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await app.close();
+    await localApi.cleanup();
+  }
+});
+
+test('uses canonical app origin when proxying to cloud fallback (cloudFallback enabled)', async () => {
   const remote = await setupRemoteServer();
   const localApi = await setupApiDir({});
 
