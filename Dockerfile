@@ -13,7 +13,7 @@ WORKDIR /app
 
 # Install root dependencies (layer-cached until package.json changes)
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm install --ignore-scripts
 
 # Copy full source
 COPY . .
