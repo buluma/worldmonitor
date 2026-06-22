@@ -148,7 +148,14 @@ export class PanelLayoutManager implements AppModule {
           <div class="variant-switcher">${(() => {
         const local = this.ctx.isDesktopApp || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const inIframe = window.self !== window.top;
-        const vHref = (v: string, prod: string) => local || SITE_VARIANT === v ? '#' : prod;
+        const variantUrl = (v: string): string => {
+          if (local || SITE_VARIANT === v) return '#';
+          const h = location.hostname;
+          const base = h.replace(/^(tech|finance|commodity|happy)\./, '');
+          const prefix = v === 'full' ? '' : `${v}.`;
+          return `${location.protocol}//${prefix}${base}${location.port ? ':' + location.port : ''}`;
+        };
+        const vHref = (v: string, _prod: string) => variantUrl(v);
         const vTarget = (v: string) => !local && SITE_VARIANT !== v && inIframe ? 'target="_blank" rel="noopener"' : '';
         return `
             <a href="${vHref('full', 'https://worldmonitor.app')}"
