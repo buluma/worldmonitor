@@ -40,10 +40,14 @@ if [ -f "$OVERRIDE" ]; then
     | sed 's/^\s*//' \
     | sed 's/: */=/' \
     | sed "s/[\"']//g" \
-    | grep -E '^(NASA_FIRMS|GROQ|AISSTREAM|FRED|FINNHUB|EIA|ACLED_ACCESS_TOKEN|ACLED_EMAIL|ACLED_PASSWORD|CLOUDFLARE|AVIATIONSTACK|OPENROUTER_API_KEY|LLM_API_URL|LLM_API_KEY|LLM_MODEL|OLLAMA_API_URL|OLLAMA_MODEL)' \
+    | grep -E '^(NASA_FIRMS|GROQ|AISSTREAM|FRED|FINNHUB|EIA|ACLED_ACCESS_TOKEN|ACLED_EMAIL|ACLED_PASSWORD|CLOUDFLARE|AVIATIONSTACK|OPENROUTER_API_KEY|LLM_API_URL|LLM_API_KEY|LLM_MODEL|OLLAMA_API_URL|OLLAMA_MODEL|WTO_API_KEY|WM_API_BASE_URL)' \
     | sed 's/^/export /' > "$_env_tmp"
   . "$_env_tmp"
   rm -f "$_env_tmp"
+fi
+# Default warm-ping target to local API when running against local Redis
+if [ "$UPSTASH_REDIS_REST_URL" = "http://localhost:8079" ] && [ -z "$WM_API_BASE_URL" ]; then
+  export WM_API_BASE_URL="http://localhost:4000"
 fi
 ok=0 fail=0 skip=0
 
