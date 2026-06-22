@@ -346,7 +346,9 @@ export async function getHashFieldsBatch(
     const values = data[0]?.result;
     if (values) {
       for (let i = 0; i < fields.length; i++) {
-        if (values[i]) result.set(fields[i]!, values[i]!);
+        // Use a null/undefined check rather than a truthy test: "" is a
+        // legitimate Redis hash value and must be preserved (see #3530).
+        if (values[i] != null) result.set(fields[i]!, values[i]!);
       }
     }
   } catch (err) {
