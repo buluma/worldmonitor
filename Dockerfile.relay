@@ -9,8 +9,9 @@
 
 FROM node:22-alpine
 
-# curl required by OREF polling (Node.js JA3 fingerprint blocked by Akamai; curl passes)
-RUN apk add --no-cache curl
+# curl: OREF polling (JA3 fingerprint blocked by Akamai)
+# python3, make, g++: native addons (bufferutil, utf-8-validate)
+RUN apk add --no-cache curl python3 make g++
 
 WORKDIR /app
 
