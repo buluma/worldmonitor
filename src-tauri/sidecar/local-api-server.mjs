@@ -1551,7 +1551,7 @@ export async function createLocalApiServer(options = {}) {
       if (context.allowPrivateRemoteBase) {
         try { extraAllowedPrivateOrigins.push(new URL(context.remoteBase).origin); } catch {}
       }
-      for (const origin of context.allowPrivateFetchOrigins) {
+      for (const origin of context.allowPrivateFetchOrigins || []) {
         try { extraAllowedPrivateOrigins.push(new URL(origin).origin); } catch {}
       }
       unregisterSelfFetchOrigins = registerSidecarAllowedPrivateFetchOrigins(boundPort, extraAllowedPrivateOrigins);
