@@ -43,8 +43,21 @@ Sourced from worldmonitor_og divergence analysis + heimdal deployment observatio
 
 Large module (~50 commits in OG). Full country resilience scoring: governance, energy, trade, social indicators. All data sources appear free (WGI, WTO, energy APIs). Worth porting as a batch project.
 
+## Alerting Pipeline (NEXT PRIORITY)
+
+Rule-based alerting from World Monitor signals → Telegram.
+
+- [ ] Rule engine in ais-relay.cjs — evaluate conditions after each seed cycle
+- [ ] Earthquake alerts: M6+ quakes, volcanic eruptions, tsunami warnings
+- [ ] Geopolitical alerts: CII risk score spikes >20%, GDELT escalation, new conflict events
+- [ ] Market alerts: major moves >5%, commodity spikes, crypto crashes
+- [ ] Natural event alerts: severe weather, wildfires near populated areas
+- [ ] Alert state in Redis — prevent duplicate notifications (cooldown per event)
+- [ ] Configurable thresholds (env vars or Redis config key)
+- [ ] Deliver via existing GramJS Telegram session in relay
+
 ## Infrastructure
 
-- [ ] Rebase fork onto OG main to enable future cherry-picks (our fork has ~8 custom commits)
-- [ ] Set up Uptime Kuma check for `wm.opsio.space` health endpoint
+- [x] Set up Uptime Kuma check for `wm.opsio.space` health endpoint
 - [ ] Add Prometheus scrape target for worldmonitor container metrics
+- [ ] Selective cherry-pick from OG (avoid rebase — paid gates would reintroduce)
