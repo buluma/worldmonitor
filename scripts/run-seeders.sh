@@ -9,6 +9,18 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_LOCAL="$PROJECT_DIR/.env.local"
+LOCKFILE="/tmp/wm-seeders.lock"
+
+if [ -f "$LOCKFILE" ]; then
+  pid=$(cat "$LOCKFILE" 2>/dev/null)
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "Seeder already running (pid $pid) — skipping"
+    exit 0
+  fi
+  rm -f "$LOCKFILE"
+fi
+echo $$ > "$LOCKFILE"
+trap 'rm -f "$LOCKFILE"' EXIT INT TERM
 
 # Prefer real repo credentials when present so host-run seeders can write to the
 # same backend the app uses. Only populate keys that are currently unset.
@@ -30,10 +42,17 @@ UPSTASH_REDIS_REST_URL="${UPSTASH_REDIS_REST_URL:-http://localhost:8079}"
 UPSTASH_REDIS_REST_TOKEN="${UPSTASH_REDIS_REST_TOKEN:-wm-local-token}"
 export UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
 
-# Source API keys from docker-compose.override.yml if present.
-# These keys are configured for the container but seeders run on the host.
+# Source API keys: prefer .env.seeders (clean key=value), fall back to
+# parsing docker-compose.override.yml (fragile with special chars).
+ENV_SEEDERS="$PROJECT_DIR/.env.seeders"
+if [ -f "$ENV_SEEDERS" ]; then
+  set -a
+  . "$ENV_SEEDERS"
+  set +a
+fi
+
 OVERRIDE="$PROJECT_DIR/docker-compose.override.yml"
-if [ -f "$OVERRIDE" ]; then
+if [ -f "$OVERRIDE" ] && [ ! -f "$ENV_SEEDERS" ]; then
   _env_tmp=$(mktemp)
   grep -E '^\s+[A-Z_]+:' "$OVERRIDE" \
     | grep -v '#' \
