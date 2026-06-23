@@ -95,29 +95,97 @@ run_seed() {
   fi
 }
 
-ok=0 fail=0 skip=0 timedout=0
+SEED_PARALLEL="${SEED_PARALLEL:-4}"
+RESULTS_DIR=$(mktemp -d)
+old_trap=$(trap -p EXIT | sed "s/^trap -- '//;s/' EXIT$//")
+trap "rm -rf '$RESULTS_DIR'; $old_trap" EXIT
 
-for f in "$SCRIPT_DIR"/seed-*.mjs; do
+run_and_record() {
+  f="$1"
   name="$(basename "$f")"
-  printf "→ %s ... " "$name"
   output=$(run_seed "$f")
   rc=$?
   last=$(echo "$output" | tail -1)
 
   if caps_seed "$f" && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; }; then
-    printf "TIMEOUT (killed after %ss)\n" "$SEED_TIMEOUT"
-    timedout=$((timedout + 1))
+    printf "→ %s ... TIMEOUT (killed after %ss)\n" "$name" "$SEED_TIMEOUT"
+    echo "TIMEOUT $f" > "$RESULTS_DIR/$name"
   elif echo "$last" | grep -qi "skip\|not set\|missing.*key\|not found"; then
-    printf "SKIP (%s)\n" "$last"
-    skip=$((skip + 1))
+    printf "→ %s ... SKIP (%s)\n" "$name" "$last"
+    echo "SKIP" > "$RESULTS_DIR/$name"
   elif [ $rc -eq 0 ]; then
-    printf "OK\n"
-    ok=$((ok + 1))
+    printf "→ %s ... OK\n" "$name"
+    echo "OK" > "$RESULTS_DIR/$name"
   else
-    printf "FAIL (%s)\n" "$last"
-    fail=$((fail + 1))
+    printf "→ %s ... FAIL (%s)\n" "$name" "$last"
+    echo "FAIL $f" > "$RESULTS_DIR/$name"
+  fi
+}
+
+running=0
+for f in "$SCRIPT_DIR"/seed-*.mjs; do
+  if [ "$SEED_PARALLEL" -le 1 ] 2>/dev/null; then
+    run_and_record "$f"
+  else
+    run_and_record "$f" &
+    running=$((running + 1))
+    if [ "$running" -ge "$SEED_PARALLEL" ]; then
+      wait -n 2>/dev/null || wait
+      running=$((running - 1))
+    fi
   fi
 done
+wait
+
+ok=0 fail=0 skip=0 timedout=0
+failed_files=""
+for r in "$RESULTS_DIR"/*; do
+  [ -f "$r" ] || continue
+  line=$(cat "$r")
+  result=$(echo "$line" | cut -d' ' -f1)
+  fpath=$(echo "$line" | cut -d' ' -f2-)
+  case "$result" in
+    OK) ok=$((ok + 1)) ;;
+    SKIP) skip=$((skip + 1)) ;;
+    TIMEOUT) timedout=$((timedout + 1)); failed_files="$failed_files $fpath" ;;
+    FAIL) fail=$((fail + 1)); failed_files="$failed_files $fpath" ;;
+  esac
+done
+
+# Retry failed seeders once
+if [ -n "$failed_files" ]; then
+  echo ""
+  echo "Retrying $(echo "$failed_files" | wc -w | tr -d ' ') failed seeder(s)..."
+  for f in $failed_files; do
+    name="$(basename "$f")"
+    printf "  ↻ %s ... " "$name"
+    output=$(run_seed "$f")
+    rc=$?
+    last=$(echo "$output" | tail -1)
+    if [ $rc -eq 0 ] && ! echo "$last" | grep -qi "skip\|not set\|missing"; then
+      printf "OK (recovered)\n"
+      fail=$((fail - 1))
+      ok=$((ok + 1))
+    else
+      printf "FAIL again\n"
+    fi
+  done
+fi
 
 echo ""
-echo "Done: $ok ok, $skip skipped, $fail failed, $timedout timed out"
+SUMMARY="Done: $ok ok, $skip skipped, $fail failed, $timedout timed out"
+echo "$SUMMARY"
+
+# Send summary to Telegram if configured
+ALERT_TOKEN="${ALERT_TELEGRAM_BOT_TOKEN:-}"
+ALERT_CHAT="${ALERT_TELEGRAM_CHAT_ID:-}"
+if [ -n "$ALERT_TOKEN" ] && [ -n "$ALERT_CHAT" ] && [ "$fail" -gt 0 ] || [ "$timedout" -gt 0 ]; then
+  if [ -n "$ALERT_TOKEN" ] && [ -n "$ALERT_CHAT" ]; then
+    MSG="🌍 *Seeder Run*: $SUMMARY"
+    curl -s -X POST "https://api.telegram.org/bot${ALERT_TOKEN}/sendMessage" \
+      -d chat_id="$ALERT_CHAT" \
+      -d text="$MSG" \
+      -d parse_mode="Markdown" \
+      > /dev/null 2>&1
+  fi
+fi
