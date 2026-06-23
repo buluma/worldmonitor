@@ -24,7 +24,7 @@ export interface ServerInsights {
 }
 
 let cached: ServerInsights | null = null;
-const MAX_AGE_MS = 15 * 60 * 1000;
+const MAX_AGE_MS = 60 * 60 * 1000;
 
 function isFresh(data: ServerInsights): boolean {
   const age = Date.now() - new Date(data.generatedAt).getTime();
