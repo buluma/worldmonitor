@@ -7,15 +7,17 @@ const RESPONSE_CACHE_PREFIX = 'api-response:';
 // RSS proxy: route directly to Railway relay via Cloudflare CDN when enabled.
 // Feature flag controls rollout; default off for safe staged deployment.
 const RSS_DIRECT_TO_RELAY = import.meta.env.VITE_RSS_DIRECT_TO_RELAY === 'true';
-const RSS_PROXY_BASE = isDev
-  ? '' // Dev uses Vite's rssProxyPlugin
+const isSelfHosted = typeof window !== 'undefined'
+  && !window.location.hostname.endsWith('worldmonitor.app')
+  && window.location.hostname !== 'worldmonitor.app';
+const RSS_PROXY_BASE = isDev || isSelfHosted
+  ? '' // Dev + self-host use local /api/rss-proxy
   : RSS_DIRECT_TO_RELAY
     ? 'https://proxy.worldmonitor.app'
     : '';
 
-// Widget agent always goes directly to Railway relay.
-// Desktop: sidecar buffers via arrayBuffer() which destroys SSE streaming, so we bypass it.
-const WIDGET_RELAY_BASE = 'https://proxy.worldmonitor.app';
+// Widget agent: self-hosted uses local API, production uses Railway relay.
+const WIDGET_RELAY_BASE = isSelfHosted ? '' : 'https://proxy.worldmonitor.app';
 export function widgetAgentUrl(): string {
   if (isDev) return '/widget-agent';
   return `${WIDGET_RELAY_BASE}/widget-agent`;
