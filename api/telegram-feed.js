@@ -1,5 +1,6 @@
 import { getRelayBaseUrl, getRelayHeaders, fetchWithTimeout, buildRelayResponse } from './_relay.js';
 import { getCorsHeaders, isDisallowedOrigin } from './_cors.js';
+import { jsonResponse } from './_json-response.js';
 import { withEdgeObservability } from './_observability.js';
 
 export const config = { runtime: 'edge' };

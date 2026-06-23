@@ -1,4 +1,5 @@
 import { getCorsHeaders } from './_cors.js';
+import { jsonResponse } from './_json-response.js';
 import { withEdgeObservability } from './_observability.js';
 
 export const config = { runtime: 'edge' };
