@@ -65,6 +65,22 @@ const FEEDS = {
   ],
 };
 
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&rsquo;/g, '’')
+    .replace(/&lsquo;/g, '‘').replace(/&rdquo;/g, '”').replace(/&ldquo;/g, '“')
+    .replace(/&mdash;/g, '—').replace(/&ndash;/g, '–').replace(/&nbsp;/g, ' ');
+}
+
+function safePubDate(raw) {
+  if (!raw) return new Date().toISOString();
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
 function parseRssItems(xml, source) {
   const items = [];
   const itemRegex = /<item[\s>]([\s\S]*?)<\/item>/gi;
@@ -75,15 +91,15 @@ function parseRssItems(xml, source) {
     const link = (block.match(/<link[^>]*>([\s\S]*?)<\/link>/) || [])[1] || '';
     const pubDate = (block.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/) || [])[1] || '';
     const desc = (block.match(/<description[^>]*>([\s\S]*?)<\/description>/) || [])[1] || '';
-    const cleanTitle = title.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim();
+    const cleanTitle = decodeHtmlEntities(title.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim());
     const cleanLink = link.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
     if (cleanTitle.length > 10) {
       items.push({
         title: cleanTitle,
         source,
         link: cleanLink,
-        pubDate: pubDate.replace(/<!\[CDATA\[|\]\]>/g, '').trim() || new Date().toISOString(),
-        description: desc.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim().slice(0, 300),
+        pubDate: safePubDate(pubDate.replace(/<!\[CDATA\[|\]\]>/g, '').trim()),
+        description: decodeHtmlEntities(desc.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim()).slice(0, 300),
       });
     }
     if (items.length >= MAX_ITEMS_PER_FEED) break;
