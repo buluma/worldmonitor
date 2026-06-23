@@ -68,16 +68,46 @@ fi
 if [ "$UPSTASH_REDIS_REST_URL" = "http://localhost:8079" ] && [ -z "$WM_API_BASE_URL" ]; then
   export WM_API_BASE_URL="http://localhost:4000"
 fi
-ok=0 fail=0 skip=0
+SEED_TIMEOUT="${SEED_TIMEOUT:-1800}"
+
+if command -v timeout >/dev/null 2>&1 && [ "${SEED_TIMEOUT:-0}" -gt 0 ] 2>/dev/null; then
+  timeout_enabled=true
+else
+  timeout_enabled=false
+fi
+
+is_bundle() {
+  case "$1" in
+    *seed-bundle-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+caps_seed() {
+  [ "$timeout_enabled" = true ] && ! is_bundle "$1"
+}
+
+run_seed() {
+  if caps_seed "$1"; then
+    timeout -k 30 "$SEED_TIMEOUT" node "$1" 2>&1
+  else
+    node "$1" 2>&1
+  fi
+}
+
+ok=0 fail=0 skip=0 timedout=0
 
 for f in "$SCRIPT_DIR"/seed-*.mjs; do
   name="$(basename "$f")"
   printf "→ %s ... " "$name"
-  output=$(node "$f" 2>&1)
+  output=$(run_seed "$f")
   rc=$?
   last=$(echo "$output" | tail -1)
 
-  if echo "$last" | grep -qi "skip\|not set\|missing.*key\|not found"; then
+  if caps_seed "$f" && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; }; then
+    printf "TIMEOUT (killed after %ss)\n" "$SEED_TIMEOUT"
+    timedout=$((timedout + 1))
+  elif echo "$last" | grep -qi "skip\|not set\|missing.*key\|not found"; then
     printf "SKIP (%s)\n" "$last"
     skip=$((skip + 1))
   elif [ $rc -eq 0 ]; then
@@ -90,4 +120,4 @@ for f in "$SCRIPT_DIR"/seed-*.mjs; do
 done
 
 echo ""
-echo "Done: $ok ok, $skip skipped, $fail failed"
+echo "Done: $ok ok, $skip skipped, $fail failed, $timedout timed out"

@@ -7,6 +7,7 @@ import { IDLE_PAUSE_MS, STORAGE_KEYS, SITE_VARIANT } from '@/config';
 import { escapeHtml, sanitizeUrl } from '@/utils/sanitize';
 
 import { getStreamQuality } from '@/services/ai-flow-settings';
+import { registerLiveMediaStarter, unregisterLiveMediaStarter } from '@/services/live-media-controller';
 import { getLiveStreamsAlwaysOn, subscribeLiveStreamsSettingsChange } from '@/services/live-stream-settings';
 import { track } from '@/services/analytics';
 
@@ -406,6 +407,9 @@ export class LiveNewsPanel extends Panel {
 
   private deferredInit = false;
   private lazyObserver: IntersectionObserver | null = null;
+  private readonly boundPlayAllStarter = () => {
+    if (this.canHostLiveMedia()) this.triggerInit();
+  };
 
   constructor() {
     // allow users to close the live news panel
@@ -429,6 +433,7 @@ export class LiveNewsPanel extends Panel {
       this.alwaysOn = alwaysOn;
       this.applyIdleMode();
     });
+    registerLiveMediaStarter('live-news', this.boundPlayAllStarter);
     document.addEventListener('keydown', this.boundFullscreenEscHandler);
   }
 
@@ -1598,6 +1603,7 @@ export class LiveNewsPanel extends Panel {
   }
 
   public destroy(): void {
+    unregisterLiveMediaStarter('live-news', this.boundPlayAllStarter);
     this.destroyPlayer();
     this.unsubscribeStreamSettings?.();
     this.unsubscribeStreamSettings = null;

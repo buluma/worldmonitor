@@ -673,6 +673,11 @@ export class Panel {
     return this.element;
   }
 
+  public canHostLiveMedia(): boolean {
+    return this.element.isConnected
+      && !this.element.classList.contains('hidden');
+  }
+
   public isNearViewport(marginPx = 400): boolean {
     if (!this.element.isConnected) return false;
     if (typeof window === 'undefined') return true;

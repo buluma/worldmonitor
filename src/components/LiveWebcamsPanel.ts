@@ -6,6 +6,7 @@ import { t } from '../services/i18n';
 import { track, trackWebcamSelected, trackWebcamRegionFiltered } from '@/services/analytics';
 import { getStreamQuality, subscribeStreamQualityChange } from '@/services/ai-flow-settings';
 import { isMobileDevice, loadFromStorage, saveToStorage } from '@/utils';
+import { registerLiveMediaStarter, unregisterLiveMediaStarter } from '@/services/live-media-controller';
 import { getLiveStreamsAlwaysOn, subscribeLiveStreamsSettingsChange } from '@/services/live-stream-settings';
 
 type WebcamRegion = 'iran' | 'middle-east' | 'europe' | 'asia' | 'americas' | 'space';
@@ -115,6 +116,12 @@ export class LiveWebcamsPanel extends Panel {
   private isIdle = false;
   private alwaysOn = getLiveStreamsAlwaysOn();
   private unsubscribeStreamSettings: (() => void) | null = null;
+  private readonly boundPlayAllStarter = () => {
+    if (this.canHostLiveMedia() && this.isIdle) {
+      this.isIdle = false;
+      this.render();
+    }
+  };
 
   // UI
   private fullscreenBtn: HTMLButtonElement | null = null;
@@ -144,6 +151,7 @@ export class LiveWebcamsPanel extends Panel {
     this.boundEmbedMessageHandler = (e) => this.handleEmbedMessage(e);
     window.addEventListener('message', this.boundEmbedMessageHandler);
     this.render();
+    registerLiveMediaStarter('live-webcams', this.boundPlayAllStarter);
     document.addEventListener('keydown', this.boundFullscreenEscHandler);
   }
 
@@ -683,6 +691,7 @@ export class LiveWebcamsPanel extends Panel {
   }
 
   public destroy(): void {
+    unregisterLiveMediaStarter('live-webcams', this.boundPlayAllStarter);
     if (this.idleTimeout) {
       clearTimeout(this.idleTimeout);
       this.idleTimeout = null;
