@@ -406,7 +406,6 @@ export class LiveNewsPanel extends Panel {
 
   private deferredInit = false;
   private lazyObserver: IntersectionObserver | null = null;
-  private idleCallbackId: number | ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     // allow users to close the live news panel
@@ -437,23 +436,17 @@ export class LiveNewsPanel extends Panel {
     this.content.innerHTML = '';
     const container = document.createElement('div');
     container.className = 'live-news-placeholder';
-    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;cursor:pointer;';
+    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;';
+
+    const spinner = document.createElement('div');
+    spinner.className = 'live-news-loading-spinner';
 
     const label = document.createElement('div');
     label.style.cssText = 'color:var(--text-secondary);font-size:13px;';
     label.textContent = this.getChannelDisplayName(this.activeChannel);
 
-    const playBtn = document.createElement('button');
-    playBtn.className = 'offline-retry';
-    playBtn.textContent = 'Load Player';
-    playBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.triggerInit();
-    });
-
+    container.appendChild(spinner);
     container.appendChild(label);
-    container.appendChild(playBtn);
-    container.addEventListener('click', () => this.triggerInit());
     this.content.appendChild(container);
   }
 
@@ -463,14 +456,7 @@ export class LiveNewsPanel extends Panel {
         if (entries.some(e => e.isIntersecting)) {
           this.lazyObserver?.disconnect();
           this.lazyObserver = null;
-          if ('requestIdleCallback' in window) {
-            this.idleCallbackId = (window as any).requestIdleCallback(
-              () => { this.idleCallbackId = null; this.triggerInit(); },
-              { timeout: 1000 },
-            );
-          } else {
-            this.idleCallbackId = setTimeout(() => { this.idleCallbackId = null; this.triggerInit(); }, 1000);
-          }
+          this.triggerInit();
         }
       },
       { threshold: 0.1 },
@@ -482,11 +468,6 @@ export class LiveNewsPanel extends Panel {
     if (this.deferredInit) return;
     this.deferredInit = true;
     if (this.lazyObserver) { this.lazyObserver.disconnect(); this.lazyObserver = null; }
-    if (this.idleCallbackId !== null) {
-      if ('cancelIdleCallback' in window) (window as any).cancelIdleCallback(this.idleCallbackId);
-      else clearTimeout(this.idleCallbackId as ReturnType<typeof setTimeout>);
-      this.idleCallbackId = null;
-    }
     this.renderPlayer();
   }
 
@@ -1622,11 +1603,6 @@ export class LiveNewsPanel extends Panel {
     this.unsubscribeStreamSettings = null;
 
     if (this.lazyObserver) { this.lazyObserver.disconnect(); this.lazyObserver = null; }
-    if (this.idleCallbackId !== null) {
-      if ('cancelIdleCallback' in window) (window as any).cancelIdleCallback(this.idleCallbackId);
-      else clearTimeout(this.idleCallbackId as ReturnType<typeof setTimeout>);
-      this.idleCallbackId = null;
-    }
 
     if (this.idleTimeout) {
       clearTimeout(this.idleTimeout);
