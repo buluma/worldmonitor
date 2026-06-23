@@ -18,31 +18,50 @@ const MAX_ITEMS_PER_FEED = 15;
 const FEEDS = {
   politics: [
     { name: 'Reuters World', url: 'https://feeds.reuters.com/Reuters/worldNews' },
-    { name: 'AP News', url: 'https://rsshub.app/apnews/topics/world-news' },
+    { name: 'AP News', url: 'https://feeds.apnews.com/rss/apf-topnews' },
     { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
     { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml' },
+    { name: 'DW News', url: 'https://rss.dw.com/rdf/rss-en-all' },
+    { name: 'France24', url: 'https://www.france24.com/en/rss' },
+    { name: 'BBC Africa', url: 'https://feeds.bbci.co.uk/news/world/africa/rss.xml' },
+    { name: 'BBC Latin America', url: 'https://feeds.bbci.co.uk/news/world/latin_america/rss.xml' },
   ],
   conflict: [
     { name: 'BBC Middle East', url: 'https://feeds.bbci.co.uk/news/world/middle_east/rss.xml' },
     { name: 'BBC Asia', url: 'https://feeds.bbci.co.uk/news/world/asia/rss.xml' },
     { name: 'BBC Europe', url: 'https://feeds.bbci.co.uk/news/world/europe/rss.xml' },
     { name: 'Arms Control', url: 'https://www.armscontrol.org/rss' },
+    { name: 'ICG', url: 'https://www.crisisgroup.org/rss.xml' },
+    { name: 'ReliefWeb', url: 'https://reliefweb.int/updates/rss.xml' },
+    { name: 'UNHCR', url: 'https://www.unhcr.org/rss/news.xml' },
   ],
   finance: [
     { name: 'Reuters Business', url: 'https://feeds.reuters.com/reuters/businessNews' },
     { name: 'CNBC', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114' },
-    { name: 'Bloomberg', url: 'https://feeds.bloomberg.com/markets/news.rss' },
+    { name: 'FT', url: 'https://www.ft.com/?format=rss' },
+    { name: 'OilPrice', url: 'https://oilprice.com/rss/main' },
+    { name: 'S&P Global', url: 'https://www.spglobal.com/commodityinsights/en/rss-feed/all' },
   ],
   tech: [
     { name: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/index' },
     { name: 'TechCrunch', url: 'https://techcrunch.com/feed/' },
     { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml' },
+    { name: 'Wired', url: 'https://www.wired.com/feed/rss' },
   ],
   intel: [
     { name: 'Bellingcat', url: 'https://www.bellingcat.com/feed/' },
     { name: 'War on the Rocks', url: 'https://warontherocks.com/feed/' },
     { name: 'CSIS', url: 'https://www.csis.org/analysis/feed' },
     { name: 'Atlantic Council', url: 'https://www.atlanticcouncil.org/feed/' },
+    { name: 'IAEA', url: 'https://www.iaea.org/feeds/press-releases' },
+    { name: 'NTI', url: 'https://www.nti.org/feed/' },
+    { name: 'RFI', url: 'https://www.rfi.fr/en/rss' },
+  ],
+  cyber: [
+    { name: 'Krebs on Security', url: 'https://krebsonsecurity.com/feed/' },
+    { name: 'The Record', url: 'https://therecord.media/feed' },
+    { name: 'BleepingComputer', url: 'https://www.bleepingcomputer.com/feed/' },
+    { name: 'Dark Reading', url: 'https://www.darkreading.com/rss.xml' },
   ],
 };
 
