@@ -6571,6 +6571,9 @@ a.prediction-link:hover {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .panel-toggle-item {
@@ -16307,7 +16310,9 @@ a.prediction-link:hover {
   max-width: 600px;
   width: 95%;
   max-height: 80vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .unified-settings-tabs {
@@ -16344,10 +16349,15 @@ a.prediction-link:hover {
 .unified-settings-tab-panel {
   display: none;
   padding: 0 4px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .unified-settings-tab-panel.active {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Source region pills */
