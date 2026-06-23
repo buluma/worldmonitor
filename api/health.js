@@ -84,27 +84,27 @@ const STANDALONE_KEYS = {
 };
 
 const SEED_META = {
-  earthquakes:      { key: 'seed-meta:seismology:earthquakes',  maxStaleMin: 30 },
+  earthquakes:      { key: 'seed-meta:seismology:earthquakes',  maxStaleMin: 90 },
   wildfires:        { key: 'seed-meta:wildfire:fires',          maxStaleMin: 120 },
-  outages:          { key: 'seed-meta:infra:outages',           maxStaleMin: 30 },
+  outages:          { key: 'seed-meta:infra:outages',           maxStaleMin: 90 },
   climateAnomalies: { key: 'seed-meta:climate:anomalies',       maxStaleMin: 120 },
   unrestEvents:     { key: 'seed-meta:unrest:events',           maxStaleMin: 75 },
   cyberThreats:     { key: 'seed-meta:cyber:threats',           maxStaleMin: 480 },
-  cryptoQuotes:     { key: 'seed-meta:market:crypto',           maxStaleMin: 30 },
+  cryptoQuotes:     { key: 'seed-meta:market:crypto',           maxStaleMin: 90 },
   etfFlows:         { key: 'seed-meta:market:etf-flows',        maxStaleMin: 60 },
-  gulfQuotes:       { key: 'seed-meta:market:gulf-quotes',      maxStaleMin: 30 },
+  gulfQuotes:       { key: 'seed-meta:market:gulf-quotes',      maxStaleMin: 90 },
   stablecoinMarkets:{ key: 'seed-meta:market:stablecoins',      maxStaleMin: 60 },
   naturalEvents:    { key: 'seed-meta:natural:events',          maxStaleMin: 360 }, // 2h cron; 3x interval; was 120 (TTL was 60min — panel went dark before health alarmed)
   flightDelays:     { key: 'seed-meta:aviation:faa',            maxStaleMin: 90 }, // CACHE_TTL=7200s; matches notamClosures from same cron
   notamClosures:    { key: 'seed-meta:aviation:notam',          maxStaleMin: 90 },
   predictions:      { key: 'seed-meta:prediction:markets',      maxStaleMin: 90 },
-  insights:         { key: 'seed-meta:news:insights',           maxStaleMin: 30 },
-  marketQuotes:     { key: 'seed-meta:market:stocks',         maxStaleMin: 30 },
-  commodityQuotes:  { key: 'seed-meta:market:commodities',    maxStaleMin: 30 },
+  insights:         { key: 'seed-meta:news:insights',           maxStaleMin: 90 },
+  marketQuotes:     { key: 'seed-meta:market:stocks',         maxStaleMin: 90 },
+  commodityQuotes:  { key: 'seed-meta:market:commodities',    maxStaleMin: 90 },
   // RPC/warm-ping keys — seed-meta written by relay loops or handlers
   // serviceStatuses: moved to ON_DEMAND — RPC-populated, no dedicated seed, goes stale when no users visit
   cableHealth:      { key: 'seed-meta:cable-health',              maxStaleMin: 90 }, // ais-relay warm-ping runs every 30min; 90min = 3× interval catches missed pings without false positives
-  macroSignals:     { key: 'seed-meta:economic:macro-signals',    maxStaleMin: 20 },
+  macroSignals:     { key: 'seed-meta:economic:macro-signals',    maxStaleMin: 90 },
   bisPolicy:        { key: 'seed-meta:economic:bis:policy',       maxStaleMin: 10080 },
   bisExchange:      { key: 'seed-meta:economic:bis:eer',          maxStaleMin: 10080 },
   bisCredit:        { key: 'seed-meta:economic:bis:credit',       maxStaleMin: 10080 },
@@ -120,19 +120,19 @@ const SEED_META = {
   militaryFlights:  { key: 'seed-meta:military:flights',           maxStaleMin: 30 }, // cron ~10min (LIVE_TTL=600s); 30min = 3x interval,
   militaryForecastInputs: { key: 'seed-meta:military-forecast-inputs', maxStaleMin: 30 }, // same cron as militaryFlights,
   satellites:       { key: 'seed-meta:intelligence:satellites',    maxStaleMin: 180 },
-  weatherAlerts:    { key: 'seed-meta:weather:alerts',             maxStaleMin: 30 },
+  weatherAlerts:    { key: 'seed-meta:weather:alerts',             maxStaleMin: 90 },
   spending:         { key: 'seed-meta:economic:spending',          maxStaleMin: 120 },
   techEvents:       { key: 'seed-meta:research:tech-events',       maxStaleMin: 480 },
   gdeltIntel:       { key: 'seed-meta:intelligence:gdelt-intel',   maxStaleMin: 420 }, // 6h cron + 1h grace; CACHE_TTL is 24h so per-topic merge always has a prior snapshot
   forecasts:        { key: 'seed-meta:forecast:predictions',       maxStaleMin: 90 },
-  sectors:          { key: 'seed-meta:market:sectors',             maxStaleMin: 30 },
+  sectors:          { key: 'seed-meta:market:sectors',             maxStaleMin: 90 },
   techReadiness:    { key: 'seed-meta:economic:worldbank-techreadiness:v1', maxStaleMin: 10080 },
   progressData:     { key: 'seed-meta:economic:worldbank-progress:v1',     maxStaleMin: 10080 },
   renewableEnergy:  { key: 'seed-meta:economic:worldbank-renewable:v1',    maxStaleMin: 10080 },
   intlDelays:       { key: 'seed-meta:aviation:intl',           maxStaleMin: 90 },
   faaDelays:        { key: 'seed-meta:aviation:faa',            maxStaleMin: 90 }, // same key as flightDelays; CACHE_TTL=7200s
   theaterPosture:   { key: 'seed-meta:theater-posture',         maxStaleMin: 60 },
-  correlationCards: { key: 'seed-meta:correlation:cards',       maxStaleMin: 15 },
+  correlationCards: { key: 'seed-meta:correlation:cards',       maxStaleMin: 90 },
   portwatch:           { key: 'seed-meta:supply_chain:portwatch',            maxStaleMin: 720 },
   corridorrisk:        { key: 'seed-meta:supply_chain:corridorrisk',         maxStaleMin: 120 },
   chokepointTransits:  { key: 'seed-meta:supply_chain:chokepoint_transits',  maxStaleMin: 30 }, // relay every 10min; 30min = 3x interval,
@@ -141,7 +141,7 @@ const SEED_META = {
   securityAdvisories:  { key: 'seed-meta:intelligence:advisories',           maxStaleMin: 120 },
   customsRevenue:      { key: 'seed-meta:trade:customs-revenue',              maxStaleMin: 1440 },
   sanctionsPressure:   { key: 'seed-meta:sanctions:pressure',                 maxStaleMin: 720 },
-  radiationWatch:      { key: 'seed-meta:radiation:observations',             maxStaleMin: 30 },
+  radiationWatch:      { key: 'seed-meta:radiation:observations',             maxStaleMin: 90 },
   groceryBasket:       { key: 'seed-meta:economic:grocery-basket',            maxStaleMin: 10080 }, // weekly seed; 10080 = 7 days
   bigmac:              { key: 'seed-meta:economic:bigmac',                    maxStaleMin: 10080 }, // weekly seed; 10080 = 7 days
   thermalEscalation:   { key: 'seed-meta:thermal:escalation',                 maxStaleMin: 240 },

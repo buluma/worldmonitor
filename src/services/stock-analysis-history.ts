@@ -14,7 +14,7 @@ const client = new MarketServiceClient(getRpcBaseUrl(), {
 const DEFAULT_LIMIT = 4;
 const DEFAULT_LIMIT_PER_SYMBOL = 4;
 const MAX_SNAPSHOTS_PER_SYMBOL = 32;
-export const STOCK_ANALYSIS_FRESH_MS = 15 * 60 * 1000;
+export const STOCK_ANALYSIS_FRESH_MS = 60 * 60 * 1000;
 
 async function getTargetSymbols(limit: number): Promise<string[]> {
   const { getStockAnalysisTargets } = await import('./stock-analysis');
