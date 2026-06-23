@@ -212,8 +212,8 @@ function toTokenData(q: ProtoCryptoQuote): TokenData {
   return {
     name: q.name,
     symbol: q.symbol,
-    price: q.price,
-    change24h: q.change,
+    price: q.price ?? 0,
+    change24h: q.change ?? 0,
     change7d: q.change7d ?? 0,
   };
 }
