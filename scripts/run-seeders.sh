@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Run all seed scripts against configured Redis, falling back to the local
 # Redis REST proxy when no explicit credentials are available.
 # Usage: ./scripts/run-seeders.sh
@@ -97,8 +97,7 @@ run_seed() {
 
 SEED_PARALLEL="${SEED_PARALLEL:-4}"
 RESULTS_DIR=$(mktemp -d)
-old_trap=$(trap -p EXIT | sed "s/^trap -- '//;s/' EXIT$//")
-trap "rm -rf '$RESULTS_DIR'; $old_trap" EXIT
+trap "rm -rf '$RESULTS_DIR'; rm -f '$LOCKFILE'" EXIT INT TERM
 
 run_and_record() {
   f="$1"
@@ -130,7 +129,7 @@ for f in "$SCRIPT_DIR"/seed-*.mjs; do
     run_and_record "$f" &
     running=$((running + 1))
     if [ "$running" -ge "$SEED_PARALLEL" ]; then
-      wait -n 2>/dev/null || wait
+      wait -n
       running=$((running - 1))
     fi
   fi
