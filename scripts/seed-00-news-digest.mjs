@@ -23,8 +23,10 @@ const FEEDS = {
     { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml' },
   ],
   conflict: [
-    { name: 'Reuters World', url: 'https://feeds.reuters.com/Reuters/worldNews' },
-    { name: 'BBC World', url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
+    { name: 'BBC Middle East', url: 'https://feeds.bbci.co.uk/news/world/middle_east/rss.xml' },
+    { name: 'BBC Asia', url: 'https://feeds.bbci.co.uk/news/world/asia/rss.xml' },
+    { name: 'BBC Europe', url: 'https://feeds.bbci.co.uk/news/world/europe/rss.xml' },
+    { name: 'Arms Control', url: 'https://www.armscontrol.org/rss' },
   ],
   finance: [
     { name: 'Reuters Business', url: 'https://feeds.reuters.com/reuters/businessNews' },
@@ -37,8 +39,10 @@ const FEEDS = {
     { name: 'The Verge', url: 'https://www.theverge.com/rss/index.xml' },
   ],
   intel: [
-    { name: 'Reuters World', url: 'https://feeds.reuters.com/Reuters/worldNews' },
-    { name: 'Al Jazeera', url: 'https://www.aljazeera.com/xml/rss/all.xml' },
+    { name: 'Bellingcat', url: 'https://www.bellingcat.com/feed/' },
+    { name: 'War on the Rocks', url: 'https://warontherocks.com/feed/' },
+    { name: 'CSIS', url: 'https://www.csis.org/analysis/feed' },
+    { name: 'Atlantic Council', url: 'https://www.atlanticcouncil.org/feed/' },
   ],
 };
 
