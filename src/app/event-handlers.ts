@@ -830,7 +830,11 @@ export class EventHandlerManager implements AppModule {
     const el = document.getElementById('headerClock');
     if (!el) return;
     const tick = () => {
-      el.textContent = new Date().toUTCString().replace('GMT', 'UTC');
+      const now = new Date();
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const short = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short' }).format(now);
+      const rest = new Intl.DateTimeFormat('en-GB', { timeZone: tz, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZoneName: 'short' }).format(now);
+      el.textContent = `${short.toUpperCase()}, ${rest.toUpperCase()}`;
     };
     tick();
     this.clockIntervalId = setInterval(tick, 1000);
