@@ -19,7 +19,8 @@ export type MissionPresetId =
   | 'osint-newsroom'
   | 'macro-market-watch'
   | 'tech-ai-watch'
-  | 'good-news-explorer';
+  | 'good-news-explorer'
+  | 'kenya-watch';
 
 export type MissionMapView = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
 
@@ -30,6 +31,7 @@ export interface MissionPreset {
   description: string;
   icon: string;
   view: MissionMapView;
+  zoom?: number;
   panels: string[];
   layers: Array<keyof MapLayers>;
 }
@@ -151,6 +153,25 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     ],
     layers: [
       'positiveEvents', 'kindness', 'happiness', 'speciesRecovery', 'renewableInstallations',
+    ],
+  },
+  {
+    id: 'kenya-watch',
+    label: 'Kenya Watch',
+    shortLabel: 'Kenya',
+    description: 'East Africa security, protests, elections, and economic indicators.',
+    icon: '🇰🇪',
+    view: 'africa',
+    zoom: 5,
+    panels: [
+      'map', 'cii', 'strategic-risk', 'intel', 'politics', 'conflict',
+      'markets', 'commodities', 'economic', 'live-news', 'live-webcams',
+      'displacement', 'weather-alerts', 'escalation-monitor', 'threat-timeline',
+      'ucdp-events', 'unrest', 'satellite-fires',
+    ],
+    layers: [
+      'conflicts', 'natural', 'fires', 'weather',
+      'protests', 'displacement', 'sanctions',
     ],
   },
 ];

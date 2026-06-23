@@ -63,6 +63,16 @@ const FEEDS = {
     { name: 'BleepingComputer', url: 'https://www.bleepingcomputer.com/feed/' },
     { name: 'Dark Reading', url: 'https://www.darkreading.com/rss.xml' },
   ],
+  africa: [
+    { name: 'BBC Africa', url: 'https://feeds.bbci.co.uk/news/world/africa/rss.xml' },
+    { name: 'KTN News', url: 'https://www.standardmedia.co.ke/rss/headlines.php' },
+    { name: 'The East African', url: 'https://www.theeastafrican.co.ke/tea/rss.xml' },
+    { name: 'Nation Africa', url: 'https://nation.africa/kenya/rss.xml' },
+    { name: 'Capital FM Kenya', url: 'https://www.capitalfm.co.ke/news/feed/' },
+    { name: 'Africanews', url: 'https://www.africanews.com/feed/' },
+    { name: 'Africa Confidential', url: 'https://www.africa-confidential.com/rss' },
+    { name: 'ISS Africa', url: 'https://issafrica.org/iss-today/feed' },
+  ],
 };
 
 function decodeHtmlEntities(str) {
