@@ -2,6 +2,7 @@ import type { AppContext, AppModule } from '@/app/app-context';
 import type { AirlineIntelPanel } from '@/components/AirlineIntelPanel';
 import { deleteWidget, getWidget, isProUser } from '@/services/widget-store';
 import { deleteMcpPanel } from '@/services/mcp-store';
+import { openMissionPresetDialog } from '@/components/MissionPresetDialog';
 import type { PanelConfig, MapLayers } from '@/types';
 import type { MapView } from '@/components';
 import type { ClusteredEvent } from '@/types';
@@ -280,6 +281,28 @@ export class EventHandlerManager implements AppModule {
     document.getElementById('searchMobileFab')?.addEventListener('click', () => {
       track('search-open', { source: 'fab' });
       openSearch();
+    });
+
+    document.getElementById('missionPresetBtn')?.addEventListener('click', () => {
+      openMissionPresetDialog({
+        getPanelSettings: () => this.ctx.panelSettings,
+        applyPanelSettings: (settings, order) => {
+          this.ctx.panelSettings = settings;
+          saveToStorage(STORAGE_KEYS.panels, settings);
+          try { localStorage.setItem(this.ctx.PANEL_ORDER_KEY, JSON.stringify(order)); } catch {}
+        },
+        applyMapLayers: (layers) => {
+          Object.assign(this.ctx.mapLayers, layers);
+          saveToStorage(STORAGE_KEYS.mapLayers, this.ctx.mapLayers);
+          this.ctx.map?.setLayers(this.ctx.mapLayers);
+        },
+        setMapView: (view) => {
+          this.ctx.map?.setView(view as import('@/components').MapView);
+        },
+        reloadDashboard: () => {
+          window.location.reload();
+        },
+      });
     });
 
     document.getElementById('copyLinkBtn')?.addEventListener('click', async () => {
