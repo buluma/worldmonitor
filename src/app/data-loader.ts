@@ -322,9 +322,10 @@ export class DataLoaderManager implements AppModule {
   }
 
   private isPerFeedFallbackEnabled(): boolean {
-    // Desktop: server digest has fewer categories than client FEEDS config.
-    // Enable per-feed RSS fallback so missing categories fetch directly.
     if (isDesktopRuntime()) return true;
+    // Self-hosted (Docker): no server digest for most categories, so always fall back.
+    const host = window.location.hostname;
+    if (host !== 'worldmonitor.app' && !host.endsWith('.worldmonitor.app')) return true;
     return isFeatureEnabled('newsPerFeedFallback');
   }
 
