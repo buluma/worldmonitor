@@ -95,7 +95,7 @@ run_seed() {
   fi
 }
 
-SEED_PARALLEL="${SEED_PARALLEL:-4}"
+SEED_PARALLEL="${SEED_PARALLEL:-1}"
 RESULTS_DIR=$(mktemp -d)
 trap "rm -rf '$RESULTS_DIR'; rm -f '$LOCKFILE'" EXIT INT TERM
 
