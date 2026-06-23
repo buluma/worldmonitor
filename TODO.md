@@ -43,18 +43,19 @@ Sourced from worldmonitor_og divergence analysis + heimdal deployment observatio
 
 Large module (~50 commits in OG). Full country resilience scoring: governance, energy, trade, social indicators. All data sources appear free (WGI, WTO, energy APIs). Worth porting as a batch project.
 
-## Alerting Pipeline (NEXT PRIORITY)
+## Alerting Pipeline
 
 Rule-based alerting from World Monitor signals → Telegram.
 
-- [ ] Rule engine in ais-relay.cjs — evaluate conditions after each seed cycle
-- [ ] Earthquake alerts: M6+ quakes, volcanic eruptions, tsunami warnings
-- [ ] Geopolitical alerts: CII risk score spikes >20%, GDELT escalation, new conflict events
-- [ ] Market alerts: major moves >5%, commodity spikes, crypto crashes
-- [ ] Natural event alerts: severe weather, wildfires near populated areas
-- [ ] Alert state in Redis — prevent duplicate notifications (cooldown per event)
-- [ ] Configurable thresholds (env vars or Redis config key)
-- [ ] Deliver via existing GramJS Telegram session in relay
+- [x] Rule engine in ais-relay.cjs — evaluate conditions after each seed cycle
+- [x] Earthquake alerts: M6+ quakes, volcanic eruptions, tsunami warnings
+- [ ] Geopolitical alerts: CII risk score spikes >20%, GDELT escalation (delta rules — baseline snapshots needed)
+- [x] Market alerts: major moves >5%, commodity spikes, crypto crashes
+- [x] Natural event alerts: severe weather, wildfires near populated areas
+- [x] Alert state in Redis — prevent duplicate notifications (cooldown per event)
+- [x] Configurable thresholds (env vars or Redis config key)
+- [x] Deliver via Telegram Bot API (ALERT_TELEGRAM_BOT_TOKEN + ALERT_TELEGRAM_CHAT_ID)
+- [x] New conflict event alerts (UCDP delta detection)
 
 ## Infrastructure
 

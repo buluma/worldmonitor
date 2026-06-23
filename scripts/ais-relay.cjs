@@ -82,6 +82,17 @@ const RELAY_RSS_RATE_LIMIT_MAX = Number.isFinite(Number(process.env.RELAY_RSS_RA
 const RELAY_LOG_THROTTLE_MS = Math.max(1000, Number(process.env.RELAY_LOG_THROTTLE_MS || 10000));
 const ALLOW_VERCEL_PREVIEW_ORIGINS = process.env.ALLOW_VERCEL_PREVIEW_ORIGINS === 'true';
 
+// Alerting pipeline — rule-based alerts → Telegram Bot API
+const ALERT_ENABLED = process.env.ALERT_ENABLED === 'true';
+const ALERT_TELEGRAM_BOT_TOKEN = process.env.ALERT_TELEGRAM_BOT_TOKEN || '';
+const ALERT_TELEGRAM_CHAT_ID = process.env.ALERT_TELEGRAM_CHAT_ID || '';
+const ALERT_EVAL_INTERVAL_MS = Math.max(30_000, Number(process.env.ALERT_EVAL_INTERVAL_MS || 120_000));
+const ALERT_COOLDOWN_HOURS = Math.max(1, Number(process.env.ALERT_COOLDOWN_HOURS || 6));
+const ALERT_COOLDOWN_SEC = ALERT_COOLDOWN_HOURS * 3600;
+const ALERT_EARTHQUAKE_MIN_MAG = Number(process.env.ALERT_EARTHQUAKE_MIN_MAG || 6.0);
+const ALERT_MARKET_MOVE_PCT = Number(process.env.ALERT_MARKET_MOVE_PCT || 5);
+const ALERT_WILDFIRE_MIN_CLUSTER = Number(process.env.ALERT_WILDFIRE_MIN_CLUSTER || 50);
+
 // OpenSky proxy — routes through residential proxy to avoid Railway IP blocks
 const OPENSKY_PROXY_AUTH = process.env.OPENSKY_PROXY_AUTH || process.env.OREF_PROXY_AUTH || '';
 const OPENSKY_PROXY_ENABLED = !!OPENSKY_PROXY_AUTH;
@@ -7189,6 +7200,54 @@ function getCorsOrigin(req) {
   return '';
 }
 
+// ─────────────────────────────────────────────────────────────
+// Alerting Pipeline — evaluate seed data → Telegram alerts
+// ─────────────────────────────────────────────────────────────
+const alertEngine = require('./lib/alert-engine.cjs');
+const alertState = { prevConflictIds: null };
+
+async function runAlertCycleRelay() {
+  try {
+    await alertEngine.runAlertCycle({
+      mget: upstashMGet,
+      get: upstashGet,
+      set: upstashSet,
+      botToken: ALERT_TELEGRAM_BOT_TOKEN,
+      chatId: ALERT_TELEGRAM_CHAT_ID,
+      cooldownSec: ALERT_COOLDOWN_SEC,
+      prevConflictIds: alertState.prevConflictIds,
+      thresholds: {
+        earthquakeMinMag: ALERT_EARTHQUAKE_MIN_MAG,
+        marketMovePct: ALERT_MARKET_MOVE_PCT,
+        wildfireMinCluster: ALERT_WILDFIRE_MIN_CLUSTER,
+      },
+    });
+    if (alertState.prevConflictIds == null) {
+      alertState.prevConflictIds = new Set();
+    }
+  } catch (e) {
+    console.warn('[Alert] Eval cycle error:', e?.message || e);
+  }
+}
+
+function startAlertEvalLoop() {
+  if (!ALERT_ENABLED) {
+    console.log('[Alert] Disabled (ALERT_ENABLED != true)');
+    return;
+  }
+  if (!ALERT_TELEGRAM_BOT_TOKEN || !ALERT_TELEGRAM_CHAT_ID) {
+    console.log('[Alert] Disabled (missing ALERT_TELEGRAM_BOT_TOKEN or ALERT_TELEGRAM_CHAT_ID)');
+    return;
+  }
+  if (!UPSTASH_ENABLED) {
+    console.log('[Alert] Disabled (no Upstash Redis)');
+    return;
+  }
+  console.log(`[Alert] Eval loop starting (interval ${ALERT_EVAL_INTERVAL_MS / 1000}s, cooldown ${ALERT_COOLDOWN_HOURS}h)`);
+  runAlertCycleRelay();
+  setInterval(runAlertCycleRelay, ALERT_EVAL_INTERVAL_MS).unref?.();
+}
+
 const server = http.createServer(async (req, res) => {
   const pathname = (req.url || '/').split('?')[0];
   const corsOrigin = getCorsOrigin(req);
@@ -8442,6 +8501,7 @@ server.listen(PORT, () => {
   startPortWatchSeedLoop();
   startCorridorRiskSeedLoop();
   startUsniFleetSeedLoop();
+  startAlertEvalLoop();
 });
 
 wss.on('connection', (ws, req) => {
