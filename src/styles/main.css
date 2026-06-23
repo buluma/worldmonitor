@@ -276,6 +276,8 @@ canvas,
   border-bottom: 1px solid var(--border);
   height: 40px;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1001;
 }
 
 /* -- Tauri desktop: separate title bar for traffic lights -- */
