@@ -7,10 +7,11 @@ import type {
 
 import { isMilitaryCallsign, isMilitaryHex, detectAircraftType, UPSTREAM_TIMEOUT_MS } from './_shared';
 import { CHROME_UA } from '../../../_shared/constants';
-import { cachedFetchJson } from '../../../_shared/redis';
+import { cachedFetchJson, getCachedJson } from '../../../_shared/redis';
 import { markNoCacheResponse } from '../../../_shared/response-headers';
 
 const REDIS_CACHE_KEY = 'military:flights:v1';
+const SEEDED_CACHE_KEY = 'military:flights:v1';
 const REDIS_CACHE_TTL = 600; // 10 min — reduce upstream API pressure
 
 /** Snap a coordinate to a grid step so nearby bbox values share cache entries. */
@@ -162,6 +163,37 @@ export async function listMilitaryFlights(
     );
 
     if (!fullResult) {
+      // Fall back to relay-seeded military flights (theater posture seeder)
+      const seeded = await getCachedJson(SEEDED_CACHE_KEY, true) as { flights?: Array<{ id: string; callsign: string; hexCode: string; lat: number; lon: number; altitude: number; heading: number; speed: number; verticalRate: number; onGround: boolean; squawk: string; operator: string; operatorCountry: string; aircraftType: string; confidence: string }> } | null;
+      if (seeded?.flights?.length) {
+        const mapped: ListMilitaryFlightsResponse['flights'] = seeded.flights.map((f) => ({
+          id: f.id,
+          callsign: f.callsign || '',
+          hexCode: f.hexCode || '',
+          registration: '',
+          aircraftType: (AIRCRAFT_TYPE_MAP[f.aircraftType] || 'MILITARY_AIRCRAFT_TYPE_UNKNOWN') as MilitaryAircraftType,
+          aircraftModel: '',
+          operator: 'MILITARY_OPERATOR_OTHER',
+          operatorCountry: f.operatorCountry || '',
+          location: { latitude: f.lat, longitude: f.lon },
+          altitude: f.altitude ?? 0,
+          heading: f.heading ?? 0,
+          speed: f.speed ?? 0,
+          verticalRate: f.verticalRate ?? 0,
+          onGround: f.onGround ?? false,
+          squawk: f.squawk || '',
+          origin: '',
+          destination: '',
+          lastSeenAt: Date.now(),
+          firstSeenAt: 0,
+          confidence: 'MILITARY_CONFIDENCE_MEDIUM',
+          isInteresting: false,
+          note: '',
+          enrichment: undefined,
+        }));
+        const filtered = filterFlightsToBounds(mapped, requestBounds);
+        return { flights: filtered, clusters: [], pagination: undefined };
+      }
       markNoCacheResponse(ctx.request);
       return { flights: [], clusters: [], pagination: undefined };
     }
