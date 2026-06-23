@@ -30,6 +30,7 @@ import {
   CascadePanel,
   StrategicRiskPanel,
   StrategicPosturePanel,
+  ThreatTimelinePanel,
   TechEventsPanel,
   ServiceStatusPanel,
   RuntimeConfigPanel,
@@ -679,6 +680,8 @@ export class PanelLayoutManager implements AppModule {
       });
       this.ctx.panels['strategic-risk'] = strategicRiskPanel;
     }
+
+    this.createPanel('threat-timeline', () => new ThreatTimelinePanel());
 
     if (this.shouldCreatePanel('strategic-posture')) {
       const strategicPosturePanel = new StrategicPosturePanel(() => this.ctx.allNews);

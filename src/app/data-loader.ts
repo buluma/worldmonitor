@@ -1083,6 +1083,9 @@ export class DataLoaderManager implements AppModule {
       const insightsPanel = this.ctx.panels['insights'] as InsightsPanel | undefined;
       insightsPanel?.updateInsights(this.ctx.latestClusters);
 
+      const threatTimeline = this.ctx.panels['threat-timeline'] as { refresh?: () => void } | undefined;
+      threatTimeline?.refresh?.();
+
       const geoLocated = this.ctx.latestClusters
         .filter((c): c is typeof c & { lat: number; lon: number } => c.lat != null && c.lon != null)
         .map(c => ({
