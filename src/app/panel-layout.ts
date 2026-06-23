@@ -1837,7 +1837,12 @@ export class PanelLayoutManager implements AppModule {
     const key = panelKey.replace(/-([a-z])/g, (_match, group: string) => group.toUpperCase());
     const lookup = `panels.${key}`;
     const localized = t(lookup);
-    return localized === lookup ? fallback : localized;
+    if (localized === lookup || typeof localized !== 'string') {
+      const titled = t(`${lookup}.title`);
+      if (titled !== `${lookup}.title` && typeof titled === 'string') return titled;
+      return fallback;
+    }
+    return localized;
   }
 
   getAllSourceNames(): string[] {
