@@ -24,8 +24,9 @@ WORKDIR /app
 COPY scripts/package.json scripts/package-lock.json ./scripts/
 RUN npm ci --prefix scripts --omit=dev --omit=optional --ignore-scripts
 
-# Relay script
+# Relay script + lib modules
 COPY scripts/ais-relay.cjs ./scripts/ais-relay.cjs
+COPY scripts/lib/ ./scripts/lib/
 
 # Shared helper required by the relay (rss-allowed-domains.cjs)
 COPY shared/ ./shared/
