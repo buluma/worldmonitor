@@ -172,6 +172,8 @@ export class Panel {
   protected newBadgeEl: HTMLElement | null = null;
   protected panelId: string;
   private abortController: AbortController = new AbortController();
+  private viewportObserver: IntersectionObserver | null = null;
+  private viewportObserverRegistered = false;
   private tooltipCloseHandler: (() => void) | null = null;
   private resizeHandle: HTMLElement | null = null;
   private isResizing = false;
@@ -678,6 +680,36 @@ export class Panel {
       && !this.element.classList.contains('hidden');
   }
 
+  public observeNearViewport(callback: () => void, marginPx = 200): void {
+    if (this.viewportObserverRegistered) return;
+    this.viewportObserverRegistered = true;
+    if (typeof IntersectionObserver === 'undefined' || typeof window === 'undefined') {
+      const ric = typeof window !== 'undefined'
+        ? (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
+        : undefined;
+      if (typeof ric === 'function') ric(() => { if (this.element.isConnected) callback(); });
+      else setTimeout(() => { if (this.element.isConnected) callback(); }, 0);
+      return;
+    }
+    this.viewportObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          this.unobserveViewport();
+          callback();
+          return;
+        }
+      }
+    }, { rootMargin: `${marginPx}px` });
+    this.viewportObserver.observe(this.element);
+  }
+
+  private unobserveViewport(): void {
+    if (this.viewportObserver) {
+      this.viewportObserver.disconnect();
+      this.viewportObserver = null;
+    }
+  }
+
   public isNearViewport(marginPx = 400): boolean {
     if (!this.element.isConnected) return false;
     if (typeof window === 'undefined') return true;
@@ -994,6 +1026,7 @@ export class Panel {
   public destroy(): void {
     this.abortController.abort();
     this.clearRetryCountdown();
+    this.unobserveViewport();
     if (this.colSpanReconcileRaf !== null) {
       cancelAnimationFrame(this.colSpanReconcileRaf);
       this.colSpanReconcileRaf = null;

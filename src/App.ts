@@ -88,6 +88,7 @@ export class App {
     this.visiblePanelPrimeRaf = window.requestAnimationFrame(() => {
       this.visiblePanelPrimeRaf = null;
       void this.primeVisiblePanelData();
+      void this.dataLoader.loadAllData();
     });
   };
   private readonly handleConnectivityChange = (): void => {
@@ -816,8 +817,8 @@ export class App {
     window.addEventListener('scroll', this.handleViewportPrime, { passive: true });
     window.addEventListener('resize', this.handleViewportPrime);
     await Promise.all([
-      this.dataLoader.loadAllData(true),
-      this.primeVisiblePanelData(true),
+      this.dataLoader.loadAllData(),
+      this.primeVisiblePanelData(),
     ]);
 
     // If bootstrap was served from cache but live data just loaded, promote the status indicator
