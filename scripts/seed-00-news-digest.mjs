@@ -94,11 +94,13 @@ function parseRssItems(xml, source) {
     const cleanTitle = decodeHtmlEntities(title.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim());
     const cleanLink = link.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
     if (cleanTitle.length > 10) {
+      const isoDate = safePubDate(pubDate.replace(/<!\[CDATA\[|\]\]>/g, '').trim());
       items.push({
         title: cleanTitle,
         source,
         link: cleanLink,
-        pubDate: safePubDate(pubDate.replace(/<!\[CDATA\[|\]\]>/g, '').trim()),
+        pubDate: isoDate,
+        publishedAt: new Date(isoDate).getTime(),
         description: decodeHtmlEntities(desc.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim()).slice(0, 300),
       });
     }
