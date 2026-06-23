@@ -16307,6 +16307,7 @@ a.prediction-link:hover {
   max-width: 600px;
   width: 95%;
   max-height: 80vh;
+  overflow-y: auto;
 }
 
 .unified-settings-tabs {
