@@ -11,7 +11,7 @@ import { cachedFetchJson, getCachedJson } from '../../../_shared/redis';
 import { markNoCacheResponse } from '../../../_shared/response-headers';
 
 const REDIS_CACHE_KEY = 'military:flights:v1';
-const SEEDED_CACHE_KEY = 'military:flights:v1';
+const SEEDED_FLIGHT_KEYS = ['military:flights:v1', 'military:flights:stale:v1'];
 const REDIS_CACHE_TTL = 600; // 10 min — reduce upstream API pressure
 
 /** Snap a coordinate to a grid step so nearby bbox values share cache entries. */
@@ -163,8 +163,12 @@ export async function listMilitaryFlights(
     );
 
     if (!fullResult) {
-      // Fall back to relay-seeded military flights (theater posture seeder)
-      const seeded = await getCachedJson(SEEDED_CACHE_KEY, true) as { flights?: Array<{ id: string; callsign: string; hexCode: string; lat: number; lon: number; altitude: number; heading: number; speed: number; verticalRate: number; onGround: boolean; squawk: string; operator: string; operatorCountry: string; aircraftType: string; confidence: string }> } | null;
+      // Fall back to seeded military flights (seed-military-flights.mjs writes these via cron)
+      let seeded: { flights?: Array<{ id: string; callsign: string; hexCode: string; lat: number; lon: number; altitude: number; heading: number; speed: number; verticalRate: number; onGround: boolean; squawk: string; operator: string; operatorCountry: string; aircraftType: string; confidence: string }> } | null = null;
+      for (const key of SEEDED_FLIGHT_KEYS) {
+        seeded = await getCachedJson(key, true) as typeof seeded;
+        if (seeded?.flights?.length) break;
+      }
       if (seeded?.flights?.length) {
         const mapped: ListMilitaryFlightsResponse['flights'] = seeded.flights.map((f) => ({
           id: f.id,
