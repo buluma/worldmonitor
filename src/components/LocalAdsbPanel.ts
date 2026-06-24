@@ -1,4 +1,5 @@
 import { Panel } from './Panel';
+import { getHydratedData } from '@/services/bootstrap';
 import { escapeHtml } from '@/utils/sanitize';
 
 interface LocalAircraft {
@@ -34,6 +35,8 @@ export class LocalAdsbPanel extends Panel {
       infoTooltip: 'Aircraft tracked by your local ADS-B receiver.',
     });
     this.setContent('<div style="padding:12px;color:var(--text-dim)">Waiting for feeder data…</div>');
+    const data = getHydratedData('localAdsb') as LocalAdsbData | undefined;
+    if (data) this.refresh(data);
   }
 
   public refresh(data: LocalAdsbData): void {

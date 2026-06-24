@@ -1,4 +1,5 @@
 import { Panel } from './Panel';
+import { getHydratedData } from '@/services/bootstrap';
 import { escapeHtml } from '@/utils/sanitize';
 
 interface BandCondition {
@@ -47,6 +48,8 @@ export class HFPropagationPanel extends Panel {
       infoTooltip: 'Solar and ionospheric conditions affecting HF radio propagation. Data from hamqsl.com.',
     });
     this.setContent('<div style="padding:12px;color:var(--text-dim)">Waiting for propagation data…</div>');
+    const data = getHydratedData('hfPropagation') as PropagationData | undefined;
+    if (data) this.refresh(data);
   }
 
   public refresh(data: PropagationData): void {
