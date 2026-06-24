@@ -44,6 +44,8 @@ const BOOTSTRAP_KEYS = {
   defiTokens:        'market:defi-tokens:v1',
   aiTokens:          'market:ai-tokens:v1',
   otherTokens:       'market:other-tokens:v1',
+  hfPropagation:     'rf:propagation:v1',
+  localAdsb:         'adsb:local:v1',
 };
 
 const STANDALONE_KEYS = {
@@ -148,11 +150,13 @@ const SEED_META = {
   nationalDebt:        { key: 'seed-meta:economic:national-debt',              maxStaleMin: 10080 }, // 7 days — monthly seed
   tariffTrendsUs:      { key: 'seed-meta:trade:tariffs:v1:840:all:10',        maxStaleMin: 900 },
   tokenPanels:       { key: 'seed-meta:market:token-panels',                   maxStaleMin: 90 }, // cron every 30min; 3× interval
+  hfPropagation:     { key: 'seed-meta:rf:propagation',                        maxStaleMin: 90 },
 };
 
 // Standalone keys that are populated on-demand by RPC handlers (not seeds).
 // Empty = WARN not CRIT since they only exist after first request.
 const ON_DEMAND_KEYS = new Set([
+  'localAdsb',
   'riskScoresLive',
   'usniFleetStale', 'positiveEventsLive',
   'bisPolicy', 'bisExchange', 'bisCredit',
