@@ -23,7 +23,7 @@ interface PropagationData {
   fetchedAt: string;
 }
 
-const BAND_ORDER = ['80m-40m', '30m-20m', '17m-15m', '12m-10m'];
+const BAND_ORDER = ['80m-40m', '30m-20m', '17m-15m', '12m-10m', 'E-Skip', 'vhf-aurora'];
 
 function conditionColor(cond: string): string {
   const c = cond.toLowerCase();
