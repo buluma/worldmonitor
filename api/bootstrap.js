@@ -66,6 +66,8 @@ const BOOTSTRAP_CACHE_KEYS = {
   aiTokens: 'market:ai-tokens:v1',
   otherTokens: 'market:other-tokens:v1',
   nationalDebt: 'economic:national-debt:v1',
+  hfPropagation: 'rf:propagation:v1',
+  localAdsb: 'adsb:local:v1',
 };
 
 const BOOTSTRAP_TIERS = {
@@ -95,6 +97,8 @@ const BOOTSTRAP_TIERS = {
   aiTokens: 'slow',
   otherTokens: 'slow',
   nationalDebt: 'slow',
+  hfPropagation: 'slow',
+  localAdsb: 'fast',
 };
 
 const SLOW_KEYS = new Set([
