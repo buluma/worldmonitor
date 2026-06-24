@@ -120,6 +120,7 @@ const SLOW_KEYS = new Set([
   'aiTokens',
   'otherTokens',
   'nationalDebt',
+  'hfPropagation',
 ]);
 
 const FAST_KEYS = new Set([
@@ -132,6 +133,7 @@ const FAST_KEYS = new Set([
   'iranEvents', 'temporalAnomalies', 'weatherAlerts',
   'spending', 'gdeltIntel', 'correlationCards',
   'forecasts',
+  'localAdsb',
 ]);
 
 // No public/s-maxage: CF (in front of api.worldmonitor.app) ignores Vary: Origin and would
