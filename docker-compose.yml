@@ -45,6 +45,11 @@ services:
       CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"
       AVIATIONSTACK_API: "${AVIATIONSTACK_API:-}"
       TRAVELPAYOUTS_API_TOKEN: "${TRAVELPAYOUTS_API_TOKEN:-}"
+      # Local ADS-B feeder (optional — for self-hosted flight tracking)
+      ADSB_FEEDER_URL: "${ADSB_FEEDER_URL:-}"
+      ADSB_FEEDER_LAT: "${ADSB_FEEDER_LAT:-}"
+      ADSB_FEEDER_LON: "${ADSB_FEEDER_LON:-}"
+      ADSB_FEEDER_RANGE_NM: "${ADSB_FEEDER_RANGE_NM:-300}"
     # Docker secrets (recommended for API keys — keeps them out of docker inspect).
     # Create secrets/ dir with one file per key, then uncomment below.
     # See SELF_HOSTING.md or docker-compose.override.yml for details.

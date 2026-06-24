@@ -1090,6 +1090,10 @@ export class DataLoaderManager implements AppModule {
       const hfData = getHydratedData('hfPropagation');
       if (hfPanel?.refresh && hfData) hfPanel.refresh(hfData);
 
+      const adsbPanel = this.ctx.panels['local-adsb'] as { refresh?: (data: unknown) => void } | undefined;
+      const adsbData = getHydratedData('localAdsb');
+      if (adsbPanel?.refresh && adsbData) adsbPanel.refresh(adsbData);
+
       const geoLocated = this.ctx.latestClusters
         .filter((c): c is typeof c & { lat: number; lon: number } => c.lat != null && c.lon != null)
         .map(c => ({

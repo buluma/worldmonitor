@@ -58,6 +58,7 @@ export const BOOTSTRAP_CACHE_KEYS: Record<string, string> = {
   otherTokens:      'market:other-tokens:v1',
   nationalDebt:     'economic:national-debt:v1',
   hfPropagation:    'rf:propagation:v1',
+  localAdsb:        'adsb:local:v1',
 };
 
 export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
@@ -86,4 +87,5 @@ export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
   otherTokens: 'slow',
   nationalDebt: 'slow',
   hfPropagation: 'slow',
+  localAdsb: 'fast',
 };

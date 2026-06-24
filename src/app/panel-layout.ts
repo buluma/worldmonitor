@@ -32,6 +32,7 @@ import {
   StrategicPosturePanel,
   ThreatTimelinePanel,
   HFPropagationPanel,
+  LocalAdsbPanel,
   TechEventsPanel,
   ServiceStatusPanel,
   RuntimeConfigPanel,
@@ -688,6 +689,7 @@ export class PanelLayoutManager implements AppModule {
 
     this.createPanel('threat-timeline', () => new ThreatTimelinePanel());
     this.createPanel('hf-propagation', () => new HFPropagationPanel());
+    this.createPanel('local-adsb', () => new LocalAdsbPanel());
 
     if (this.shouldCreatePanel('strategic-posture')) {
       const strategicPosturePanel = new StrategicPosturePanel(() => this.ctx.allNews);

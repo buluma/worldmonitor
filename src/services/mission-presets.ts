@@ -183,7 +183,7 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     icon: '✈️',
     view: 'global',
     panels: [
-      'map', 'airline-intel', 'military-correlation', 'strategic-posture',
+      'map', 'airline-intel', 'local-adsb', 'military-correlation', 'strategic-posture',
       'live-news', 'threat-timeline', 'hf-propagation', 'weather-alerts',
     ],
     layers: [

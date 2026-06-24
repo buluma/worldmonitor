@@ -1,0 +1,86 @@
+import { Panel } from './Panel';
+import { escapeHtml } from '@/utils/sanitize';
+
+interface LocalAircraft {
+  hex: string;
+  callsign: string;
+  lat: number;
+  lon: number;
+  altBaro: number | null;
+  gs: number | null;
+  track: number | null;
+  type: string | null;
+  registration: string | null;
+  onGround: boolean;
+  squawk: string | null;
+  rssi: number | null;
+}
+
+interface LocalAdsbData {
+  aircraft: LocalAircraft[];
+  total: number;
+  withPosition: number;
+  feeder: { lat: number; lon: number; rangeNm: number };
+  fetchedAt: string;
+}
+
+export class LocalAdsbPanel extends Panel {
+  constructor() {
+    super({
+      id: 'local-adsb',
+      title: 'Local ADS-B',
+      showCount: true,
+      closable: true,
+      infoTooltip: 'Aircraft tracked by your local ADS-B receiver.',
+    });
+    this.setContent('<div style="padding:12px;color:var(--text-dim)">Waiting for feeder data…</div>');
+  }
+
+  public refresh(data: LocalAdsbData): void {
+    if (!data || !data.aircraft || data.aircraft.length === 0) {
+      this.setCount(0);
+      this.setContent('<div style="padding:12px;color:var(--text-dim)">No aircraft in range.</div>');
+      return;
+    }
+
+    this.setCount(data.withPosition);
+
+    const sorted = [...data.aircraft].sort((a, b) => {
+      if (a.onGround !== b.onGround) return a.onGround ? 1 : -1;
+      return (b.altBaro ?? 0) - (a.altBaro ?? 0);
+    });
+
+    const rows = sorted.slice(0, 20).map(a => {
+      const alt = a.onGround ? 'GND' : a.altBaro != null ? `${(a.altBaro / 1000).toFixed(1)}k` : '?';
+      const speed = a.gs != null ? `${Math.round(a.gs)}kt` : '';
+      const id = a.callsign || a.hex;
+      const typeStr = a.type ? ` · ${escapeHtml(a.type)}` : '';
+      const regStr = a.registration ? ` (${escapeHtml(a.registration)})` : '';
+      const sqk = a.squawk === '7700' ? ' <span style="color:var(--semantic-critical);font-weight:700">7700</span>'
+        : a.squawk === '7600' ? ' <span style="color:var(--semantic-elevated)">7600</span>'
+        : a.squawk === '7500' ? ' <span style="color:var(--semantic-critical)">7500</span>'
+        : '';
+
+      return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:11px">
+        <div>
+          <span style="font-weight:600;font-family:var(--font-mono,monospace)">${escapeHtml(id)}</span>${regStr}${typeStr}${sqk}
+        </div>
+        <div style="color:var(--text-dim);white-space:nowrap">${alt} ${speed}</div>
+      </div>`;
+    }).join('');
+
+    const age = data.fetchedAt ? new Date(data.fetchedAt) : null;
+    const agoStr = age ? `${Math.round((Date.now() - age.getTime()) / 1000)}s ago` : '';
+
+    this.setContent(`
+      <div style="padding:4px 12px 8px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:6px">
+          <span>${data.withPosition} tracked · ${data.total} total</span>
+          <span>${agoStr}</span>
+        </div>
+        ${rows}
+        ${sorted.length > 20 ? `<div style="font-size:10px;color:var(--text-dim);padding:6px 0">+ ${sorted.length - 20} more</div>` : ''}
+      </div>
+    `);
+  }
+}
