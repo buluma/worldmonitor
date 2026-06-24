@@ -20,7 +20,8 @@ export type MissionPresetId =
   | 'macro-market-watch'
   | 'tech-ai-watch'
   | 'good-news-explorer'
-  | 'kenya-watch';
+  | 'kenya-watch'
+  | 'aviation-ops';
 
 export type MissionMapView = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
 
@@ -172,6 +173,21 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     layers: [
       'conflicts', 'natural', 'fires', 'weather',
       'protests', 'displacement', 'sanctions',
+    ],
+  },
+  {
+    id: 'aviation-ops',
+    label: 'Aviation Ops',
+    shortLabel: 'Aviation',
+    description: 'Flight tracking, military aircraft, airport ops, and airspace closures.',
+    icon: '✈️',
+    view: 'global',
+    panels: [
+      'map', 'airline-intel', 'military-correlation', 'strategic-posture',
+      'live-news', 'threat-timeline', 'hf-propagation', 'weather-alerts',
+    ],
+    layers: [
+      'flights', 'military', 'bases', 'weather', 'conflicts',
     ],
   },
 ];

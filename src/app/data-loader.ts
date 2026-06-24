@@ -1086,6 +1086,10 @@ export class DataLoaderManager implements AppModule {
       const threatTimeline = this.ctx.panels['threat-timeline'] as { refresh?: () => void } | undefined;
       threatTimeline?.refresh?.();
 
+      const hfPanel = this.ctx.panels['hf-propagation'] as { refresh?: (data: unknown) => void } | undefined;
+      const hfData = getHydratedData('hfPropagation');
+      if (hfPanel?.refresh && hfData) hfPanel.refresh(hfData);
+
       const geoLocated = this.ctx.latestClusters
         .filter((c): c is typeof c & { lat: number; lon: number } => c.lat != null && c.lon != null)
         .map(c => ({

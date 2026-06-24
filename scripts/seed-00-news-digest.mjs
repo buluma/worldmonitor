@@ -63,6 +63,13 @@ const FEEDS = {
     { name: 'BleepingComputer', url: 'https://www.bleepingcomputer.com/feed/' },
     { name: 'Dark Reading', url: 'https://www.darkreading.com/rss.xml' },
   ],
+  aviation: [
+    { name: 'Aviation Week', url: 'https://aviationweek.com/rss.xml' },
+    { name: 'FlightGlobal', url: 'https://www.flightglobal.com/rss' },
+    { name: 'Simple Flying', url: 'https://simpleflying.com/feed/' },
+    { name: 'The Points Guy', url: 'https://thepointsguy.com/feed/' },
+    { name: 'Aviation Safety Net', url: 'https://aviation-safety.net/rss/latest-accidents.xml' },
+  ],
   africa: [
     { name: 'BBC Africa', url: 'https://feeds.bbci.co.uk/news/world/africa/rss.xml' },
     { name: 'KTN News', url: 'https://www.standardmedia.co.ke/rss/headlines.php' },
