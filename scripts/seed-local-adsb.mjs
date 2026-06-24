@@ -76,7 +76,7 @@ async function run() {
 
   if (data.withPosition > 0) {
     for (const a of data.aircraft.slice(0, 5)) {
-      console.log(`  ${a.hex} ${a.callsign || '?':8s} alt=${a.altBaro ?? '?'} gs=${a.gs ?? '?'}`);
+      console.log(`  ${a.hex} ${(a.callsign || '?').padEnd(8)} alt=${a.altBaro ?? '?'} gs=${a.gs ?? '?'}`);
     }
     if (data.aircraft.length > 5) console.log(`  ... and ${data.aircraft.length - 5} more`);
   }
