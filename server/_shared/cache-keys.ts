@@ -85,4 +85,5 @@ export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
   aiTokens: 'slow',
   otherTokens: 'slow',
   nationalDebt: 'slow',
+  hfPropagation: 'slow',
 };
