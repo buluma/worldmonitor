@@ -175,4 +175,71 @@ describe('CII scoring', () => {
     const us = scoreFor(scores, 'US')!;
     assert.ok(us.combinedScore >= 2 && us.combinedScore <= 10, `US baseline score ${us.combinedScore} should be ~2-10`);
   });
+
+  // --- Option C: UCDP expanded scoring (fills gap when ACLED unavailable) ---
+
+  it('UCDP events with deathsBest contribute to conflict fatalities', () => {
+    const aux = emptyAux();
+    aux.ucdpEvents = [{
+      country: 'Syria',
+      violenceType: 'UCDP_VIOLENCE_TYPE_STATE_BASED',
+      deathsBest: 50,
+      dateStart: Date.now() - 2 * 24 * 60 * 60 * 1000,
+    }];
+    const withUcdp = scoreFor(computeCIIScores([], aux), 'SY')!;
+    const withoutUcdp = scoreFor(computeCIIScores([], emptyAux()), 'SY')!;
+    assert.ok(withUcdp.combinedScore > withoutUcdp.combinedScore,
+      `SY with UCDP fatalities (${withUcdp.combinedScore}) should be > without (${withoutUcdp.combinedScore})`);
+  });
+
+  it('UCDP one-sided violence maps to civilian violence signal', () => {
+    const aux = emptyAux();
+    aux.ucdpEvents = [{
+      country: 'Myanmar',
+      violenceType: 'UCDP_VIOLENCE_TYPE_ONE_SIDED',
+      deathsBest: 30,
+      dateStart: Date.now() - 3 * 24 * 60 * 60 * 1000,
+    }];
+    const scores = computeCIIScores([], aux);
+    const mm = scoreFor(scores, 'MM')!;
+    assert.ok(mm.components!.geoConvergence > 0,
+      `MM conflict component should be > 0 from UCDP civilian violence (got ${mm.components!.geoConvergence})`);
+  });
+
+  it('UCDP time-decay: recent events contribute more to conflict component than old', () => {
+    const recentAux = emptyAux();
+    recentAux.ucdpEvents = [{
+      country: 'Germany',
+      violenceType: 'UCDP_VIOLENCE_TYPE_NON_STATE',
+      deathsBest: 40,
+      dateStart: Date.now() - 1 * 24 * 60 * 60 * 1000,
+    }];
+    const oldAux = emptyAux();
+    oldAux.ucdpEvents = [{
+      country: 'Germany',
+      violenceType: 'UCDP_VIOLENCE_TYPE_NON_STATE',
+      deathsBest: 40,
+      dateStart: Date.now() - 60 * 24 * 60 * 60 * 1000,
+    }];
+    const recent = scoreFor(computeCIIScores([], recentAux), 'DE')!;
+    const old = scoreFor(computeCIIScores([], oldAux), 'DE')!;
+    assert.ok(recent.components!.geoConvergence > old.components!.geoConvergence,
+      `Recent conflict (${recent.components!.geoConvergence}) should be > 60-day-old (${old.components!.geoConvergence})`);
+  });
+
+  it('UCDP-only scores (no ACLED) still produce meaningful risk above baseline', () => {
+    const aux = emptyAux();
+    aux.ucdpEvents = [
+      { country: 'Ukraine', violenceType: 'UCDP_VIOLENCE_TYPE_STATE_BASED', deathsBest: 100, dateStart: Date.now() - 5 * 24 * 60 * 60 * 1000, intensity_level: '2' },
+      { country: 'Syria', violenceType: 'UCDP_VIOLENCE_TYPE_STATE_BASED', deathsBest: 80, dateStart: Date.now() - 3 * 24 * 60 * 60 * 1000, intensity_level: '2' },
+      { country: 'Yemen', violenceType: 'UCDP_VIOLENCE_TYPE_ONE_SIDED', deathsBest: 40, dateStart: Date.now() - 1 * 24 * 60 * 60 * 1000, intensity_level: '2' },
+    ];
+    const scores = computeCIIScores([], aux);
+    const ua = scoreFor(scores, 'UA')!;
+    const sy = scoreFor(scores, 'SY')!;
+    const ye = scoreFor(scores, 'YE')!;
+    assert.ok(ua.combinedScore >= 70, `UA UCDP-only (${ua.combinedScore}) should be >= 70`);
+    assert.ok(sy.combinedScore >= 70, `SY UCDP-only (${sy.combinedScore}) should be >= 70`);
+    assert.ok(ye.combinedScore >= 70, `YE UCDP-only (${ye.combinedScore}) should be >= 70`);
+  });
 });

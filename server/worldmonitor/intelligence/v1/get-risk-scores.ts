@@ -345,13 +345,37 @@ export function computeCIIScores(
     data[code].fatalities += fat;
   }
 
-  // --- UCDP ---
+  // --- UCDP (expanded: fatalities + event counts fill gap when ACLED unavailable) ---
+  const now = Date.now();
   for (const ev of aux.ucdpEvents) {
     const code = normalizeCountryName(ev.country || ev.location || '');
     if (!code || !data[code]) continue;
-    const intensity = parseInt(ev.intensity_level || ev.type_of_violence || '0', 10);
-    if (intensity >= 2) data[code].ucdpWar = true;
-    else if (intensity >= 1) data[code].ucdpMinor = true;
+
+    const violenceType = ev.violenceType || ev.type_of_violence || '';
+    const intensity = parseInt(ev.intensity_level || '', 10);
+    const violenceNum = typeof violenceType === 'string'
+      ? (violenceType.includes('STATE_BASED') ? 1 : violenceType.includes('NON_STATE') ? 2 : violenceType.includes('ONE_SIDED') ? 3 : parseInt(violenceType, 10) || 0)
+      : (typeof violenceType === 'number' ? violenceType : 0);
+
+    if (intensity >= 2 || violenceNum === 1) data[code].ucdpWar = true;
+    else if (intensity >= 1 || violenceNum >= 1) data[code].ucdpMinor = true;
+
+    // Time-decay: same windows as ACLED (0-7d = 1.0, 8-30d = 0.4, >30d = 0.15)
+    const eventMs = safeNum(ev.dateStart || ev.date_start);
+    const daysAgo = eventMs > 0 ? Math.max(0, Math.floor((now - eventMs) / (24 * 60 * 60 * 1000))) : 365;
+    const weight = daysAgo <= 7 ? 1.0 : daysAgo <= 30 ? 0.4 : 0.15;
+
+    const deaths = safeNum(ev.deathsBest || ev.best || 0) * weight;
+
+    // Map violence types: state-based → battles, one-sided → civilian violence, non-state → battles
+    if (violenceNum === 3) {
+      data[code].civilianViolence += weight;
+      data[code].conflictFatalities += deaths;
+    } else {
+      data[code].battles += weight;
+      data[code].conflictFatalities += deaths;
+    }
+    data[code].fatalities += deaths;
   }
 
   // --- Outages (string enum severity) ---

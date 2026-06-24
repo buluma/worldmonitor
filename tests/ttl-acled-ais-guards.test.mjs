@@ -73,6 +73,11 @@ describe('ACLED shared cache layer', () => {
       'Should gracefully degrade when ACLED_ACCESS_TOKEN is not set');
   });
 
+  it('returns empty array when ACLED_DISABLED is true', () => {
+    assert.match(src, /ACLED_DISABLED.*===.*'true'.*return \[\]/,
+      'Should short-circuit when ACLED_DISABLED env var is set');
+  });
+
   it('caches successful results via cachedFetchJson', () => {
     assert.match(src, /cachedFetchJson/,
       'Should use cachedFetchJson which writes to cache automatically on successful fetch');

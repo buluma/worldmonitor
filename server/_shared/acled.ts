@@ -45,6 +45,8 @@ interface FetchAcledOptions {
  * different handlers share the same cached result.
  */
 export async function fetchAcledCached(opts: FetchAcledOptions): Promise<AcledRawEvent[]> {
+  if (process.env.ACLED_DISABLED === 'true') return [];
+
   const token = await getAcledAccessToken();
   if (!token) return [];
 
