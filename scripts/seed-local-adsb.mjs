@@ -55,6 +55,27 @@ async function fetchAircraft() {
       messages: a.messages ?? 0,
     }));
 
+  let stats = null;
+  try {
+    const statsUrl = FEEDER_URL.replace('/data/aircraft.json', '/data/stats.json');
+    const sr = await fetch(statsUrl, { signal: AbortSignal.timeout(5_000) });
+    if (sr.ok) {
+      const sd = await sr.json();
+      const l = (sd.last1min || {}).local || {};
+      const t = (sd.total || {}).local || {};
+      stats = {
+        gainDb: sd.gain_db ?? 0,
+        noise: l.noise ?? 0,
+        signal: l.signal ?? 0,
+        peakSignal: l.peak_signal ?? 0,
+        messages1m: Array.isArray(l.accepted) ? l.accepted.reduce((a, b) => a + b, 0) : 0,
+        messagesTotal: Array.isArray(t.accepted) ? t.accepted.reduce((a, b) => a + b, 0) : 0,
+        maxRangeNm: (sd.total || {}).max_distance_in_nautical_miles ?? 0,
+        tracksTotal: ((sd.total || {}).tracks || {}).all ?? 0,
+      };
+    }
+  } catch {}
+
   return {
     aircraft,
     total: raw.length,
@@ -64,6 +85,7 @@ async function fetchAircraft() {
       lon: FEEDER_LON,
       rangeNm: FEEDER_RANGE_NM,
     },
+    stats,
     now: data.now || Date.now() / 1000,
     fetchedAt: new Date().toISOString(),
   };

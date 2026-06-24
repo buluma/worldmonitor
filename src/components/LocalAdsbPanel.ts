@@ -17,11 +17,23 @@ interface LocalAircraft {
   rssi: number | null;
 }
 
+interface FeederStats {
+  gainDb: number;
+  noise: number;
+  signal: number;
+  peakSignal: number;
+  messages1m: number;
+  messagesTotal: number;
+  maxRangeNm: number;
+  tracksTotal: number;
+}
+
 interface LocalAdsbData {
   aircraft: LocalAircraft[];
   total: number;
   withPosition: number;
   feeder: { lat: number; lon: number; rangeNm: number };
+  stats?: FeederStats | null;
   fetchedAt: string;
 }
 
@@ -42,7 +54,9 @@ export class LocalAdsbPanel extends Panel {
   public refresh(data: LocalAdsbData): void {
     if (!data || !data.aircraft || data.aircraft.length === 0) {
       this.setCount(0);
-      this.setContent('<div style="padding:12px;color:var(--text-dim)">No aircraft in range.</div>');
+      const es = data.stats;
+      const emptyStats = es ? `<div style="margin-top:8px;font-size:10px;color:var(--text-dim)">Receiver: ${es.messages1m} msg/min · noise ${es.noise.toFixed(1)} dB · ${es.tracksTotal} lifetime tracks</div>` : '';
+      this.setContent(`<div style="padding:12px;color:var(--text-dim)">No aircraft in range.${emptyStats}</div>`);
       return;
     }
 
@@ -75,12 +89,21 @@ export class LocalAdsbPanel extends Panel {
     const age = data.fetchedAt ? new Date(data.fetchedAt) : null;
     const agoStr = age ? `${Math.round((Date.now() - age.getTime()) / 1000)}s ago` : '';
 
+    const s = data.stats;
+    const statsRow = s ? `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px;padding:6px 0;border-bottom:1px solid var(--border-subtle)">
+        <div style="text-align:center"><div style="font-size:13px;font-weight:600">${s.messages1m}</div><div style="font-size:8px;color:var(--text-dim)">MSG/MIN</div></div>
+        <div style="text-align:center"><div style="font-size:13px;font-weight:600">${s.noise.toFixed(1)}</div><div style="font-size:8px;color:var(--text-dim)">NOISE dB</div></div>
+        <div style="text-align:center"><div style="font-size:13px;font-weight:600">${s.signal.toFixed(1)}</div><div style="font-size:8px;color:var(--text-dim)">SIGNAL dB</div></div>
+        <div style="text-align:center"><div style="font-size:13px;font-weight:600">${s.gainDb}</div><div style="font-size:8px;color:var(--text-dim)">GAIN dB</div></div>
+      </div>` : '';
+
     this.setContent(`
       <div style="padding:4px 12px 8px">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:6px">
-          <span>${data.withPosition} tracked · ${data.total} total</span>
+          <span>${data.withPosition} tracked · ${data.total} total${s ? ` · ${s.tracksTotal} lifetime` : ''}</span>
           <span>${agoStr}</span>
         </div>
+        ${statsRow}
         ${rows}
         ${sorted.length > 20 ? `<div style="font-size:10px;color:var(--text-dim);padding:6px 0">+ ${sorted.length - 20} more</div>` : ''}
       </div>
