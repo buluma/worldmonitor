@@ -114,10 +114,11 @@ export class LocalAdsbPanel extends Panel {
       </div>
     `);
 
-    requestAnimationFrame(() => {
+    // setContent is debounced 150ms — wait for DOM insertion before drawing
+    setTimeout(() => {
       const canvas = document.getElementById(radarId) as HTMLCanvasElement | null;
       if (canvas) this.drawRadar(canvas, data.feeder, data.aircraft);
-    });
+    }, 200);
   }
 
   private drawRadar(
@@ -129,6 +130,7 @@ export class LocalAdsbPanel extends Panel {
     const rect = canvas.getBoundingClientRect();
     const w = rect.width;
     const h = 140;
+    if (w < 10) return;
     canvas.width = w * dpr;
     canvas.height = h * dpr;
     const ctx = canvas.getContext('2d');
@@ -140,11 +142,12 @@ export class LocalAdsbPanel extends Panel {
     const maxR = Math.min(cx, cy) - 8;
     const rangeDeg = feeder.rangeNm * NM_TO_DEG;
 
-    const style = getComputedStyle(canvas);
-    const dimColor = style.getPropertyValue('--text-dim').trim() || 'rgba(255,255,255,0.2)';
-    const accentColor = style.getPropertyValue('--status-live').trim() || '#44ff88';
-    const warnColor = style.getPropertyValue('--semantic-elevated').trim() || '#ffaa00';
-    const critColor = style.getPropertyValue('--semantic-critical').trim() || '#ff4444';
+    const rootStyle = getComputedStyle(document.documentElement);
+    const cssVar = (name: string, fallback: string) => rootStyle.getPropertyValue(name).trim() || fallback;
+    const dimColor = cssVar('--text-dim', 'rgba(255,255,255,0.2)');
+    const accentColor = cssVar('--status-live', '#44ff88');
+    const warnColor = cssVar('--semantic-elevated', '#ffaa00');
+    const critColor = cssVar('--semantic-critical', '#ff4444');
 
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
