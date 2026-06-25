@@ -119,9 +119,8 @@ export function getApiBaseUrl(): string {
 }
 
 function isWorldMonitorWebHost(hostname: string): boolean {
-  return hostname === 'worldmonitor.app'
-    || hostname === 'www.worldmonitor.app'
-    || hostname.endsWith('.worldmonitor.app');
+  return hostname === 'wm.opsio.space'
+    || hostname.endsWith('.wm.opsio.space');
 }
 
 export function getConfiguredWebApiBaseUrl(): string {
@@ -164,7 +163,7 @@ export function getRemoteApiBaseUrl(): string {
   if (fromHosts) return fromHosts;
 
   // Desktop builds may not set VITE_WS_API_URL; default to production.
-  if (isDesktopRuntime()) return 'https://worldmonitor.app';
+  if (isDesktopRuntime()) return 'https://wm.opsio.space';
   return '';
 }
 
@@ -208,9 +207,8 @@ function extractHostnames(...urls: (string | undefined)[]): string[] {
 }
 
 const APP_HOSTS = new Set([
-  'worldmonitor.app',
-  'www.worldmonitor.app',
-  'tech.worldmonitor.app',
+  'wm.opsio.space',
+  'tech.wm.opsio.space',
   'api.worldmonitor.app',
   'localhost',
   '127.0.0.1',
@@ -221,7 +219,7 @@ function isAppOriginUrl(urlStr: string): boolean {
   try {
     const u = new URL(urlStr);
     const host = u.hostname;
-    return APP_HOSTS.has(host) || host.endsWith('.worldmonitor.app');
+    return APP_HOSTS.has(host) || host.endsWith('.wm.opsio.space');
   } catch {
     return false;
   }

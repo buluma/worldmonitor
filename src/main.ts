@@ -26,7 +26,7 @@ const sentryReplaySessionSampleRate = parseClientSampleRate(import.meta.env.VITE
 const sentryReplayOnErrorSampleRate = parseClientSampleRate(import.meta.env.VITE_SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE, 1);
 const sentryEnvironment = desktopRuntime
   ? (import.meta.env.DEV ? 'desktop-development' : 'desktop-production')
-  : (location.hostname === 'worldmonitor.app' || location.hostname.endsWith('.worldmonitor.app'))
+  : (location.hostname === 'wm.opsio.space' || location.hostname.endsWith('.wm.opsio.space'))
     ? 'production'
     : location.hostname.includes('vercel.app')
       ? 'preview'

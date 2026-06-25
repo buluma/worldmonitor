@@ -112,7 +112,7 @@ describe('widget-agent relay — security', () => {
     );
   });
 
-  it('SSRF guard — only worldmonitor.app endpoints are in allowlist', () => {
+  it('SSRF guard — only wm.opsio.space endpoints are in allowlist', () => {
     const setStart = relay.indexOf('WIDGET_ALLOWED_ENDPOINTS = new Set');
     assert.ok(setStart !== -1);
     const setBody = relay.slice(setStart, relay.indexOf(']);', setStart) + 2);
@@ -168,7 +168,7 @@ describe('widget-agent relay — security', () => {
     const corsBlock = relay.slice(widgetCorsIdx, widgetCorsIdx + 600);
     // Must NOT define a hardcoded origins array for this specific route
     assert.ok(
-      !corsBlock.includes("['https://worldmonitor.app'"),
+      !corsBlock.includes("['https://wm.opsio.space'"),
       'Do NOT hardcode origins for /widget-agent — reuse getCorsOrigin()',
     );
     // Must reference corsOrigin variable (set by getCorsOrigin earlier)

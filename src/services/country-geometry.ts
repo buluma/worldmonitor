@@ -14,13 +14,13 @@ interface CountryHit {
 
 const COUNTRY_GEOJSON_URLS = [
   '/data/countries.geojson',
-  'https://maps.worldmonitor.app/countries.geojson',
+  'https://maps.wm.opsio.space/countries.geojson',
 ] as const;
 
 /** Optional higher-resolution boundary overrides sourced from Natural Earth. */
 const COUNTRY_OVERRIDE_URLS = [
   '/data/country-boundary-overrides.geojson',
-  'https://maps.worldmonitor.app/country-boundary-overrides.geojson',
+  'https://maps.wm.opsio.space/country-boundary-overrides.geojson',
 ] as const;
 const COUNTRY_OVERRIDE_TIMEOUT_MS = 3_000;
 

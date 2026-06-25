@@ -29,7 +29,7 @@ type CacheTier = 'fast' | 'medium' | 'slow' | 'slow-browser' | 'static' | 'daily
 
 // Browser-only cache: no `public` or `s-maxage` so Cloudflare (which ignores
 // Vary: Origin) does NOT cache these responses. CF sits in front of api.worldmonitor.app
-// and would otherwise pin ACAO: worldmonitor.app on the cached response, breaking CORS
+// and would otherwise pin ACAO: wm.opsio.space on the cached response, breaking CORS
 // for preview deployments. Vercel CDN caching is handled separately by CDN-Cache-Control.
 const TIER_HEADERS: Record<CacheTier, string> = {
   fast: 'max-age=60, stale-while-revalidate=60, stale-if-error=600',

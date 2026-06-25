@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Submit all worldmonitor.app URLs to IndexNow after deploy.
+ * Submit all wm.opsio.space URLs to IndexNow after deploy.
  * Run once after deploying the IndexNow key file:
  *   node scripts/seo-indexnow-submit.mjs
  *
@@ -12,33 +12,33 @@ const KEY = 'a7f3e9d1b2c44e8f9a0b1c2d3e4f5a6b';
 
 const BATCHES = [
   {
-    host: 'www.worldmonitor.app',
+    host: 'wm.opsio.space',
     urls: [
-      'https://www.worldmonitor.app/',
-      'https://www.worldmonitor.app/pro',
-      'https://www.worldmonitor.app/blog/',
-      'https://www.worldmonitor.app/blog/posts/what-is-worldmonitor-real-time-global-intelligence/',
-      'https://www.worldmonitor.app/blog/posts/five-dashboards-one-platform-worldmonitor-variants/',
-      'https://www.worldmonitor.app/blog/posts/track-global-conflicts-in-real-time/',
-      'https://www.worldmonitor.app/blog/posts/cyber-threat-intelligence-for-security-teams/',
-      'https://www.worldmonitor.app/blog/posts/osint-for-everyone-open-source-intelligence-democratized/',
-      'https://www.worldmonitor.app/blog/posts/natural-disaster-monitoring-earthquakes-fires-volcanoes/',
-      'https://www.worldmonitor.app/blog/posts/real-time-market-intelligence-for-traders-and-analysts/',
-      'https://www.worldmonitor.app/blog/posts/monitor-global-supply-chains-and-commodity-disruptions/',
-      'https://www.worldmonitor.app/blog/posts/satellite-imagery-orbital-surveillance/',
-      'https://www.worldmonitor.app/blog/posts/live-webcams-from-geopolitical-hotspots/',
-      'https://www.worldmonitor.app/blog/posts/prediction-markets-ai-forecasting-geopolitics/',
-      'https://www.worldmonitor.app/blog/posts/command-palette-search-everything-instantly/',
-      'https://www.worldmonitor.app/blog/posts/worldmonitor-in-21-languages-global-intelligence-for-everyone/',
-      'https://www.worldmonitor.app/blog/posts/ai-powered-intelligence-without-the-cloud/',
-      'https://www.worldmonitor.app/blog/posts/build-on-worldmonitor-developer-api-open-source/',
-      'https://www.worldmonitor.app/blog/posts/worldmonitor-vs-traditional-intelligence-tools/',
-      'https://www.worldmonitor.app/blog/posts/tracking-global-trade-routes-chokepoints-freight-costs/',
+      'https://wm.opsio.space/',
+      'https://wm.opsio.space/pro',
+      'https://wm.opsio.space/blog/',
+      'https://wm.opsio.space/blog/posts/what-is-worldmonitor-real-time-global-intelligence/',
+      'https://wm.opsio.space/blog/posts/five-dashboards-one-platform-worldmonitor-variants/',
+      'https://wm.opsio.space/blog/posts/track-global-conflicts-in-real-time/',
+      'https://wm.opsio.space/blog/posts/cyber-threat-intelligence-for-security-teams/',
+      'https://wm.opsio.space/blog/posts/osint-for-everyone-open-source-intelligence-democratized/',
+      'https://wm.opsio.space/blog/posts/natural-disaster-monitoring-earthquakes-fires-volcanoes/',
+      'https://wm.opsio.space/blog/posts/real-time-market-intelligence-for-traders-and-analysts/',
+      'https://wm.opsio.space/blog/posts/monitor-global-supply-chains-and-commodity-disruptions/',
+      'https://wm.opsio.space/blog/posts/satellite-imagery-orbital-surveillance/',
+      'https://wm.opsio.space/blog/posts/live-webcams-from-geopolitical-hotspots/',
+      'https://wm.opsio.space/blog/posts/prediction-markets-ai-forecasting-geopolitics/',
+      'https://wm.opsio.space/blog/posts/command-palette-search-everything-instantly/',
+      'https://wm.opsio.space/blog/posts/worldmonitor-in-21-languages-global-intelligence-for-everyone/',
+      'https://wm.opsio.space/blog/posts/ai-powered-intelligence-without-the-cloud/',
+      'https://wm.opsio.space/blog/posts/build-on-worldmonitor-developer-api-open-source/',
+      'https://wm.opsio.space/blog/posts/worldmonitor-vs-traditional-intelligence-tools/',
+      'https://wm.opsio.space/blog/posts/tracking-global-trade-routes-chokepoints-freight-costs/',
     ],
   },
-  { host: 'tech.worldmonitor.app', urls: ['https://tech.worldmonitor.app/'] },
-  { host: 'finance.worldmonitor.app', urls: ['https://finance.worldmonitor.app/'] },
-  { host: 'happy.worldmonitor.app', urls: ['https://happy.worldmonitor.app/'] },
+  { host: 'tech.wm.opsio.space', urls: ['https://tech.wm.opsio.space/'] },
+  { host: 'finance.wm.opsio.space', urls: ['https://finance.wm.opsio.space/'] },
+  { host: 'happy.wm.opsio.space', urls: ['https://happy.wm.opsio.space/'] },
 ];
 
 const ENDPOINTS = [

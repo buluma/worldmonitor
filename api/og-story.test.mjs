@@ -4,8 +4,8 @@ import handler from './og-story.js';
 
 function renderOgStory(query = '') {
   const req = {
-    url: `https://worldmonitor.app/api/og-story${query ? `?${query}` : ''}`,
-    headers: { host: 'worldmonitor.app' },
+    url: `https://wm.opsio.space/api/og-story${query ? `?${query}` : ''}`,
+    headers: { host: 'wm.opsio.space' },
   };
 
   let statusCode = 0;

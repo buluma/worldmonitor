@@ -17,7 +17,7 @@ const RATE_WINDOW_MS = 60 * 60 * 1000;
 const rateLimiter = createIpRateLimiter({ limit: RATE_LIMIT, windowMs: RATE_WINDOW_MS });
 
 async function sendConfirmationEmail(email, referralCode) {
-  const referralLink = `https://worldmonitor.app/pro?ref=${referralCode}`;
+  const referralLink = `https://wm.opsio.space/pro?ref=${referralCode}`;
   const shareText = encodeURIComponent('I just joined the World Monitor Pro waitlist \u2014 real-time global intelligence powered by AI. Join me:');
   const shareUrl = encodeURIComponent(referralLink);
   const twitterShare = `https://x.com/intent/tweet?text=${shareText}&url=${shareUrl}`;
@@ -38,7 +38,7 @@ async function sendConfirmationEmail(email, referralCode) {
         'Authorization': `Bearer ${resendKey}`,
       },
       body: JSON.stringify({
-        from: 'World Monitor <noreply@worldmonitor.app>',
+        from: 'World Monitor <noreply@wm.opsio.space>',
         to: [email],
         subject: 'You\u2019re on the World Monitor Pro waitlist',
         html: `
@@ -140,7 +140,7 @@ async function sendConfirmationEmail(email, referralCode) {
                 </table>
               </div>
               <div style="text-align: center; margin-bottom: 36px;">
-                <a href="https://worldmonitor.app" style="display: inline-block; background: #4ade80; color: #0a0a0a; padding: 14px 36px; text-decoration: none; font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; border-radius: 2px;">Explore the Free Dashboard</a>
+                <a href="https://wm.opsio.space" style="display: inline-block; background: #4ade80; color: #0a0a0a; padding: 14px 36px; text-decoration: none; font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; border-radius: 2px;">Explore the Free Dashboard</a>
                 <p style="font-size: 12px; color: #555; margin-top: 12px;">The free dashboard stays free forever. Pro adds intelligence on top.</p>
               </div>
             </div>
@@ -148,11 +148,11 @@ async function sendConfirmationEmail(email, referralCode) {
               <div style="margin-bottom: 16px;">
                 <a href="https://x.com/eliehabib" style="color: #666; text-decoration: none; font-size: 12px; margin: 0 12px;">X / Twitter</a>
                 <a href="https://github.com/koala73/worldmonitor" style="color: #666; text-decoration: none; font-size: 12px; margin: 0 12px;">GitHub</a>
-                <a href="https://worldmonitor.app/pro" style="color: #666; text-decoration: none; font-size: 12px; margin: 0 12px;">Pro Waitlist</a>
+                <a href="https://wm.opsio.space/pro" style="color: #666; text-decoration: none; font-size: 12px; margin: 0 12px;">Pro Waitlist</a>
               </div>
               <p style="font-size: 11px; color: #444; margin: 0; line-height: 1.6;">
                 World Monitor \u2014 Real-time intelligence for a connected world.<br />
-                <a href="https://worldmonitor.app" style="color: #4ade80; text-decoration: none;">worldmonitor.app</a>
+                <a href="https://wm.opsio.space" style="color: #4ade80; text-decoration: none;">wm.opsio.space</a>
               </p>
             </div>
           </div>`,

@@ -46,7 +46,7 @@ async function sendNotificationEmail(name, email, organization, phone, message) 
         'Authorization': `Bearer ${resendKey}`,
       },
       body: JSON.stringify({
-        from: 'World Monitor <noreply@worldmonitor.app>',
+        from: 'World Monitor <noreply@wm.opsio.space>',
         to: [notifyEmail],
         subject: `[WM Enterprise] ${sanitizeForSubject(name)} from ${sanitizeForSubject(organization)}`,
         html: `
@@ -60,7 +60,7 @@ async function sendNotificationEmail(name, email, organization, phone, message) 
               <tr><td style="padding: 8px; font-weight: bold; color: #666;">Phone</td><td style="padding: 8px;"><a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a></td></tr>
               <tr><td style="padding: 8px; font-weight: bold; color: #666;">Message</td><td style="padding: 8px;">${escapeHtml(message || 'N/A')}</td></tr>
             </table>
-            <p style="color: #999; font-size: 12px; margin-top: 24px;">Sent from worldmonitor.app enterprise contact form</p>
+            <p style="color: #999; font-size: 12px; margin-top: 24px;">Sent from wm.opsio.space enterprise contact form</p>
           </div>`,
       }),
     });

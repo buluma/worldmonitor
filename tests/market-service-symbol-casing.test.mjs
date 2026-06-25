@@ -27,10 +27,10 @@ function overrideGlobal(name, value) {
 
 function installBrowserEnv() {
   const location = {
-    hostname: 'worldmonitor.app',
+    hostname: 'wm.opsio.space',
     protocol: 'https:',
-    host: 'worldmonitor.app',
-    origin: 'https://worldmonitor.app',
+    host: 'wm.opsio.space',
+    origin: 'https://wm.opsio.space',
   };
   const navigator = { userAgent: 'node-test', onLine: true };
   const window = { location, navigator };

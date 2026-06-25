@@ -29,7 +29,7 @@ async function fetchAnonymousOpenSky(req, corsHeaders) {
     const response = await fetch(upstreamUrl, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; WorldMonitor/1.0; +https://worldmonitor.app)',
+        'User-Agent': 'Mozilla/5.0 (compatible; WorldMonitor/1.0; +https://wm.opsio.space)',
       },
       signal: AbortSignal.timeout(12_000),
     });

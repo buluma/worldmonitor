@@ -325,7 +325,7 @@ export class DataLoaderManager implements AppModule {
     if (isDesktopRuntime()) return true;
     // Self-hosted (Docker): no server digest for most categories, so always fall back.
     const host = window.location.hostname;
-    if (host !== 'worldmonitor.app' && !host.endsWith('.worldmonitor.app')) return true;
+    if (host !== 'wm.opsio.space' && !host.endsWith('.wm.opsio.space')) return true;
     return isFeatureEnabled('newsPerFeedFallback');
   }
 

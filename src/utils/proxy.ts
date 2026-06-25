@@ -8,8 +8,8 @@ const RESPONSE_CACHE_PREFIX = 'api-response:';
 // Feature flag controls rollout; default off for safe staged deployment.
 const RSS_DIRECT_TO_RELAY = import.meta.env.VITE_RSS_DIRECT_TO_RELAY === 'true';
 const isSelfHosted = typeof window !== 'undefined'
-  && !window.location.hostname.endsWith('worldmonitor.app')
-  && window.location.hostname !== 'worldmonitor.app';
+  && !window.location.hostname.endsWith('wm.opsio.space')
+  && window.location.hostname !== 'wm.opsio.space';
 const RSS_PROXY_BASE = isDev || isSelfHosted
   ? '' // Dev + self-host use local /api/rss-proxy
   : RSS_DIRECT_TO_RELAY

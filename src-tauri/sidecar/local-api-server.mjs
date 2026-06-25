@@ -413,7 +413,7 @@ async function proxyToCloud(requestUrl, req, remoteBase) {
   headers.delete('If-Modified-Since');
   // Identify sidecar as trusted origin so the cloud API key validator
   // doesn't reject the request (no origin + no key = 401).
-  headers.set('Origin', 'https://worldmonitor.app');
+  headers.set('Origin', 'https://wm.opsio.space');
   return fetch(target, {
     method: req.method,
     headers,
@@ -598,7 +598,7 @@ const SIDECAR_ALLOWED_ORIGINS = [
   /^https?:\/\/localhost(:\d+)?$/,
   /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
   /^https?:\/\/tauri\.localhost(:\d+)?$/,
-  // Only allow exact domain or single-level subdomains (e.g. preview-xyz.worldmonitor.app).
+  // Only allow exact domain or single-level subdomains (e.g. preview-xyz.wm.opsio.space).
   // The previous (.*\.)? pattern was overly broad. Anchored to prevent spoofing
   // via domains like worldmonitorEVIL.vercel.app.
   /^https:\/\/([a-z0-9-]+\.)?worldmonitor\.app$/,

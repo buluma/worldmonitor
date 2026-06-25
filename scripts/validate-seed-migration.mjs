@@ -14,7 +14,7 @@ const BASE_URL = process.argv.includes('--base-url')
   ? process.argv[process.argv.indexOf('--base-url') + 1]
   : 'https://api.worldmonitor.app';
 
-const ORIGIN = 'https://worldmonitor.app';
+const ORIGIN = 'https://wm.opsio.space';
 
 // ========================================================================
 // Test definitions — one per migrated handler

@@ -77,7 +77,7 @@ export function getProviderCredentials(
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://worldmonitor.app',
+        'HTTP-Referer': 'https://wm.opsio.space',
         'X-Title': 'World Monitor',
       },
     };

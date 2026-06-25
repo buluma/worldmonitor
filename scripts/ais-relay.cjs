@@ -2775,7 +2775,7 @@ const CLASSIFY_LLM_PROVIDERS = [
     envKey: 'OPENROUTER_API_KEY',
     apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
     model: 'google/gemini-2.5-flash',
-    headers: (key) => ({ Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://worldmonitor.app', 'X-Title': 'World Monitor', 'User-Agent': CHROME_UA }),
+    headers: (key) => ({ Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://wm.opsio.space', 'X-Title': 'World Monitor', 'User-Agent': CHROME_UA }),
     timeout: 30000,
   },
 ];
@@ -2989,7 +2989,7 @@ async function seedServiceStatuses() {
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': CHROME_UA,
-        Origin: 'https://worldmonitor.app',
+        Origin: 'https://wm.opsio.space',
       },
       body: '{}',
       signal: AbortSignal.timeout(60_000),
@@ -3394,7 +3394,7 @@ async function seedCiiWarmPing() {
     const resp = await fetch(CII_RPC_URL, {
       headers: {
         'User-Agent': CHROME_UA,
-        Origin: 'https://worldmonitor.app',
+        Origin: 'https://wm.opsio.space',
       },
       signal: AbortSignal.timeout(60_000),
     });
@@ -3434,7 +3434,7 @@ async function seedChokepointWarmPing() {
   try {
     const resp = await fetch(CHOKEPOINT_RPC_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': CHROME_UA, Origin: 'https://worldmonitor.app' },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': CHROME_UA, Origin: 'https://wm.opsio.space' },
       body: '{}',
       signal: AbortSignal.timeout(60_000),
     });
@@ -3472,7 +3472,7 @@ async function seedCableHealthWarmPing() {
   try {
     const resp = await fetch(CABLE_HEALTH_RPC_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': CHROME_UA, Origin: 'https://worldmonitor.app' },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': CHROME_UA, Origin: 'https://wm.opsio.space' },
       body: '{}',
       signal: AbortSignal.timeout(60_000),
     });
@@ -6410,7 +6410,7 @@ function handleWorldBankRequest(req, res) {
   const request = https.get(wbUrl, {
     headers: {
       'Accept': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (compatible; WorldMonitor/1.0; +https://worldmonitor.app)',
+      'User-Agent': 'Mozilla/5.0 (compatible; WorldMonitor/1.0; +https://wm.opsio.space)',
     },
     timeout: 15000,
   }, (response) => {
@@ -7179,9 +7179,9 @@ function handleNotamProxyRequest(req, res) {
 
 // CORS origin allowlist — only our domains can use this relay
 const ALLOWED_ORIGINS = [
-  'https://worldmonitor.app',
-  'https://tech.worldmonitor.app',
-  'https://finance.worldmonitor.app',
+  'https://wm.opsio.space',
+  'https://tech.wm.opsio.space',
+  'https://finance.wm.opsio.space',
   'http://localhost:5173',   // Vite dev
   'http://localhost:5174',   // Vite dev alt port
   'http://localhost:4173',   // Vite preview
@@ -7192,10 +7192,10 @@ const ALLOWED_ORIGINS = [
 function getCorsOrigin(req) {
   const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  // Wildcard: any *.worldmonitor.app subdomain (for variant subdomains)
+  // Wildcard: any *.wm.opsio.space subdomain (for variant subdomains)
   try {
     const url = new URL(origin);
-    if (url.hostname.endsWith('.worldmonitor.app') && url.protocol === 'https:') return origin;
+    if (url.hostname.endsWith('.wm.opsio.space') && url.protocol === 'https:') return origin;
   } catch { /* invalid origin — fall through */ }
   // Optional: allow Vercel preview deployments when explicitly enabled.
   if (ALLOW_VERCEL_PREVIEW_ORIGINS && origin.endsWith('.vercel.app')) return origin;

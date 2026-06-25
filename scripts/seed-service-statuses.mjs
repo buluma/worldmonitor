@@ -239,7 +239,7 @@ async function warmPingHostedRpc() {
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': CHROME_UA,
-        Origin: 'https://worldmonitor.app',
+        Origin: 'https://wm.opsio.space',
       },
       body: '{}',
       signal: AbortSignal.timeout(60_000),

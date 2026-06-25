@@ -28,7 +28,7 @@ async function warmPing(name, path) {
   try {
     const resp = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': CHROME_UA, Origin: 'https://worldmonitor.app' },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': CHROME_UA, Origin: 'https://wm.opsio.space' },
       body: JSON.stringify({}),
       signal: AbortSignal.timeout(TIMEOUT),
     });
