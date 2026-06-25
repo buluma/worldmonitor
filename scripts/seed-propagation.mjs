@@ -10,7 +10,7 @@ import { loadEnvFile, getRedisCredentials, redisSet } from './_seed-utils.mjs';
 loadEnvFile(import.meta.url);
 
 const KEY = 'rf:propagation:v1';
-const TTL = 1800;
+const TTL = 3600; // 1h — 2x the 30-min self-host cron interval
 const SOURCE_URL = 'https://www.hamqsl.com/solarxml.php';
 
 function parseXmlTag(xml, tag) {

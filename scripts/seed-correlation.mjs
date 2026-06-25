@@ -5,7 +5,7 @@ import { loadEnvFile, runSeed, getRedisCredentials, redisPipeline } from './_see
 loadEnvFile(import.meta.url);
 
 const CANONICAL_KEY = 'correlation:cards-bootstrap:v1';
-const CACHE_TTL = 1200; // 20min — outlives maxStaleMin:15 with buffer (cron runs every 5min)
+const CACHE_TTL = 3600; // 1h — 2x the 30-min self-host cron interval
 
 const INPUT_KEYS = [
   'military:flights:v1',

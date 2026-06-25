@@ -6,7 +6,7 @@ loadEnvFile(import.meta.url);
 
 const API_BASE = 'https://api.usaspending.gov/api/v2';
 const CANONICAL_KEY = 'economic:spending:v1';
-const CACHE_TTL = 3600; // 1 hour
+const CACHE_TTL = 5400; // 90min — 3x the 30-min self-host cron interval
 
 const AWARD_TYPE_MAP = {
   'A': 'contract', 'B': 'contract', 'C': 'contract', 'D': 'contract',
