@@ -119,8 +119,9 @@ export function getApiBaseUrl(): string {
 }
 
 function isWorldMonitorWebHost(hostname: string): boolean {
-  return hostname === 'wm.opsio.space'
-    || hostname.endsWith('.wm.opsio.space');
+  return hostname === 'worldmonitor.app'
+    || hostname === 'www.worldmonitor.app'
+    || hostname.endsWith('.worldmonitor.app');
 }
 
 export function getConfiguredWebApiBaseUrl(): string {
