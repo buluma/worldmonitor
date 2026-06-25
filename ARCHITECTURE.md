@@ -41,8 +41,8 @@ World Monitor is a real-time global intelligence dashboard built as a TypeScript
               ┌───────────┼───────────┐
               │           │           │
         ┌─────▼───┐ ┌─────▼───┐ ┌────▼────┐
-        │ Finnhub │ │  Yahoo  │ │ ACLED   │
-        │ OpenSky │ │  GDELT  │ │ UCDP    │
+        │ Finnhub │ │  Yahoo  │ │ UCDP    │
+        │ OpenSky │ │  GDELT  │ │ ACLED*  │
         │ CoinGeck│ │  FRED   │ │ FIRMS   │
         │   ...   │ │   ...   │ │   ...   │
         └─────────┘ └─────────┘ └─────────┘
@@ -151,7 +151,7 @@ All API endpoints live in `api/` as self-contained JavaScript files deployed as 
 |------|----------|----------|
 | fast | 300s | Live event streams, flight status |
 | medium | 600s | Market quotes, stock analysis |
-| slow | 1800s | ACLED events, cyber threats |
+| slow | 1800s | Conflict events (UCDP), cyber threats |
 | static | 7200s | Humanitarian summaries, ETF flows |
 | daily | 86400s | Critical minerals, static reference data |
 | no-store | 0 | Vessel snapshots, aircraft tracking |

@@ -80,7 +80,8 @@ The `.env.example` file documents every variable with descriptions and registrat
 | **Cache**         | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                       | 10K commands/day                           |
 | **Markets**       | `FINNHUB_API_KEY`, `FRED_API_KEY`, `EIA_API_KEY`                           | All free tier                              |
 | **Tracking**      | `WINGBITS_API_KEY`, `AISSTREAM_API_KEY`                                    | Free                                       |
-| **Geopolitical**  | `ACLED_ACCESS_TOKEN`, `CLOUDFLARE_API_TOKEN`, `NASA_FIRMS_API_KEY`         | Free for researchers                       |
+| **Geopolitical**  | `CLOUDFLARE_API_TOKEN`, `NASA_FIRMS_API_KEY`                               | NASA FIRMS free; Cloudflare paid           |
+| **Conflict**      | `ACLED_DISABLED=true` (default), `UCDP_ACCESS_TOKEN`                       | ACLED paid; UCDP free fallback             |
 | **Relay**         | `WS_RELAY_URL`, `VITE_WS_RELAY_URL`, `OPENSKY_CLIENT_ID/SECRET`            | Self-hosted                                |
 | **UI**            | `VITE_VARIANT`, `VITE_MAP_INTERACTION_MODE` (`flat` or `3d`, default `3d`) | N/A                                        |
 | **Observability** | `VITE_SENTRY_DSN`, `SENTRY_EDGE_DSN`, `SENTRY_DESKTOP_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | N/A                                        |

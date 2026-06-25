@@ -30,8 +30,7 @@ Sourced from worldmonitor_og divergence analysis + heimdal deployment observatio
 
 ## Self-Host / heimdal
 
-- [ ] Add `ACLED_EMAIL`/`ACLED_PASSWORD` scope param (`scope=authenticated`) to OAuth helper — see "ACLED → GDELT Migration" section
-- [ ] Investigate ACLED API access — account may need researcher approval — see "ACLED → GDELT Migration" section
+- [x] ~~ACLED disabled — API requires paid license, UCDP fallback active~~
 - [ ] Obtain `military-bases-final.json` dataset (or `CLOUDFLARE_R2_ACCOUNT_ID`) for military bases layer
 - [ ] Set up log rotation for `/tmp/wm-seeders.log`
 - [ ] Add `WINDY_API_KEY` for webcam layer (optional)
@@ -39,73 +38,17 @@ Sourced from worldmonitor_og divergence analysis + heimdal deployment observatio
 - [ ] Investigate FIRMS seeder Node fetch failures — curl works, Node doesn't (transient?)
 - [ ] Consider adding seeder cron to `docker-compose.override.yml` as a sidecar instead of host cron
 
-## ACLED → GDELT Migration (or key renewal)
+## ACLED — Permanently Disabled (2025-06-25)
 
-ACLED API returning 403 — expired key/account. Health endpoint reports 503 (DEGRADED) because
-`risk:scores:sebuf:v1` and `risk:scores:sebuf:stale:v1` are empty or stale, pushing `critCount > 0`.
-Three options ranked by effort:
+ACLED API requires paid data license. Free/Open accounts have no API access.
+Option C (UCDP fallback) implemented and shipped. ACLED code remains but is gated
+behind `ACLED_DISABLED=true` (now default). If a paid license is ever obtained,
+set `ACLED_DISABLED=` (empty) and configure credentials.
 
-### Option A: Renew ACLED key (lowest effort, best data quality)
-- [ ] Apply at acleddata.com/register — takes ~5 min, approval usually instant
-- [ ] Set `ACLED_EMAIL` + `ACLED_PASSWORD` in Heimdal `.env`
-- [ ] Restart worldmonitor container — OAuth auto-exchange handles the rest
-
-### Option B: Replace ACLED with GDELT (medium effort, data quality tradeoff)
-
-**What changes:**
-
-1. `server/_shared/gdelt.ts` — New shared fetcher for GDELT GEO API v2
-   - No auth needed, no rate limits
-   - Returns GeoJSON: `{ features: [{ properties: { name, count, url, shareimage }, geometry: { coordinates } }] }`
-   - Cache in Redis same pattern as `acled.ts` (15 min TTL)
-
-2. `server/_shared/acled.ts` → update `fetchAcledCached` to call GDELT or add adapter
-   - Keep `AcledRawEvent` interface as internal canonical type
-   - Map GDELT fields → `AcledRawEvent` shape so downstream consumers don't change
-   - **Lost fields:** `fatalities` (GDELT has none), `actor1/2`, `sub_event_type`, `event_id_cnty`
-   - **Gained:** news volume/count per event cluster
-
-3. `server/worldmonitor/intelligence/v1/get-risk-scores.ts` — Biggest impact
-   - `fetchACLEDEvents()` returns per-event fatalities — core to CII scoring
-   - Without fatalities: `conflictFatalities`, `protestFatalities` always 0
-   - Scoring components `fatalityScore`, `unrestFatalityBoost`, `civilianBoost` become inert
-   - **Fix:** Use GDELT `count` (article volume) as proxy signal, recalibrate weights
-   - **Alt:** Lean harder on UCDP (already integrated) for fatality data
-
-4. `server/worldmonitor/conflict/v1/list-acled-events.ts` — Moderate impact
-   - Maps to `AcledConflictEvent` with `fatalities`, `actors[]`, `source`
-   - GDELT can provide `lat/lon`, `country`, `eventType` but not individual fatalities or actors
-   - Conflict map markers would lose detail tooltips
-
-5. `server/worldmonitor/unrest/v1/list-unrest-events.ts` — No change needed
-   - Already reads from Redis seed cache (`unrest:events:v1`)
-   - Seed script (Railway) is separate — update that independently
-
-6. `server/_shared/acled-auth.ts` — Can be deleted or kept dormant
-
-7. `api/health.js` — No change needed
-   - Health checks Redis keys, not ACLED directly
-   - Once risk scores populate via GDELT, health returns 200
-
-8. `src/services/country-instability.ts` — Frontend, ~1000 lines
-   - References ACLED event types in scoring
-   - If backend adapter maps GDELT → `AcledRawEvent`, frontend untouched
-
-**Files touched:** 3-4 server files + 1 new file
-**Risk:** Scoring accuracy degrades (no fatality data). Calibration needed.
-**Timeline:** ~4-6 hours implementation + testing
-
-### Option C: Expand UCDP role + disable ACLED gracefully (smallest useful change)
-- [x] UCDP already provides conflict events with fatalities and intensity levels
-- [x] Risk scores already have UCDP floor logic (`ucdpWar`, `ucdpMinor`)
-- [x] Expand UCDP ingestion in `computeCIIScores()` — fatalities, violence type mapping, time-decay
-- [x] Set ACLED fetcher to return `[]` immediately via `ACLED_DISABLED=true` env var
-- [x] Scores fall back to `BASELINE_RISK` + UCDP + other aux sources — still useful
-- [ ] Health recovers once `risk:scores:sebuf:v1` populates from non-ACLED sources (set `ACLED_DISABLED=true` on heimdal)
-
-**Files touched:** 2 files (`get-risk-scores.ts`, `acled.ts`)
-**Risk:** Less granular than ACLED (UCDP updates monthly, not daily)
-**Timeline:** ~1-2 hours
+- [x] UCDP expanded to fill ACLED gap (fatalities, violence type mapping, time-decay)
+- [x] `ACLED_DISABLED=true` env var gates all ACLED API calls
+- [x] Default set to `true` in `.env.example`, `docker-compose.yml`, heimdal `.env`
+- [x] Docs updated (README, SELF_HOSTING, ARCHITECTURE)
 
 ---
 

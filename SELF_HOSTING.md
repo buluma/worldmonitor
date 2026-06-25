@@ -45,8 +45,8 @@ services:
       FRED_API_KEY: ""            # https://fred.stlouisfed.org/docs/api/api_key.html (free)
       EIA_API_KEY: ""             # https://www.eia.gov/opendata/ (free)
 
-      # ⚔️ Conflict & Unrest
-      ACLED_ACCESS_TOKEN: ""      # https://acleddata.com (free for researchers)
+      # ⚔️ Conflict & Unrest (ACLED disabled by default — requires paid license)
+      ACLED_DISABLED: "true"      # Set to "" and add ACLED creds if you have a paid license
 
       # 🛰️ Earth Observation
       NASA_FIRMS_API_KEY: ""      # https://firms.modaps.eosdis.nasa.gov (free)
@@ -75,9 +75,9 @@ services:
 | Status | Keys |
 |--------|------|
 | 🟢 No key needed | Earthquakes, weather, natural events, UNHCR displacement, prediction markets, stablecoins, crypto, spending, climate anomalies, submarine cables, BIS data, cyber threats |
-| 🟢 Free signup | GROQ, FRED, EIA, NASA FIRMS, AISSTREAM, Finnhub, AviationStack, ACLED, OpenRouter |
+| 🟢 Free signup | GROQ, FRED, EIA, NASA FIRMS, AISSTREAM, Finnhub, AviationStack, OpenRouter |
 | 🟡 Free (limited) | OpenSky (higher rate limits with account) |
-| 🔴 Paid | Cloudflare Radar (internet outages) |
+| 🔴 Paid | Cloudflare Radar (internet outages), ACLED (conflict data — UCDP used as free fallback) |
 
 ## 🌱 Seeding Data
 
