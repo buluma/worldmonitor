@@ -9,7 +9,12 @@ const ENV = (() => {
 })();
 
 const WS_API_URL = ENV.VITE_WS_API_URL || '';
-const DEFAULT_WEB_API_URL = 'https://api.worldmonitor.app';
+
+const CLOUD_DOMAIN = 'worldmonitor.app';
+const CLOUD_API_ORIGIN = `https://api.${CLOUD_DOMAIN}`;
+const SELF_HOST_DOMAIN = 'wm.opsio.space';
+
+const DEFAULT_WEB_API_URL = CLOUD_API_ORIGIN;
 
 const DEFAULT_REMOTE_HOSTS: Record<string, string> = {
   tech: WS_API_URL,
@@ -119,9 +124,9 @@ export function getApiBaseUrl(): string {
 }
 
 export function isWorldMonitorWebHost(hostname: string): boolean {
-  return hostname === 'worldmonitor.app'
-    || hostname === 'www.worldmonitor.app'
-    || hostname.endsWith('.worldmonitor.app');
+  return hostname === CLOUD_DOMAIN
+    || hostname === `www.${CLOUD_DOMAIN}`
+    || hostname.endsWith(`.${CLOUD_DOMAIN}`);
 }
 
 export function getConfiguredWebApiBaseUrl(): string {
@@ -164,7 +169,7 @@ export function getRemoteApiBaseUrl(): string {
   if (fromHosts) return fromHosts;
 
   // Desktop builds may not set VITE_WS_API_URL; default to production.
-  if (isDesktopRuntime()) return 'https://wm.opsio.space';
+  if (isDesktopRuntime()) return `https://${SELF_HOST_DOMAIN}`;
   return '';
 }
 
@@ -208,9 +213,9 @@ function extractHostnames(...urls: (string | undefined)[]): string[] {
 }
 
 const APP_HOSTS = new Set([
-  'wm.opsio.space',
-  'tech.wm.opsio.space',
-  'api.worldmonitor.app',
+  SELF_HOST_DOMAIN,
+  `tech.${SELF_HOST_DOMAIN}`,
+  `api.${CLOUD_DOMAIN}`,
   'localhost',
   '127.0.0.1',
   ...extractHostnames(WS_API_URL, ENV.VITE_WS_RELAY_URL),
@@ -220,7 +225,7 @@ function isAppOriginUrl(urlStr: string): boolean {
   try {
     const u = new URL(urlStr);
     const host = u.hostname;
-    return APP_HOSTS.has(host) || host.endsWith('.wm.opsio.space');
+    return APP_HOSTS.has(host) || host.endsWith(`.${SELF_HOST_DOMAIN}`);
   } catch {
     return false;
   }
@@ -722,7 +727,7 @@ export function installRuntimeFetchPatch(): void {
   (window as unknown as Record<string, unknown>).__wmFetchPatched = true;
 }
 
-const ALLOWED_REDIRECT_HOSTS = /^https:\/\/([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)*worldmonitor\.app(:\d+)?$/;
+const ALLOWED_REDIRECT_HOSTS = new RegExp(`^https://([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)*${CLOUD_DOMAIN.replace('.', '\\.')}(:\\d+)?$`);
 
 function isAllowedRedirectTarget(url: string): boolean {
   try {
