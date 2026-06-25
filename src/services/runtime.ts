@@ -118,7 +118,7 @@ export function getApiBaseUrl(): string {
   return `http://127.0.0.1:${getLocalApiPort()}`;
 }
 
-function isWorldMonitorWebHost(hostname: string): boolean {
+export function isWorldMonitorWebHost(hostname: string): boolean {
   return hostname === 'worldmonitor.app'
     || hostname === 'www.worldmonitor.app'
     || hostname.endsWith('.worldmonitor.app');

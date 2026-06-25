@@ -1086,13 +1086,6 @@ export class DataLoaderManager implements AppModule {
       const threatTimeline = this.ctx.panels['threat-timeline'] as { refresh?: () => void } | undefined;
       threatTimeline?.refresh?.();
 
-      const hfPanel = this.ctx.panels['hf-propagation'] as { refresh?: (data: unknown) => void } | undefined;
-      const hfData = getHydratedData('hfPropagation');
-      if (hfPanel?.refresh && hfData) hfPanel.refresh(hfData);
-
-      const adsbPanel = this.ctx.panels['local-adsb'] as { refresh?: (data: unknown) => void } | undefined;
-      const adsbData = getHydratedData('localAdsb');
-      if (adsbPanel?.refresh && adsbData) adsbPanel.refresh(adsbData);
 
       const geoLocated = this.ctx.latestClusters
         .filter((c): c is typeof c & { lat: number; lon: number } => c.lat != null && c.lon != null)
@@ -1540,31 +1533,15 @@ export class DataLoaderManager implements AppModule {
     }
 
     try {
-      // Try hydrated bootstrap data first (instant, no RPC)
-      const hydrated = getHydratedData('techEvents') as { events?: Array<{ id: string; title: string; type: string; location: string; coords?: { lat: number; lng: number; country: string; virtual?: boolean }; startDate: string; endDate: string; url: string }> } | undefined;
-      let events = hydrated?.events;
-
-      if (!events?.length) {
-        // Fallback: RPC call
-        const client = new ResearchServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
-        const data = await client.listTechEvents({
-          type: 'conference',
-          mappable: true,
-          days: 90,
-          limit: 50,
-        });
-        if (!data.success) throw new Error(data.error || 'Unknown error');
-        events = data.events;
-      } else {
-        // Filter hydrated data to match map layer needs (conferences, mappable, 90 days)
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() + 90);
-        events = events.filter(e =>
-          e.type === 'conference' &&
-          e.coords && !e.coords.virtual &&
-          new Date(e.startDate) <= cutoff,
-        ).slice(0, 50);
-      }
+      const client = new ResearchServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
+      const data = await client.listTechEvents({
+        type: 'conference',
+        mappable: true,
+        days: 90,
+        limit: 50,
+      });
+      if (!data.success) throw new Error(data.error || 'Unknown error');
+      const events = data.events;
 
       const now = new Date();
       const mapEvents = (events || []).map((e: any) => ({
