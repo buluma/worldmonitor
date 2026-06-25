@@ -178,8 +178,8 @@ echo "$SUMMARY"
 # Send summary to Telegram if configured
 ALERT_TOKEN="${ALERT_TELEGRAM_BOT_TOKEN:-}"
 ALERT_CHAT="${ALERT_TELEGRAM_CHAT_ID:-}"
-if [ -n "$ALERT_TOKEN" ] && [ -n "$ALERT_CHAT" ] && [ "$fail" -gt 0 ] || [ "$timedout" -gt 0 ]; then
-  if [ -n "$ALERT_TOKEN" ] && [ -n "$ALERT_CHAT" ]; then
+if [ -n "$ALERT_TOKEN" ] && [ -n "$ALERT_CHAT" ]; then
+  if [ "$fail" -gt 0 ] || [ "$timedout" -gt 0 ]; then
     MSG="🌍 *Seeder Run*: $SUMMARY"
     curl -s -X POST "https://api.telegram.org/bot${ALERT_TOKEN}/sendMessage" \
       -d chat_id="$ALERT_CHAT" \
