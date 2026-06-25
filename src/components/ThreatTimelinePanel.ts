@@ -31,7 +31,7 @@ export class ThreatTimelinePanel extends Panel {
       showCount: false,
       infoTooltip: 'Threat-level distribution from intelligence insights.',
     });
-    this.setContent('<div class="threat-tl-empty">Waiting for insight data…</div>');
+    this.showLoading('Analyzing threats…');
   }
 
   public refresh(): void {

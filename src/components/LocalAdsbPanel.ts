@@ -46,7 +46,7 @@ export class LocalAdsbPanel extends Panel {
       closable: true,
       infoTooltip: 'Aircraft tracked by your local ADS-B receiver.',
     });
-    this.setContent('<div style="padding:12px;color:var(--text-dim)">Waiting for feeder data…</div>');
+    this.showLoading('Connecting to feeder…');
     const data = getHydratedData('localAdsb') as LocalAdsbData | undefined;
     if (data) this.refresh(data);
   }

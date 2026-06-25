@@ -47,14 +47,14 @@ export class HFPropagationPanel extends Panel {
       showCount: false,
       infoTooltip: 'Solar and ionospheric conditions affecting HF radio propagation. Data from hamqsl.com.',
     });
-    this.setContent('<div style="padding:12px;color:var(--text-dim)">Waiting for propagation data…</div>');
+    this.showLoading('Fetching solar data…');
     const data = getHydratedData('hfPropagation') as PropagationData | undefined;
     if (data) this.refresh(data);
   }
 
   public refresh(data: PropagationData): void {
     if (!data || !data.solarFlux) {
-      this.setContent('<div style="padding:12px;color:var(--text-dim)">No propagation data available.</div>');
+      this.showError('No propagation data available');
       return;
     }
 
