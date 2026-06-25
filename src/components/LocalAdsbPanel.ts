@@ -2,6 +2,8 @@ import { Panel } from './Panel';
 import { getHydratedData } from '@/services/bootstrap';
 import { escapeHtml } from '@/utils/sanitize';
 
+const NM_TO_DEG = 1 / 60; // 1 nautical mile ≈ 1 arc-minute
+
 interface LocalAircraft {
   hex: string;
   callsign: string;
@@ -46,7 +48,7 @@ export class LocalAdsbPanel extends Panel {
       closable: true,
       infoTooltip: 'Aircraft tracked by your local ADS-B receiver.',
     });
-    this.setContent('<div style="padding:12px;color:var(--text-dim)">Waiting for feeder data…</div>');
+    this.showLoading('Connecting to feeder…');
     const data = getHydratedData('localAdsb') as LocalAdsbData | undefined;
     if (data) this.refresh(data);
   }
@@ -97,6 +99,8 @@ export class LocalAdsbPanel extends Panel {
         <div style="text-align:center"><div style="font-size:13px;font-weight:600">${s.gainDb}</div><div style="font-size:8px;color:var(--text-dim)">GAIN dB</div></div>
       </div>` : '';
 
+    const radarId = 'adsb-radar-' + Date.now();
+
     this.setContent(`
       <div style="padding:4px 12px 8px">
         <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:6px">
@@ -104,9 +108,110 @@ export class LocalAdsbPanel extends Panel {
           <span>${agoStr}</span>
         </div>
         ${statsRow}
+        <canvas id="${radarId}" style="width:100%;height:140px;margin-bottom:8px;border-radius:4px"></canvas>
         ${rows}
         ${sorted.length > 20 ? `<div style="font-size:10px;color:var(--text-dim);padding:6px 0">+ ${sorted.length - 20} more</div>` : ''}
       </div>
     `);
+
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById(radarId) as HTMLCanvasElement | null;
+      if (canvas) this.drawRadar(canvas, data.feeder, data.aircraft);
+    });
+  }
+
+  private drawRadar(
+    canvas: HTMLCanvasElement,
+    feeder: { lat: number; lon: number; rangeNm: number },
+    aircraft: LocalAircraft[],
+  ): void {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width;
+    const h = 140;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const maxR = Math.min(cx, cy) - 8;
+    const rangeDeg = feeder.rangeNm * NM_TO_DEG;
+
+    const style = getComputedStyle(canvas);
+    const dimColor = style.getPropertyValue('--text-dim').trim() || 'rgba(255,255,255,0.2)';
+    const accentColor = style.getPropertyValue('--status-live').trim() || '#44ff88';
+    const warnColor = style.getPropertyValue('--semantic-elevated').trim() || '#ffaa00';
+    const critColor = style.getPropertyValue('--semantic-critical').trim() || '#ff4444';
+
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, maxR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = dimColor;
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i <= 3; i++) {
+      const r = (maxR * i) / 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(cx - maxR, cy);
+    ctx.lineTo(cx + maxR, cy);
+    ctx.moveTo(cx, cy - maxR);
+    ctx.lineTo(cx, cy + maxR);
+    ctx.stroke();
+
+    ctx.fillStyle = dimColor;
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${feeder.rangeNm}nm`, cx + maxR - 2, cy - 2);
+
+    ctx.fillStyle = accentColor;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    const cosLat = Math.cos((feeder.lat * Math.PI) / 180);
+    for (const a of aircraft) {
+      const dLat = a.lat - feeder.lat;
+      const dLon = (a.lon - feeder.lon) * cosLat;
+      const px = cx + (dLon / rangeDeg) * maxR;
+      const py = cy - (dLat / rangeDeg) * maxR;
+
+      if (px < 0 || px > w || py < 0 || py > h) continue;
+
+      let color = accentColor;
+      if (a.squawk === '7700' || a.squawk === '7500') color = critColor;
+      else if (a.squawk === '7600') color = warnColor;
+      else if (a.onGround) color = dimColor;
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (a.track != null && !a.onGround) {
+        const rad = ((a.track - 90) * Math.PI) / 180;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + Math.cos(rad) * 8, py + Math.sin(rad) * 8);
+        ctx.stroke();
+      }
+
+      if (a.callsign) {
+        ctx.fillStyle = color;
+        ctx.font = '7px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(a.callsign, px + 5, py + 2);
+      }
+    }
   }
 }

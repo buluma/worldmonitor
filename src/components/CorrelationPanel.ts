@@ -84,12 +84,14 @@ export class CorrelationPanel extends Panel {
     this.setCount(cards.length);
 
     if (cards.length === 0) {
+      this.setCompact(true);
       replaceChildren(this.content, h('div', {
         className: 'correlation-empty',
         style: 'padding:12px;text-align:center;opacity:0.5;font-size:11px;',
       }, 'No active convergence detected'));
       return;
     }
+    this.setCompact(false);
 
     const cardEls = cards.map(card => this.buildCard(card));
     replaceChildren(this.content, h('div', { className: 'correlation-cards' }, ...cardEls));

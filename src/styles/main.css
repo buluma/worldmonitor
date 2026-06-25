@@ -1224,6 +1224,20 @@ canvas,
 
 /* .panel.resized: Custom height set - use grid-row span for height */
 
+.panel.panel-compact {
+  min-height: 0 !important;
+  grid-row: span 1 !important;
+}
+
+.panel.panel-compact .panel-content {
+  display: none;
+}
+
+.panel.panel-compact .panel-resize-handle,
+.panel.panel-compact .panel-col-resize-handle {
+  display: none;
+}
+
 /* Row span classes for resizable panels */
 .panel.span-1 {
   grid-row: span 1 !important;

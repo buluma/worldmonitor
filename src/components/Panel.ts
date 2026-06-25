@@ -629,6 +629,10 @@ export class Panel {
   }
 
 
+  public setCompact(compact: boolean): void {
+    this.element.classList.toggle('panel-compact', compact);
+  }
+
   protected setDataBadge(state: 'live' | 'cached' | 'unavailable', detail?: string): void {
     if (!this.statusBadgeEl) return;
     const labels = {

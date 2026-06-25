@@ -43,9 +43,10 @@ export class EnergyComplexPanel extends Panel {
     ].filter(Boolean);
 
     if (metrics.length === 0 && this.tape.length === 0) {
-      this.setContent(`<div class="economic-empty">${t('components.energyComplex.noData')}</div>`);
+      this.showError(t('components.energyComplex.noData'));
       return;
     }
+    this.setErrorState(false);
 
     const footerParts = [];
     if (hasAnalytics(this.analytics)) footerParts.push('EIA');
