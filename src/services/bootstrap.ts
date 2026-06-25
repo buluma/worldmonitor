@@ -30,9 +30,11 @@ let lastHydrationState: BootstrapHydrationState = {
 };
 
 export function getHydratedData(key: string): unknown | undefined {
-  const val = hydrationCache.get(key);
-  if (val !== undefined) hydrationCache.delete(key);
-  return val;
+  return hydrationCache.get(key);
+}
+
+export function clearHydrationCache(): void {
+  hydrationCache.clear();
 }
 
 export function markBootstrapAsLive(): void {
