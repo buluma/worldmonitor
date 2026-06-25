@@ -5,7 +5,8 @@ public/blog/
 .DS_Store
 *.log
 .env
-.env.local
+.env.*
+!.env.example
 .playwright-mcp/
 *-network.txt
 .vercel
@@ -14,8 +15,6 @@ api/\[\[...path\]\].js
 .claude/
 .cursor/
 CLAUDE.md
-.env.vercel-backup
-.env.vercel-export
 .agent/
 .factory/
 .windsurf/
