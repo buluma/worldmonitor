@@ -11,7 +11,7 @@
  *   ADSB_FEEDER_RANGE_NM — max receiver range in nautical miles (default 300)
  */
 
-import { loadEnvFile, getRedisCredentials, redisSet } from './_seed-utils.mjs';
+import { loadEnvFile, runSeed } from './_seed-utils.mjs';
 
 loadEnvFile(import.meta.url);
 
@@ -20,21 +20,27 @@ const FEEDER_LAT = Number(process.env.ADSB_FEEDER_LAT || '-1.37139');
 const FEEDER_LON = Number(process.env.ADSB_FEEDER_LON || '36.66347');
 const FEEDER_RANGE_NM = Number(process.env.ADSB_FEEDER_RANGE_NM || '300');
 const KEY = 'adsb:local:v1';
-const TTL = 120;
+const TTL = 150;
 
 if (!FEEDER_URL) {
   console.warn('[local-adsb] ADSB_FEEDER_URL not set — skipping');
   process.exit(0);
 }
 
-async function fetchAircraft() {
-  const resp = await fetch(FEEDER_URL, { signal: AbortSignal.timeout(10_000) });
-  if (!resp.ok) throw new Error(`Feeder HTTP ${resp.status}`);
-  const data = await resp.json();
+const statsUrl = FEEDER_URL.replace('/data/aircraft.json', '/data/stats.json');
+
+async function fetchData() {
+  const [aircraftResp, statsResp] = await Promise.all([
+    fetch(FEEDER_URL, { signal: AbortSignal.timeout(10_000) }),
+    fetch(statsUrl, { signal: AbortSignal.timeout(5_000) }).catch(() => null),
+  ]);
+
+  if (!aircraftResp.ok) throw new Error(`Feeder HTTP ${aircraftResp.status}`);
+  const data = await aircraftResp.json();
   const raw = data.aircraft || [];
 
   const aircraft = raw
-    .filter(a => a.lat != null && a.lon != null)
+    .filter(a => a.lat != null && a.lon != null && (a.seen ?? 999) < 58)
     .map(a => ({
       hex: a.hex || '',
       callsign: (a.flight || '').trim(),
@@ -56,11 +62,9 @@ async function fetchAircraft() {
     }));
 
   let stats = null;
-  try {
-    const statsUrl = FEEDER_URL.replace('/data/aircraft.json', '/data/stats.json');
-    const sr = await fetch(statsUrl, { signal: AbortSignal.timeout(5_000) });
-    if (sr.ok) {
-      const sd = await sr.json();
+  if (statsResp?.ok) {
+    try {
+      const sd = await statsResp.json();
       const l = (sd.last1min || {}).local || {};
       const t = (sd.total || {}).local || {};
       stats = {
@@ -73,8 +77,16 @@ async function fetchAircraft() {
         maxRangeNm: (sd.total || {}).max_distance_in_nautical_miles ?? 0,
         tracksTotal: ((sd.total || {}).tracks || {}).all ?? 0,
       };
+    } catch {}
+  }
+
+  console.log(`  Aircraft: ${aircraft.length}/${raw.length} with position (stale filtered)`);
+  if (aircraft.length > 0) {
+    for (const a of aircraft.slice(0, 5)) {
+      console.log(`  ${a.hex} ${(a.callsign || '?').padEnd(8)} alt=${a.altBaro ?? '?'} gs=${a.gs ?? '?'}`);
     }
-  } catch {}
+    if (aircraft.length > 5) console.log(`  ... and ${aircraft.length - 5} more`);
+  }
 
   return {
     aircraft,
@@ -91,24 +103,9 @@ async function fetchAircraft() {
   };
 }
 
-async function run() {
-  console.log(`[local-adsb] Fetching from ${FEEDER_URL}...`);
-  const data = await fetchAircraft();
-  console.log(`  Aircraft: ${data.withPosition}/${data.total} with position`);
-
-  if (data.withPosition > 0) {
-    for (const a of data.aircraft.slice(0, 5)) {
-      console.log(`  ${a.hex} ${(a.callsign || '?').padEnd(8)} alt=${a.altBaro ?? '?'} gs=${a.gs ?? '?'}`);
-    }
-    if (data.aircraft.length > 5) console.log(`  ... and ${data.aircraft.length - 5} more`);
-  }
-
-  const { url, token } = getRedisCredentials();
-  await redisSet(url, token, KEY, data, TTL);
-  console.log(`[local-adsb] Written to ${KEY} (TTL ${TTL}s)`);
-}
-
-run().catch(err => {
-  console.error('FATAL:', err.message || err);
-  process.exit(1);
+await runSeed('adsb', 'local', KEY, fetchData, {
+  ttlSeconds: TTL,
+  lockTtlMs: 55_000,
+  validateFn: data => Array.isArray(data?.aircraft),
+  recordCount: data => data.withPosition,
 });

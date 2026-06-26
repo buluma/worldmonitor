@@ -12,6 +12,7 @@ interface LocalAircraft {
   altBaro: number | null;
   gs: number | null;
   track: number | null;
+  vertRate: number | null;
   type: string | null;
   registration: string | null;
   onGround: boolean;
@@ -72,6 +73,7 @@ export class LocalAdsbPanel extends Panel {
     const rows = sorted.slice(0, 20).map(a => {
       const alt = a.onGround ? 'GND' : a.altBaro != null ? `${(a.altBaro / 1000).toFixed(1)}k` : '?';
       const speed = a.gs != null ? `${Math.round(a.gs)}kt` : '';
+      const vr = !a.onGround && a.vertRate != null ? (a.vertRate > 200 ? '▲' : a.vertRate < -200 ? '▼' : '') : '';
       const id = a.callsign || a.hex;
       const typeStr = a.type ? ` · ${escapeHtml(a.type)}` : '';
       const regStr = a.registration ? ` (${escapeHtml(a.registration)})` : '';
@@ -84,7 +86,7 @@ export class LocalAdsbPanel extends Panel {
         <div>
           <span style="font-weight:600;font-family:var(--font-mono,monospace)">${escapeHtml(id)}</span>${regStr}${typeStr}${sqk}
         </div>
-        <div style="color:var(--text-dim);white-space:nowrap">${alt} ${speed}</div>
+        <div style="color:var(--text-dim);white-space:nowrap">${vr}${alt} ${speed}</div>
       </div>`;
     }).join('');
 
@@ -148,6 +150,8 @@ export class LocalAdsbPanel extends Panel {
     const accentColor = cssVar('--status-live', '#44ff88');
     const warnColor = cssVar('--semantic-elevated', '#ffaa00');
     const critColor = cssVar('--semantic-critical', '#ff4444');
+    const lowColor = cssVar('--status-stale', '#ffaa44');
+    const highColor = cssVar('--status-info', '#44aaff');
 
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
@@ -156,11 +160,15 @@ export class LocalAdsbPanel extends Panel {
 
     ctx.strokeStyle = dimColor;
     ctx.lineWidth = 0.5;
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'right';
     for (let i = 1; i <= 3; i++) {
       const r = (maxR * i) / 3;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.fillStyle = dimColor;
+      ctx.fillText(`${Math.round(feeder.rangeNm * i / 3)}nm`, cx + r - 2, cy - 2);
     }
 
     ctx.beginPath();
@@ -169,11 +177,6 @@ export class LocalAdsbPanel extends Panel {
     ctx.moveTo(cx, cy - maxR);
     ctx.lineTo(cx, cy + maxR);
     ctx.stroke();
-
-    ctx.fillStyle = dimColor;
-    ctx.font = '8px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${feeder.rangeNm}nm`, cx + maxR - 2, cy - 2);
 
     ctx.fillStyle = accentColor;
     ctx.beginPath();
@@ -193,10 +196,15 @@ export class LocalAdsbPanel extends Panel {
       if (a.squawk === '7700' || a.squawk === '7500') color = critColor;
       else if (a.squawk === '7600') color = warnColor;
       else if (a.onGround) color = dimColor;
+      else if (typeof a.altBaro === 'number') {
+        if (a.altBaro < 10000) color = lowColor;
+        else if (a.altBaro > 35000) color = highColor;
+      }
 
+      const dotR = a.rssi != null ? Math.max(2, Math.min(4, 2 + ((a.rssi + 45) / 25) * 2)) : 2.5;
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py, dotR, 0, Math.PI * 2);
       ctx.fill();
 
       if (a.track != null && !a.onGround) {
