@@ -304,6 +304,68 @@ export interface NationalDebtEntry {
   source: string;
 }
 
+export interface BlsObservation { year: string; period: string; periodName: string; value: string; }
+export interface BlsSeries { seriesId: string; title: string; units: string; observations: BlsObservation[]; }
+export interface GetBlsSeriesRequest { seriesId: string; limit: number; }
+export interface GetBlsSeriesResponse { series?: BlsSeries; }
+export interface CrudeInventoryWeek { period: string; stocksMb: number; weeklyChangeMb?: number; }
+export interface GetCrudeInventoriesRequest {}
+export interface GetCrudeInventoriesResponse { weeks: CrudeInventoryWeek[]; latestPeriod: string; }
+export interface EcbFxRate { pair: string; rate: number; date: string; change1d: number; }
+export interface GetEcbFxRatesRequest {}
+export interface GetEcbFxRatesResponse { rates: EcbFxRate[]; updatedAt: string; seededAt: number; unavailable: boolean; }
+export interface GetEconomicCalendarRequest { fromDate: string; toDate: string; }
+export interface EconomicEvent { event: string; country: string; date: string; impact: string; actual: string; estimate: string; previous: string; unit: string; }
+export interface GetEconomicCalendarResponse { events: EconomicEvent[]; fromDate: string; toDate: string; total: number; unavailable: boolean; }
+export interface EconomicStressComponent { id: string; label: string; rawValue: number; score: number; weight: number; missing: boolean; }
+export interface GetEconomicStressRequest {}
+export interface GetEconomicStressResponse { compositeScore: number; label: string; components: EconomicStressComponent[]; seededAt: string; unavailable: boolean; }
+export interface EnergyCrisisPolicy { country: string; countryCode: string; category: string; sector: string; measure: string; dateAnnounced: string; status: string; }
+export interface GetEnergyCrisisPoliciesRequest { countryCode: string; category: string; }
+export interface GetEnergyCrisisPoliciesResponse { source: string; sourceUrl: string; context: string; policies: EnergyCrisisPolicy[]; updatedAt: string; unavailable: boolean; }
+export interface GetEuFsiRequest {}
+export interface EuFsiObservation { date: string; value: number; }
+export interface GetEuFsiResponse { latestValue: number; latestDate: string; label: string; history: EuFsiObservation[]; seededAt: string; unavailable: boolean; stale: boolean; }
+export interface EuGasStorageHistoryEntry { date: string; fillPct: number; gasTwh: number; }
+export interface GetEuGasStorageRequest {}
+export interface GetEuGasStorageResponse { fillPct: number; fillPctChange1d: number; gasDaysConsumption: number; trend: string; history: EuGasStorageHistoryEntry[]; seededAt: number; updatedAt: string; unavailable: boolean; }
+export interface GetEuYieldCurveRequest {}
+export interface EuYieldCurveData { date: string; rates: Record<string, number>; source: string; updatedAt: string; }
+export interface GetEuYieldCurveResponse { data?: EuYieldCurveData; unavailable: boolean; }
+export interface EurostatMetric { value: number; date: string; unit: string; priorValue: number; hasPrior: boolean; }
+export interface EurostatCountryEntry { cpi?: EurostatMetric; unemployment?: EurostatMetric; gdpGrowth?: EurostatMetric; }
+export interface GetEurostatCountryDataRequest {}
+export interface GetEurostatCountryDataResponse { countries: Record<string, EurostatCountryEntry>; seededAt: number; unavailable: boolean; }
+export interface FaoFoodPricePoint { date: string; ffpi: number; meat: number; dairy: number; cereals: number; oils: number; sugar: number; }
+export interface GetFaoFoodPriceIndexRequest {}
+export interface GetFaoFoodPriceIndexResponse { points: FaoFoodPricePoint[]; fetchedAt: string; currentFfpi: number; momPct: number; yoyPct: number; }
+export interface NatGasStorageWeek { period: string; storBcf: number; weeklyChangeBcf?: number; }
+export interface GetNatGasStorageRequest {}
+export interface GetNatGasStorageResponse { weeks: NatGasStorageWeek[]; latestPeriod: string; }
+export interface OilInventoriesSprWeek { period: string; stocksMb: number; }
+export interface OilInventoriesSprSnapshot { latestStocksMb: number; changeWow: number; weeks: OilInventoriesSprWeek[]; }
+export interface OilInventoriesEuGasDay { date: string; fillPct: number; }
+export interface OilInventoriesEuGas { fillPct: number; fillPctChange1d: number; trend: string; history: OilInventoriesEuGasDay[]; }
+export interface OilInventoriesIeaMember { iso2: string; daysOfCover?: number; netExporter: boolean; belowObligation: boolean; }
+export interface OilInventoriesRegionStats { avgDays?: number; minDays?: number; countBelowObligation?: number; }
+export interface OilInventoriesIeaStocks { dataMonth: string; members: OilInventoriesIeaMember[]; europe?: OilInventoriesRegionStats; asiaPacific?: OilInventoriesRegionStats; northAmerica?: OilInventoriesRegionStats; }
+export interface OilInventoriesRefinery { inputsMbpd: number; period: string; }
+export interface CrudeInventoryWeekRef { period: string; stocksMb: number; weeklyChangeMb?: number; }
+export interface NatGasWeekRef { period: string; storBcf: number; weeklyChangeBcf?: number; }
+export interface GetOilInventoriesRequest {}
+export interface GetOilInventoriesResponse { crudeWeeks: CrudeInventoryWeekRef[]; spr?: OilInventoriesSprSnapshot; natGasWeeks: NatGasWeekRef[]; euGas?: OilInventoriesEuGas; ieaStocks?: OilInventoriesIeaStocks; refinery?: OilInventoriesRefinery; updatedAt: string; }
+export interface OilStocksAnalysisMember { iso2: string; daysOfCover?: number; netExporter: boolean; belowObligation: boolean; obligationMet: boolean; rank: number; vsObligation?: number; }
+export interface OilStocksRegionalSummaryEurope { avgDays?: number; minDays?: number; countBelowObligation: number; }
+export interface OilStocksRegionalSummaryAsiaPacific { avgDays?: number; minDays?: number; countBelowObligation: number; }
+export interface OilStocksRegionalSummaryNorthAmerica { netExporters: number; avgDays?: number; }
+export interface OilStocksRegionalSummary { europe?: OilStocksRegionalSummaryEurope; asiaPacific?: OilStocksRegionalSummaryAsiaPacific; northAmerica?: OilStocksRegionalSummaryNorthAmerica; }
+export interface GetOilStocksAnalysisRequest {}
+export interface GetOilStocksAnalysisResponse { updatedAt: string; dataMonth: string; ieaMembers: OilStocksAnalysisMember[]; belowObligation: string[]; regionalSummary?: OilStocksRegionalSummary; unavailable: boolean; }
+export interface FuelPrice { usdPrice: number; localPrice: number; grade: string; source: string; available: boolean; wowPct: number; observedAt: string; }
+export interface FuelCountryPrice { code: string; name: string; currency: string; flag: string; gasoline?: FuelPrice; diesel?: FuelPrice; fxRate: number; }
+export interface ListFuelPricesRequest {}
+export interface ListFuelPricesResponse { countries: FuelCountryPrice[]; fetchedAt: string; cheapestGasoline: string; cheapestDiesel: string; mostExpensiveGasoline: string; mostExpensiveDiesel: string; wowAvailable: boolean; prevFetchedAt: string; sourceCount: number; countryCount: number; }
+
 export interface FieldViolation {
   field: string;
   description: string;
@@ -361,6 +423,21 @@ export interface EconomicServiceHandler {
   listGroceryBasketPrices(ctx: ServerContext, req: ListGroceryBasketPricesRequest): Promise<ListGroceryBasketPricesResponse>;
   listBigMacPrices(ctx: ServerContext, req: ListBigMacPricesRequest): Promise<ListBigMacPricesResponse>;
   getNationalDebt(ctx: ServerContext, req: GetNationalDebtRequest): Promise<GetNationalDebtResponse>;
+  getBlsSeries(ctx: ServerContext, req: GetBlsSeriesRequest): Promise<GetBlsSeriesResponse>;
+  getCrudeInventories(ctx: ServerContext, req: GetCrudeInventoriesRequest): Promise<GetCrudeInventoriesResponse>;
+  getEcbFxRates(ctx: ServerContext, req: GetEcbFxRatesRequest): Promise<GetEcbFxRatesResponse>;
+  getEconomicCalendar(ctx: ServerContext, req: GetEconomicCalendarRequest): Promise<GetEconomicCalendarResponse>;
+  getEconomicStress(ctx: ServerContext, req: GetEconomicStressRequest): Promise<GetEconomicStressResponse>;
+  getEnergyCrisisPolicies(ctx: ServerContext, req: GetEnergyCrisisPoliciesRequest): Promise<GetEnergyCrisisPoliciesResponse>;
+  getEuFsi(ctx: ServerContext, req: GetEuFsiRequest): Promise<GetEuFsiResponse>;
+  getEuGasStorage(ctx: ServerContext, req: GetEuGasStorageRequest): Promise<GetEuGasStorageResponse>;
+  getEuYieldCurve(ctx: ServerContext, req: GetEuYieldCurveRequest): Promise<GetEuYieldCurveResponse>;
+  getEurostatCountryData(ctx: ServerContext, req: GetEurostatCountryDataRequest): Promise<GetEurostatCountryDataResponse>;
+  getFaoFoodPriceIndex(ctx: ServerContext, req: GetFaoFoodPriceIndexRequest): Promise<GetFaoFoodPriceIndexResponse>;
+  getNatGasStorage(ctx: ServerContext, req: GetNatGasStorageRequest): Promise<GetNatGasStorageResponse>;
+  getOilInventories(ctx: ServerContext, req: GetOilInventoriesRequest): Promise<GetOilInventoriesResponse>;
+  getOilStocksAnalysis(ctx: ServerContext, req: GetOilStocksAnalysisRequest): Promise<GetOilStocksAnalysisResponse>;
+  listFuelPrices(ctx: ServerContext, req: ListFuelPricesRequest): Promise<ListFuelPricesResponse>;
 }
 
 export function createEconomicServiceRoutes(
@@ -864,6 +941,42 @@ export function createEconomicServiceRoutes(
         }
       },
     },
+    ...([
+      { path: "/api/economic/v1/get-bls-series", method: "getBlsSeries", reqBuilder: (url: URL) => ({ seriesId: url.searchParams.get("series_id") ?? "", limit: Number(url.searchParams.get("limit") ?? 0) }) as GetBlsSeriesRequest },
+      { path: "/api/economic/v1/get-crude-inventories", method: "getCrudeInventories", reqBuilder: () => ({} as GetCrudeInventoriesRequest) },
+      { path: "/api/economic/v1/get-ecb-fx-rates", method: "getEcbFxRates", reqBuilder: () => ({} as GetEcbFxRatesRequest) },
+      { path: "/api/economic/v1/get-economic-calendar", method: "getEconomicCalendar", reqBuilder: (url: URL) => ({ fromDate: url.searchParams.get("fromDate") ?? "", toDate: url.searchParams.get("toDate") ?? "" }) as GetEconomicCalendarRequest },
+      { path: "/api/economic/v1/get-economic-stress", method: "getEconomicStress", reqBuilder: () => ({} as GetEconomicStressRequest) },
+      { path: "/api/economic/v1/get-energy-crisis-policies", method: "getEnergyCrisisPolicies", reqBuilder: (url: URL) => ({ countryCode: url.searchParams.get("country_code") ?? "", category: url.searchParams.get("category") ?? "" }) as GetEnergyCrisisPoliciesRequest },
+      { path: "/api/economic/v1/get-eu-fsi", method: "getEuFsi", reqBuilder: () => ({} as GetEuFsiRequest) },
+      { path: "/api/economic/v1/get-eu-gas-storage", method: "getEuGasStorage", reqBuilder: () => ({} as GetEuGasStorageRequest) },
+      { path: "/api/economic/v1/get-eu-yield-curve", method: "getEuYieldCurve", reqBuilder: () => ({} as GetEuYieldCurveRequest) },
+      { path: "/api/economic/v1/get-eurostat-country-data", method: "getEurostatCountryData", reqBuilder: () => ({} as GetEurostatCountryDataRequest) },
+      { path: "/api/economic/v1/get-fao-food-price-index", method: "getFaoFoodPriceIndex", reqBuilder: () => ({} as GetFaoFoodPriceIndexRequest) },
+      { path: "/api/economic/v1/get-nat-gas-storage", method: "getNatGasStorage", reqBuilder: () => ({} as GetNatGasStorageRequest) },
+      { path: "/api/economic/v1/get-oil-inventories", method: "getOilInventories", reqBuilder: () => ({} as GetOilInventoriesRequest) },
+      { path: "/api/economic/v1/get-oil-stocks-analysis", method: "getOilStocksAnalysis", reqBuilder: () => ({} as GetOilStocksAnalysisRequest) },
+      { path: "/api/economic/v1/list-fuel-prices", method: "listFuelPrices", reqBuilder: () => ({} as ListFuelPricesRequest) },
+    ] as const).map(({ path, method, reqBuilder }) => ({
+      method: "GET" as const,
+      path,
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const url = new URL(req.url);
+          const ctx: ServerContext = { request: req, pathParams: {}, headers: Object.fromEntries(req.headers.entries()) };
+          const body = reqBuilder(url);
+          const result = await (handler as any)[method](ctx, body);
+          return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), { status: 400, headers: { "Content-Type": "application/json" } });
+          }
+          if (options?.onError) return options.onError(err, req);
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), { status: 500, headers: { "Content-Type": "application/json" } });
+        }
+      },
+    })),
   ];
 }
 

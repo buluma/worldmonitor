@@ -47,6 +47,15 @@ export const REFRESH_INTERVALS = {
   groceryBasket: 6 * 60 * 60 * 1000, // unchanged (6h)
   intelligence: 20 * 60 * 1000, // 15min → 20min
   correlationEngine: 10 * 60 * 1000, // 5min → 10min
+  // Wave-1 economic panels (data seeded on Railway, refresh daily/hourly)
+  oilInventories: 6 * 60 * 60 * 1000,      // 6h — EIA weekly data
+  fuelPrices: 6 * 60 * 60 * 1000,           // 6h — weekly GlobalPetrolPrices
+  energyCrisis: 4 * 60 * 60 * 1000,         // 4h — IEA policy tracker
+  macroTiles: 6 * 60 * 60 * 1000,           // 6h — FRED/Eurostat
+  fsi: 30 * 60 * 1000,                       // 30min — market stress composite
+  yieldCurve: 60 * 60 * 1000,               // 1h — FRED/ECB
+  economicCalendar: 60 * 60 * 1000,         // 1h — upcoming events
+  faoFoodPriceIndex: 24 * 60 * 60 * 1000,  // 24h — FAO monthly data
 };
 
 // Monitor colors - shared

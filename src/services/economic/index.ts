@@ -26,6 +26,7 @@ import {
   type BisCreditToGdp,
   type GetNationalDebtResponse,
   type NationalDebtEntry,
+  type GetEurostatCountryDataResponse,
 } from '@/generated/client/worldmonitor/economic/v1/service_client';
 import { createCircuitBreaker } from '@/utils';
 import { getCSSColor } from '@/utils';
@@ -664,5 +665,29 @@ export async function fetchBisData(): Promise<BisData> {
     };
   } catch {
     return empty;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Eurostat Country Data (Wave-1 port — getEurostatCountryData RPC)
+// ---------------------------------------------------------------------------
+
+export type { GetEurostatCountryDataResponse };
+
+const emptyEurostatFallback: GetEurostatCountryDataResponse = {
+  countries: {},
+  seededAt: 0,
+  unavailable: true,
+};
+
+export async function getEurostatCountryData(): Promise<GetEurostatCountryDataResponse> {
+  const hydrated = getHydratedData('eurostatCountryData') as GetEurostatCountryDataResponse | undefined;
+  if (hydrated && !hydrated.unavailable && Object.keys(hydrated.countries).length > 0) {
+    return hydrated;
+  }
+  try {
+    return await client.getEurostatCountryData({});
+  } catch {
+    return emptyEurostatFallback;
   }
 }

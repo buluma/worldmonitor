@@ -304,6 +304,382 @@ export interface NationalDebtEntry {
   source: string;
 }
 
+export interface BlsObservation {
+  year: string;
+  period: string;
+  periodName: string;
+  value: string;
+}
+
+export interface BlsSeries {
+  seriesId: string;
+  title: string;
+  units: string;
+  observations: BlsObservation[];
+}
+
+export interface GetBlsSeriesRequest {
+  seriesId: string;
+  limit: number;
+}
+
+export interface GetBlsSeriesResponse {
+  series?: BlsSeries;
+}
+
+export interface CrudeInventoryWeek {
+  period: string;
+  stocksMb: number;
+  weeklyChangeMb?: number;
+}
+
+export interface GetCrudeInventoriesRequest {}
+
+export interface GetCrudeInventoriesResponse {
+  weeks: CrudeInventoryWeek[];
+  latestPeriod: string;
+}
+
+export interface EcbFxRate {
+  pair: string;
+  rate: number;
+  date: string;
+  change1d: number;
+}
+
+export interface GetEcbFxRatesRequest {}
+
+export interface GetEcbFxRatesResponse {
+  rates: EcbFxRate[];
+  updatedAt: string;
+  seededAt: number;
+  unavailable: boolean;
+}
+
+export interface GetEconomicCalendarRequest {
+  fromDate: string;
+  toDate: string;
+}
+
+export interface EconomicEvent {
+  event: string;
+  country: string;
+  date: string;
+  impact: string;
+  actual: string;
+  estimate: string;
+  previous: string;
+  unit: string;
+}
+
+export interface GetEconomicCalendarResponse {
+  events: EconomicEvent[];
+  fromDate: string;
+  toDate: string;
+  total: number;
+  unavailable: boolean;
+}
+
+export interface EconomicStressComponent {
+  id: string;
+  label: string;
+  rawValue: number;
+  score: number;
+  weight: number;
+  missing: boolean;
+}
+
+export interface GetEconomicStressRequest {}
+
+export interface GetEconomicStressResponse {
+  compositeScore: number;
+  label: string;
+  components: EconomicStressComponent[];
+  seededAt: string;
+  unavailable: boolean;
+}
+
+export interface EnergyCrisisPolicy {
+  country: string;
+  countryCode: string;
+  category: string;
+  sector: string;
+  measure: string;
+  dateAnnounced: string;
+  status: string;
+}
+
+export interface GetEnergyCrisisPoliciesRequest {
+  countryCode: string;
+  category: string;
+}
+
+export interface GetEnergyCrisisPoliciesResponse {
+  source: string;
+  sourceUrl: string;
+  context: string;
+  policies: EnergyCrisisPolicy[];
+  updatedAt: string;
+  unavailable: boolean;
+}
+
+export interface GetEuFsiRequest {}
+
+export interface EuFsiObservation {
+  date: string;
+  value: number;
+}
+
+export interface GetEuFsiResponse {
+  latestValue: number;
+  latestDate: string;
+  label: string;
+  history: EuFsiObservation[];
+  seededAt: string;
+  unavailable: boolean;
+  stale: boolean;
+}
+
+export interface EuGasStorageHistoryEntry {
+  date: string;
+  fillPct: number;
+  gasTwh: number;
+}
+
+export interface GetEuGasStorageRequest {}
+
+export interface GetEuGasStorageResponse {
+  fillPct: number;
+  fillPctChange1d: number;
+  gasDaysConsumption: number;
+  trend: string;
+  history: EuGasStorageHistoryEntry[];
+  seededAt: number;
+  updatedAt: string;
+  unavailable: boolean;
+}
+
+export interface GetEuYieldCurveRequest {}
+
+export interface EuYieldCurveData {
+  date: string;
+  rates: Record<string, number>;
+  source: string;
+  updatedAt: string;
+}
+
+export interface GetEuYieldCurveResponse {
+  data?: EuYieldCurveData;
+  unavailable: boolean;
+}
+
+export interface EurostatMetric {
+  value: number;
+  date: string;
+  unit: string;
+  priorValue: number;
+  hasPrior: boolean;
+}
+
+export interface EurostatCountryEntry {
+  cpi?: EurostatMetric;
+  unemployment?: EurostatMetric;
+  gdpGrowth?: EurostatMetric;
+}
+
+export interface GetEurostatCountryDataRequest {}
+
+export interface GetEurostatCountryDataResponse {
+  countries: Record<string, EurostatCountryEntry>;
+  seededAt: number;
+  unavailable: boolean;
+}
+
+export interface FaoFoodPricePoint {
+  date: string;
+  ffpi: number;
+  meat: number;
+  dairy: number;
+  cereals: number;
+  oils: number;
+  sugar: number;
+}
+
+export interface GetFaoFoodPriceIndexRequest {}
+
+export interface GetFaoFoodPriceIndexResponse {
+  points: FaoFoodPricePoint[];
+  fetchedAt: string;
+  currentFfpi: number;
+  momPct: number;
+  yoyPct: number;
+}
+
+export interface NatGasStorageWeek {
+  period: string;
+  storBcf: number;
+  weeklyChangeBcf?: number;
+}
+
+export interface GetNatGasStorageRequest {}
+
+export interface GetNatGasStorageResponse {
+  weeks: NatGasStorageWeek[];
+  latestPeriod: string;
+}
+
+export interface OilInventoriesSprWeek {
+  period: string;
+  stocksMb: number;
+}
+
+export interface OilInventoriesSprSnapshot {
+  latestStocksMb: number;
+  changeWow: number;
+  weeks: OilInventoriesSprWeek[];
+}
+
+export interface OilInventoriesEuGasDay {
+  date: string;
+  fillPct: number;
+}
+
+export interface OilInventoriesEuGas {
+  fillPct: number;
+  fillPctChange1d: number;
+  trend: string;
+  history: OilInventoriesEuGasDay[];
+}
+
+export interface OilInventoriesIeaMember {
+  iso2: string;
+  daysOfCover?: number;
+  netExporter: boolean;
+  belowObligation: boolean;
+}
+
+export interface OilInventoriesRegionStats {
+  avgDays?: number;
+  minDays?: number;
+  countBelowObligation?: number;
+}
+
+export interface OilInventoriesIeaStocks {
+  dataMonth: string;
+  members: OilInventoriesIeaMember[];
+  europe?: OilInventoriesRegionStats;
+  asiaPacific?: OilInventoriesRegionStats;
+  northAmerica?: OilInventoriesRegionStats;
+}
+
+export interface OilInventoriesRefinery {
+  inputsMbpd: number;
+  period: string;
+}
+
+export interface CrudeInventoryWeekRef {
+  period: string;
+  stocksMb: number;
+  weeklyChangeMb?: number;
+}
+
+export interface NatGasWeekRef {
+  period: string;
+  storBcf: number;
+  weeklyChangeBcf?: number;
+}
+
+export interface GetOilInventoriesRequest {}
+
+export interface GetOilInventoriesResponse {
+  crudeWeeks: CrudeInventoryWeekRef[];
+  spr?: OilInventoriesSprSnapshot;
+  natGasWeeks: NatGasWeekRef[];
+  euGas?: OilInventoriesEuGas;
+  ieaStocks?: OilInventoriesIeaStocks;
+  refinery?: OilInventoriesRefinery;
+  updatedAt: string;
+}
+
+export interface OilStocksAnalysisMember {
+  iso2: string;
+  daysOfCover?: number;
+  netExporter: boolean;
+  belowObligation: boolean;
+  obligationMet: boolean;
+  rank: number;
+  vsObligation?: number;
+}
+
+export interface OilStocksRegionalSummaryEurope {
+  avgDays?: number;
+  minDays?: number;
+  countBelowObligation: number;
+}
+
+export interface OilStocksRegionalSummaryAsiaPacific {
+  avgDays?: number;
+  minDays?: number;
+  countBelowObligation: number;
+}
+
+export interface OilStocksRegionalSummaryNorthAmerica {
+  netExporters: number;
+  avgDays?: number;
+}
+
+export interface OilStocksRegionalSummary {
+  europe?: OilStocksRegionalSummaryEurope;
+  asiaPacific?: OilStocksRegionalSummaryAsiaPacific;
+  northAmerica?: OilStocksRegionalSummaryNorthAmerica;
+}
+
+export interface GetOilStocksAnalysisRequest {}
+
+export interface GetOilStocksAnalysisResponse {
+  updatedAt: string;
+  dataMonth: string;
+  ieaMembers: OilStocksAnalysisMember[];
+  belowObligation: string[];
+  regionalSummary?: OilStocksRegionalSummary;
+  unavailable: boolean;
+}
+
+export interface FuelPrice {
+  usdPrice: number;
+  localPrice: number;
+  grade: string;
+  source: string;
+  available: boolean;
+  wowPct: number;
+  observedAt: string;
+}
+
+export interface FuelCountryPrice {
+  code: string;
+  name: string;
+  currency: string;
+  flag: string;
+  gasoline?: FuelPrice;
+  diesel?: FuelPrice;
+  fxRate: number;
+}
+
+export interface ListFuelPricesRequest {}
+
+export interface ListFuelPricesResponse {
+  countries: FuelCountryPrice[];
+  fetchedAt: string;
+  cheapestGasoline: string;
+  cheapestDiesel: string;
+  mostExpensiveGasoline: string;
+  mostExpensiveDiesel: string;
+  wowAvailable: boolean;
+  prevFetchedAt: string;
+  sourceCount: number;
+  countryCount: number;
+}
+
 export interface FieldViolation {
   field: string;
   description: string;
@@ -641,6 +1017,123 @@ export class EconomicServiceClient {
     }
 
     return await resp.json() as GetNationalDebtResponse;
+  }
+
+  async getBlsSeries(req: GetBlsSeriesRequest, options?: EconomicServiceCallOptions): Promise<GetBlsSeriesResponse> {
+    const path = "/api/economic/v1/get-bls-series";
+    const params = new URLSearchParams();
+    if (req.seriesId != null && req.seriesId !== "") params.set("series_id", String(req.seriesId));
+    if (req.limit != null && req.limit !== 0) params.set("limit", String(req.limit));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetBlsSeriesResponse;
+  }
+
+  async getCrudeInventories(req: GetCrudeInventoriesRequest, options?: EconomicServiceCallOptions): Promise<GetCrudeInventoriesResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-crude-inventories";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetCrudeInventoriesResponse;
+  }
+
+  async getEcbFxRates(req: GetEcbFxRatesRequest, options?: EconomicServiceCallOptions): Promise<GetEcbFxRatesResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-ecb-fx-rates";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEcbFxRatesResponse;
+  }
+
+  async getEconomicCalendar(req: GetEconomicCalendarRequest, options?: EconomicServiceCallOptions): Promise<GetEconomicCalendarResponse> {
+    const path = "/api/economic/v1/get-economic-calendar";
+    const params = new URLSearchParams();
+    if (req.fromDate != null && req.fromDate !== "") params.set("fromDate", req.fromDate);
+    if (req.toDate != null && req.toDate !== "") params.set("toDate", req.toDate);
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEconomicCalendarResponse;
+  }
+
+  async getEconomicStress(req: GetEconomicStressRequest, options?: EconomicServiceCallOptions): Promise<GetEconomicStressResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-economic-stress";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEconomicStressResponse;
+  }
+
+  async getEnergyCrisisPolicies(req: GetEnergyCrisisPoliciesRequest, options?: EconomicServiceCallOptions): Promise<GetEnergyCrisisPoliciesResponse> {
+    const path = "/api/economic/v1/get-energy-crisis-policies";
+    const params = new URLSearchParams();
+    if (req.countryCode != null && req.countryCode !== "") params.set("country_code", req.countryCode);
+    if (req.category != null && req.category !== "") params.set("category", req.category);
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEnergyCrisisPoliciesResponse;
+  }
+
+  async getEuFsi(req: GetEuFsiRequest, options?: EconomicServiceCallOptions): Promise<GetEuFsiResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-eu-fsi";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEuFsiResponse;
+  }
+
+  async getEuGasStorage(req: GetEuGasStorageRequest, options?: EconomicServiceCallOptions): Promise<GetEuGasStorageResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-eu-gas-storage";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEuGasStorageResponse;
+  }
+
+  async getEuYieldCurve(req: GetEuYieldCurveRequest, options?: EconomicServiceCallOptions): Promise<GetEuYieldCurveResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-eu-yield-curve";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEuYieldCurveResponse;
+  }
+
+  async getEurostatCountryData(req: GetEurostatCountryDataRequest, options?: EconomicServiceCallOptions): Promise<GetEurostatCountryDataResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-eurostat-country-data";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetEurostatCountryDataResponse;
+  }
+
+  async getFaoFoodPriceIndex(req: GetFaoFoodPriceIndexRequest, options?: EconomicServiceCallOptions): Promise<GetFaoFoodPriceIndexResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-fao-food-price-index";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetFaoFoodPriceIndexResponse;
+  }
+
+  async getNatGasStorage(req: GetNatGasStorageRequest, options?: EconomicServiceCallOptions): Promise<GetNatGasStorageResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-nat-gas-storage";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetNatGasStorageResponse;
+  }
+
+  async getOilInventories(req: GetOilInventoriesRequest, options?: EconomicServiceCallOptions): Promise<GetOilInventoriesResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-oil-inventories";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetOilInventoriesResponse;
+  }
+
+  async getOilStocksAnalysis(req: GetOilStocksAnalysisRequest, options?: EconomicServiceCallOptions): Promise<GetOilStocksAnalysisResponse> {
+    const url = this.baseURL + "/api/economic/v1/get-oil-stocks-analysis";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetOilStocksAnalysisResponse;
+  }
+
+  async listFuelPrices(req: ListFuelPricesRequest, options?: EconomicServiceCallOptions): Promise<ListFuelPricesResponse> {
+    const url = this.baseURL + "/api/economic/v1/list-fuel-prices";
+    const resp = await this.fetchFn(url, { method: "GET", headers: { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers }, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as ListFuelPricesResponse;
   }
 
   private async handleError(resp: Response): Promise<never> {

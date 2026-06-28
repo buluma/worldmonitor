@@ -918,6 +918,10 @@ export class Panel {
     }
   }
 
+  public setSafeContent(html: import('@/utils/sanitize').SafeHtml): void {
+    this.setContent(html.toString());
+  }
+
   public setContent(html: string): void {
     if (this._locked) return;
     this.setErrorState(false);

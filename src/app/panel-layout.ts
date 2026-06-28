@@ -843,6 +843,32 @@ export class PanelLayoutManager implements AppModule {
     this.createPanel('etf-flows', () => new ETFFlowsPanel());
     this.createPanel('stablecoins', () => new StablecoinPanel());
 
+    // Wave-1 economic panels (ungated — self-hosted Heimdal, no premium/showLocked calls)
+    this.lazyPanel('oil-inventories', () =>
+      import('@/components/OilInventoriesPanel').then(m => new m.OilInventoriesPanel()),
+    );
+    this.lazyPanel('fuel-prices', () =>
+      import('@/components/FuelPricesPanel').then(m => new m.FuelPricesPanel()),
+    );
+    this.lazyPanel('energy-crisis', () =>
+      import('@/components/EnergyCrisisPanel').then(m => new m.EnergyCrisisPanel()),
+    );
+    this.lazyPanel('macro-tiles', () =>
+      import('@/components/MacroTilesPanel').then(m => new m.MacroTilesPanel()),
+    );
+    this.lazyPanel('fsi', () =>
+      import('@/components/FSIPanel').then(m => new m.FSIPanel()),
+    );
+    this.lazyPanel('yield-curve', () =>
+      import('@/components/YieldCurvePanel').then(m => new m.YieldCurvePanel()),
+    );
+    this.lazyPanel('economic-calendar', () =>
+      import('@/components/EconomicCalendarPanel').then(m => new m.EconomicCalendarPanel()),
+    );
+    this.lazyPanel('fao-food-price-index', () =>
+      import('@/components/FaoFoodPriceIndexPanel').then(m => new m.FaoFoodPriceIndexPanel()),
+    );
+
     if (this.ctx.isDesktopApp) {
       const runtimeConfigPanel = new RuntimeConfigPanel({ mode: 'alert' });
       this.ctx.panels['runtime-config'] = runtimeConfigPanel;

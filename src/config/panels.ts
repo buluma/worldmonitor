@@ -74,6 +74,15 @@ const FULL_PANELS: Record<string, PanelConfig> = {
   'tech-readiness': { name: 'Tech Readiness Index', enabled: true, priority: 2 },
   'world-clock': { name: 'World Clock', enabled: true, priority: 2 },
   'national-debt': { name: 'Global Debt Clock', enabled: true, priority: 2 },
+  // Wave-1 economic ports (ungated — no premium field)
+  'oil-inventories': { name: 'Oil & Gas Inventories', enabled: true, priority: 2 },
+  'fuel-prices': { name: 'Fuel Prices', enabled: true, priority: 2 },
+  'energy-crisis': { name: 'Energy Crisis Tracker', enabled: true, priority: 2 },
+  'macro-tiles': { name: 'Macro Indicators', enabled: true, priority: 2 },
+  'fsi': { name: 'Financial Stress Index', enabled: true, priority: 2 },
+  'yield-curve': { name: 'Yield Curve & Rates', enabled: true, priority: 2 },
+  'economic-calendar': { name: 'Economic Calendar', enabled: true, priority: 2 },
+  'fao-food-price-index': { name: 'FAO Food Price Index', enabled: true, priority: 2 },
 };
 
 const FULL_MAP_LAYERS: MapLayers = {

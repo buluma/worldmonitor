@@ -403,6 +403,14 @@
     "radiationWatch": "Radiation Watch",
     "thermalEscalation": "Thermal Escalation",
     "nationalDebt": "National Debt",
+    "oilInventories": "Oil & Gas Inventories",
+    "fuelPrices": "Fuel Prices",
+    "energyCrisis": "Energy Crisis Tracker",
+    "macroTiles": "Macro Indicators",
+    "fsi": "Financial Stress Index",
+    "yieldCurve": "Yield Curve & Rates",
+    "economicCalendar": "Economic Calendar",
+    "faoFoodPriceIndex": "FAO Food Price Index",
     "cryptoHeatmap": "Crypto Heatmap",
     "defiTokens": "DeFi Tokens",
     "aiTokens": "AI Tokens",
@@ -1882,6 +1890,82 @@
     },
     "commodities": {
       "infoTooltip": "<strong>Commodities</strong> Tradeable non-energy commodity tape focused on metals and materials. Energy prices live in Energy Complex; macro stress indicators live in Macro Stress."
+    },
+    "oilInventories": {
+      "infoTooltip": "<strong>Oil & Gas Inventories</strong> US and OECD energy storage data:<ul><li><strong>US Crude</strong>: EIA weekly commercial stocks + Strategic Petroleum Reserve</li><li><strong>Nat Gas</strong>: EIA working gas in underground storage (Bcf)</li><li><strong>EU Gas</strong>: GIE AGSI+ aggregate fill percentage</li><li><strong>IEA OECD</strong>: Days-of-cover by member country vs 90-day obligation</li><li><strong>Refinery</strong>: US crude inputs to refineries (Mb/d)</li></ul>Source: EIA, IEA, GIE AGSI+"
+    },
+    "fuelPrices": {
+      "infoTooltip": "<strong>Fuel Prices</strong> Retail gasoline and diesel prices in USD per litre across ~170 countries. Sorted by gasoline price descending. Week-on-week change shown when available. Source: GlobalPetrolPrices.com",
+      "countries": "countries"
+    },
+    "energyCrisis": {
+      "infoTooltip": "<strong>Energy Crisis Tracker</strong> IEA 2026 Energy Crisis Policy Response Tracker. Government measures to conserve energy and support consumers in response to Middle East conflict and Strait of Hormuz supply disruptions. Source: IEA"
+    },
+    "macroTiles": {
+      "title": "Macro Indicators",
+      "infoTooltip": "<strong>Macro Indicators</strong> Key macroeconomic snapshots:<ul><li><strong>US tab</strong>: CPI YoY, Unemployment, GDP, Fed Funds Rate (FRED)</li><li><strong>Euro Area tab</strong>: HICP, Unemployment, GDP Growth QoQ (Eurostat), €STR (ECB)</li></ul>Each tile shows the latest value, change vs prior, and date. Source: FRED, Eurostat, ECB"
+    },
+    "fsi": {
+      "title": "Financial Stress Index",
+      "infoTooltip": "<strong>Financial Stress Index</strong> Composite financial stress indicators:<ul><li><strong>US FSI</strong>: Composite of VIX, HY spreads, HYG/TLT prices</li><li><strong>EU CISS</strong>: ECB Composite Indicator of Systemic Stress for the Euro Area</li></ul>Low Stress → No Stress → Elevated → Severe. Source: FRED, ECB",
+      "usFsiValue": "US Financial Stress Index",
+      "cissTitle": "EU CISS (ECB)",
+      "cissStale": "CISS data may be stale — ECB publication lag",
+      "scale": {
+        "highStress": "High Stress",
+        "lowStress": "Low Stress",
+        "noStress": "No Stress",
+        "extremeStress": "Extreme Stress"
+      },
+      "labels": {
+        "lowStress": "Low Stress",
+        "moderateStress": "Moderate Stress",
+        "elevatedStress": "Elevated Stress",
+        "severeStress": "Severe Stress"
+      },
+      "cissLabels": {
+        "low": "Low",
+        "moderate": "Moderate",
+        "elevated": "Elevated",
+        "high": "High"
+      },
+      "interpretation": {
+        "low": "Financial conditions are accommodative. Credit markets functioning normally.",
+        "moderate": "Some stress in financial markets. Monitor credit spreads and volatility.",
+        "elevated": "Significant financial stress. Credit tightening and elevated volatility.",
+        "severe": "Severe financial stress. Systemic risk elevated. Crisis conditions possible."
+      },
+      "metrics": {
+        "vix": "VIX",
+        "hySpread": "HY Spread",
+        "hygPrice": "HYG",
+        "tltPrice": "TLT"
+      },
+      "notAvailable": "N/A",
+      "errors": {
+        "unavailable": "Financial stress data unavailable",
+        "failedToLoad": "Failed to load financial stress data"
+      }
+    },
+    "yieldCurve": {
+      "infoTooltip": "<strong>Yield Curve & Rates</strong> US Treasury yield curve with ECB Euro Area AAA sovereign curve overlay:<ul><li><strong>US Curve tab</strong>: Current vs prior-period US curve; 2Y-10Y spread + inversion signal</li><li><strong>ECB Rates tab</strong>: €STR, EURIBOR 3M/6M/1Y with sparklines</li></ul>Inversion (2Y > 10Y) is a recession signal. Source: FRED, ECB"
+    },
+    "economicCalendar": {
+      "infoTooltip": "<strong>Economic Calendar</strong> Upcoming and recent high-impact economic releases for US and EU:<ul><li>Filter by region: All, US, EU</li><li>Impact color: Red = high, Orange = medium, Dim = low</li><li>Shows countdown for upcoming events; actual value when released</li></ul>Source: Trading Economics / Investing.com"
+    },
+    "faoFoodPriceIndex": {
+      "infoTooltip": "<strong>FAO Food Price Index</strong> Monthly FAO composite food price index and sub-indices (2014-2016 = 100):<ul><li><strong>FFPI</strong>: Composite Food Price Index</li><li><strong>Cereals, Meat, Dairy, Oils, Sugar</strong>: Sub-indices</li></ul>Month-on-month and year-on-year changes shown. Source: FAO",
+      "indexLabel": "FFPI",
+      "mom": "MoM",
+      "yoy": "YoY",
+      "asOf": "as of",
+      "baseNote": "Base period: 2014-2016 = 100 · Source: FAO",
+      "ffpi": "Food",
+      "cereals": "Cereals",
+      "meat": "Meat",
+      "dairy": "Dairy",
+      "oils": "Oils",
+      "sugar": "Sugar"
     },
     "panel": {
       "showMethodologyInfo": "Show methodology info",
