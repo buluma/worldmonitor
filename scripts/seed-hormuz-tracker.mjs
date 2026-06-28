@@ -21,22 +21,37 @@ const REDIS_KEY = 'supply_chain:hormuz_tracker:v1';
 const TTL = 14_400; // 4h
 const CRISIS_START = '2026-02-23';
 
-// ─── PortWatch (IMF/UN) ───────────────────────────────────────────────────────
-// Public dataset: no auth required. Port = "Strait of Hormuz" aggregate corridor.
+// ─── PortWatch (IMF/UN via ArcGIS) ───────────────────────────────────────────
+// ArcGIS FeatureServer: Daily_Chokepoints_Data, portid='chokepoint6' = Hormuz.
+// No auth required. Updated weekly Tuesdays 09:00 ET.
+
+const PORTWATCH_URL = 'https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query';
 
 async function fetchPortWatchData() {
   try {
-    const url = 'https://portwatch.imf.org/api/PortCallStats?portCode=HORMUZ&limit=90&metric=vessel_count';
-    const resp = await fetch(url, {
+    const params = new URLSearchParams({
+      where: "portid='chokepoint6'",
+      outFields: 'date,n_tanker,n_total,n_container,n_dry_bulk,n_general_cargo,capacity_tanker,capacity',
+      f: 'json',
+      orderByFields: 'date DESC',
+      resultRecordCount: '120',
+    });
+    const resp = await fetch(`${PORTWATCH_URL}?${params}`, {
       headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!resp.ok) {
       console.warn(`  PortWatch: HTTP ${resp.status}`);
       return null;
     }
     const data = await resp.json();
-    return data;
+    const features = data?.features;
+    if (!Array.isArray(features) || features.length === 0) {
+      console.warn('  PortWatch: no features returned');
+      return null;
+    }
+    // DESC from API → reverse for chronological chart order
+    return features.map(f => f.attributes).reverse();
   } catch (e) {
     console.warn(`  PortWatch fetch failed: ${e.message}`);
     return null;
@@ -141,32 +156,71 @@ function buildStaticData() {
   };
 }
 
+function buildPortWatchPayload(rows) {
+  // rows: [{date, n_tanker, n_total, n_container, n_dry_bulk, n_general_cargo, capacity_tanker, capacity}]
+  const tankerSeries = rows.map(r => ({ date: r.date, value: r.n_tanker ?? 0 }));
+  const totalSeries  = rows.map(r => ({ date: r.date, value: r.n_total ?? 0 }));
+
+  const preCrisis = rows.filter(r => r.date < CRISIS_START);
+  const postCrisis = rows.filter(r => r.date >= CRISIS_START);
+  const avgPre  = preCrisis.length  ? preCrisis.reduce((s, r)  => s + (r.n_tanker ?? 0), 0) / preCrisis.length  : null;
+  const avgPost = postCrisis.length ? postCrisis.reduce((s, r) => s + (r.n_tanker ?? 0), 0) / postCrisis.length : null;
+  const last = rows[rows.length - 1];
+  const lastTankers = last?.n_tanker ?? 0;
+
+  let status = 'open';
+  if (avgPre && avgPost && avgPost < avgPre * 0.85) status = 'disrupted';
+  else if (avgPre && avgPost && avgPost < avgPre * 0.95) status = 'restricted';
+
+  const flowPct = avgPre ? Math.round((lastTankers / avgPre) * 100) : null;
+  const summaryFlow = flowPct != null ? `${flowPct}% of pre-crisis baseline` : 'data updating';
+
+  return {
+    fetchedAt: Date.now(),
+    updatedDate: last?.date ?? null,
+    title: 'Strait of Hormuz — Vessel Transit Monitor',
+    summary: `Recent transit: ${lastTankers} oil tankers/day (${summaryFlow}). Iran-linked vessel screening active since ${CRISIS_START}. UAE ADCOP and Saudi Petroline bypass routes activated.`,
+    paragraphs: [
+      `The Strait of Hormuz carries approximately 20% of global oil trade and 25% of global LNG. Since the ${CRISIS_START} escalation, oil tanker transits have averaged ${avgPost != null ? Math.round(avgPost) : 'N/A'}/day vs ${avgPre != null ? Math.round(avgPre) : 'N/A'}/day pre-crisis.`,
+      'Saudi Arabia and UAE have activated bypass pipeline capacity: the East-West Petroline (4.8 mb/d nameplate) and the Abu Dhabi Crude Oil Pipeline to Fujairah (1.5 mb/d). Fujairah storage stocks are near maximum.',
+      'Insurance markets have applied war-risk surcharges. Several major tanker operators have suspended Hormuz transits pending security clarification.',
+    ],
+    status,
+    charts: [
+      { label: 'oil-tankers', title: 'Oil Tanker Transits (vessels/day)', series: tankerSeries },
+      { label: 'all-vessels', title: 'All Vessel Transits (vessels/day)',  series: totalSeries  },
+    ],
+    attribution: {
+      source: 'IMF PortWatch — Daily Chokepoint Transit Data',
+      url: 'https://portwatch.imf.org/pages/chokepoint6',
+    },
+  };
+}
+
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  // Try PortWatch
-  const portWatchRaw = await fetchPortWatchData();
-  if (portWatchRaw) {
-    console.log('  PortWatch data available — building charts');
-    // PortWatch returns different structures depending on endpoint; just log and use static for now
-    console.log(`  PortWatch keys: ${Object.keys(portWatchRaw).join(', ')}`);
-  }
+  const portWatchRows = await fetchPortWatchData();
 
-  // Try EIA via FRED
-  const eiaCharts = await fetchEiaFlowData();
-  if (eiaCharts) {
-    console.log(`  EIA/FRED: ${eiaCharts.length} chart series`);
-  }
+  let payload;
+  if (portWatchRows && portWatchRows.length > 0) {
+    console.log(`  PortWatch: ${portWatchRows.length} daily records (${portWatchRows[0].date} → ${portWatchRows[portWatchRows.length - 1].date})`);
+    payload = buildPortWatchPayload(portWatchRows);
+  } else {
+    console.log('  PortWatch unavailable — using static model');
+    payload = buildStaticData();
 
-  // Build final payload — merge EIA charts into static if available
-  const payload = buildStaticData();
-  if (eiaCharts && eiaCharts.length > 0) {
-    payload.charts = [...payload.charts, ...eiaCharts];
-    payload.attribution = { source: 'EIA Petroleum Data + Strait transit model', url: 'https://www.eia.gov/petroleum' };
+    // Augment static with EIA/FRED if available
+    const eiaCharts = await fetchEiaFlowData();
+    if (eiaCharts && eiaCharts.length > 0) {
+      payload.charts = [...payload.charts, ...eiaCharts];
+      payload.attribution = { source: 'EIA Petroleum Data + Strait transit model', url: 'https://www.eia.gov/petroleum' };
+      console.log(`  EIA/FRED: ${eiaCharts.length} additional series`);
+    }
   }
 
   await writeExtraKeyWithMeta(REDIS_KEY, payload, TTL, payload.charts.length);
-  console.log(`  hormuz-tracker: status=${payload.status}, ${payload.charts.length} charts`);
+  console.log(`  hormuz-tracker: status=${payload.status}, ${payload.charts.length} charts, updated=${payload.updatedDate}`);
   console.log('hormuz tracker seed complete');
 }
 
