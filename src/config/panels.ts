@@ -92,6 +92,14 @@ const FULL_PANELS: Record<string, PanelConfig> = {
   'aaii-sentiment': { name: 'AAII Sentiment', enabled: true, priority: 2 },
   'earnings-calendar': { name: 'Earnings Calendar', enabled: true, priority: 2 },
   'wsb-ticker-scanner': { name: 'WSB Ticker Scanner', enabled: true, priority: 2 },
+  // Wave-3 supply-chain ports (ungated — no premium field)
+  'energy-disruptions': { name: 'Energy Disruptions Log', enabled: true, priority: 2 },
+  'fuel-shortages': { name: 'Global Fuel Shortage Registry', enabled: true, priority: 2 },
+  'pipeline-status': { name: 'Oil & Gas Pipeline Status', enabled: true, priority: 2 },
+  'storage-facility-map': { name: 'Strategic Storage Atlas', enabled: true, priority: 2 },
+  'chokepoint-strip': { name: 'Chokepoint Status Strip', enabled: true, priority: 2 },
+  'hormuz-tracker': { name: 'Strait of Hormuz Tracker', enabled: true, priority: 2 },
+  'energy-risk-overview': { name: 'Global Energy Risk Overview', enabled: true, priority: 2 },
 };
 
 const FULL_MAP_LAYERS: MapLayers = {

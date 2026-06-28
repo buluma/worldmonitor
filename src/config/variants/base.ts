@@ -65,6 +65,13 @@ export const REFRESH_INTERVALS = {
   aaiiSentiment: 24 * 60 * 60 * 1000,      // 24h — weekly AAII survey
   earningsCalendar: 2 * 60 * 60 * 1000,    // 2h — earnings dates
   wsbTickerScanner: 15 * 60 * 1000,        // 15min — Reddit mentions
+  energyDisruptions: 10 * 60 * 1000,       // 10min — Redis-backed classifier
+  fuelShortages: 15 * 60 * 1000,           // 15min — registry refresh
+  pipelineStatus: 15 * 60 * 1000,          // 15min — registry refresh
+  storageFacilityMap: 15 * 60 * 1000,      // 15min — registry refresh
+  chokepointStrip: 5 * 60 * 1000,          // 5min — live AIS-backed
+  hormuzTracker: 30 * 60 * 1000,           // 30min — server-cached REST
+  energyRiskOverview: 5 * 60 * 1000,       // 5min — composed from 4 sources
 };
 
 // Monitor colors - shared

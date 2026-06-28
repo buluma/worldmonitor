@@ -15,6 +15,7 @@ import {
   type ListDefiTokensResponse,
   type ListAiTokensResponse,
   type ListOtherTokensResponse,
+  type CommodityQuote as ProtoCommodityQuote,
   type MarketQuote as ProtoMarketQuote,
   type CryptoQuote as ProtoCryptoQuote,
 } from '@/generated/client/worldmonitor/market/v1/service_client';
@@ -268,4 +269,29 @@ export async function fetchOtherTokens(): Promise<TokenData[]> {
   const results = resp.tokens.map(toTokenData).filter(t => t.price > 0);
   if (results.length > 0) { lastSuccessfulOther = results; return results; }
   return lastSuccessfulOther;
+}
+
+function toCommodityMarketData(q: ProtoCommodityQuote, meta?: { name?: string; display?: string }): MarketData {
+  return {
+    symbol: q.symbol,
+    name: meta?.name ?? q.name,
+    display: meta?.display ?? q.display ?? q.symbol,
+    price: q.price,
+    change: q.change,
+    sparkline: q.sparkline?.length > 0 ? q.sparkline : undefined,
+  };
+}
+
+export async function fetchCommodityQuotes(
+  commodities: Array<{ symbol: string; name: string; display: string }>,
+): Promise<MarketFetchResult> {
+  const symbols = commodities.map(c => c.symbol);
+  const meta = new Map(commodities.map(c => [c.symbol, c]));
+  try {
+    const resp = await client.listCommodityQuotes({ symbols });
+    const data = resp.quotes.map(q => toCommodityMarketData(q, meta.get(q.symbol)));
+    return { data };
+  } catch {
+    return { data: [] };
+  }
 }

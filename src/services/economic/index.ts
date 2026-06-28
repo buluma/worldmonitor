@@ -27,6 +27,7 @@ import {
   type GetNationalDebtResponse,
   type NationalDebtEntry,
   type GetEurostatCountryDataResponse,
+  type GetEuGasStorageResponse,
 } from '@/generated/client/worldmonitor/economic/v1/service_client';
 import { createCircuitBreaker } from '@/utils';
 import { getCSSColor } from '@/utils';
@@ -689,5 +690,22 @@ export async function getEurostatCountryData(): Promise<GetEurostatCountryDataRe
     return await client.getEurostatCountryData({});
   } catch {
     return emptyEurostatFallback;
+  }
+}
+
+export type { GetEuGasStorageResponse };
+
+const emptyEuGasStorage: GetEuGasStorageResponse = {
+  fillPct: 0, fillPctChange1d: 0, gasDaysConsumption: 0,
+  trend: '', history: [], seededAt: 0, updatedAt: '', unavailable: true,
+};
+
+export async function getEuGasStorageData(): Promise<GetEuGasStorageResponse> {
+  const hydrated = getHydratedData('euGasStorage') as GetEuGasStorageResponse | undefined;
+  if (hydrated && !hydrated.unavailable && hydrated.fillPct > 0) return hydrated;
+  try {
+    return await client.getEuGasStorage({}, { signal: AbortSignal.timeout(12_000) });
+  } catch {
+    return emptyEuGasStorage;
   }
 }

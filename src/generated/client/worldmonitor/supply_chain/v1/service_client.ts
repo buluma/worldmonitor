@@ -51,6 +51,8 @@ export interface ChokepointInfo {
   directions: string[];
   directionalDwt: DirectionalDwt[];
   transitSummary?: TransitSummary;
+  flowEstimate?: FlowEstimate;
+  warRiskTier?: WarRiskTier;
 }
 
 export interface DirectionalDwt {
@@ -71,6 +73,7 @@ export interface TransitSummary {
   disruptionPct: number;
   riskSummary: string;
   riskReportAction: string;
+  dataAvailable: boolean;
 }
 
 export interface TransitDayCount {
@@ -79,6 +82,278 @@ export interface TransitDayCount {
   cargo: number;
   other: number;
   total: number;
+  container: number;
+  dryBulk: number;
+  generalCargo: number;
+  roro: number;
+  capContainer: number;
+  capDryBulk: number;
+  capGeneralCargo: number;
+  capRoro: number;
+  capTanker: number;
+}
+
+export interface FlowEstimate {
+  currentMbd: number;
+  baselineMbd: number;
+  flowRatio: number;
+  disrupted: boolean;
+  source: string;
+  hazardAlertLevel: string;
+  hazardAlertName: string;
+}
+
+export type WarRiskTier = "WAR_RISK_TIER_UNSPECIFIED" | "WAR_RISK_TIER_NORMAL" | "WAR_RISK_TIER_ELEVATED" | "WAR_RISK_TIER_HIGH" | "WAR_RISK_TIER_CRITICAL" | "WAR_RISK_TIER_WAR_ZONE";
+
+export interface ListPipelinesRequest {
+  commodityType: string;
+}
+
+export interface ListPipelinesResponse {
+  pipelines: PipelineEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface PipelineEntry {
+  id: string;
+  name: string;
+  operator: string;
+  commodityType: string;
+  fromCountry: string;
+  toCountry: string;
+  transitCountries: string[];
+  capacityBcmYr: number;
+  capacityMbd: number;
+  lengthKm: number;
+  inService: number;
+  startPoint?: LatLon;
+  endPoint?: LatLon;
+  waypoints: LatLon[];
+  evidence?: PipelineEvidence;
+  publicBadge: string;
+}
+
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+export interface PipelineEvidence {
+  physicalState: string;
+  physicalStateSource: string;
+  operatorStatement?: OperatorStatement;
+  commercialState: string;
+  sanctionRefs: SanctionRef[];
+  lastEvidenceUpdate: string;
+  classifierVersion: string;
+  classifierConfidence: number;
+}
+
+export interface OperatorStatement {
+  text: string;
+  url: string;
+  date: string;
+}
+
+export interface SanctionRef {
+  authority: string;
+  listId: string;
+  date: string;
+  url: string;
+}
+
+export interface GetPipelineDetailRequest {
+  pipelineId: string;
+}
+
+export interface GetPipelineDetailResponse {
+  pipeline?: PipelineEntry;
+  revisions: PipelineRevisionEntry[];
+  fetchedAt: string;
+  unavailable: boolean;
+}
+
+export interface PipelineRevisionEntry {
+  date: string;
+  fieldChanged: string;
+  previousValue: string;
+  newValue: string;
+  trigger: string;
+  sourcesUsed: string[];
+  classifierVersion: string;
+}
+
+export interface ListStorageFacilitiesRequest {
+  facilityType: string;
+}
+
+export interface ListStorageFacilitiesResponse {
+  facilities: StorageFacilityEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface StorageFacilityEntry {
+  id: string;
+  name: string;
+  operator: string;
+  facilityType: string;
+  country: string;
+  location?: StorageLatLon;
+  capacityTwh: number;
+  capacityMb: number;
+  capacityMtpa: number;
+  workingCapacityUnit: string;
+  inService: number;
+  evidence?: StorageEvidence;
+  publicBadge: string;
+}
+
+export interface StorageLatLon {
+  lat: number;
+  lon: number;
+}
+
+export interface StorageEvidence {
+  physicalState: string;
+  physicalStateSource: string;
+  operatorStatement?: StorageOperatorStatement;
+  commercialState: string;
+  sanctionRefs: StorageSanctionRef[];
+  fillDisclosed: boolean;
+  fillSource: string;
+  lastEvidenceUpdate: string;
+  classifierVersion: string;
+  classifierConfidence: number;
+}
+
+export interface StorageOperatorStatement {
+  text: string;
+  url: string;
+  date: string;
+}
+
+export interface StorageSanctionRef {
+  authority: string;
+  listId: string;
+  date: string;
+  url: string;
+}
+
+export interface GetStorageFacilityDetailRequest {
+  facilityId: string;
+}
+
+export interface GetStorageFacilityDetailResponse {
+  facility?: StorageFacilityEntry;
+  revisions: StorageFacilityRevisionEntry[];
+  fetchedAt: string;
+  unavailable: boolean;
+}
+
+export interface StorageFacilityRevisionEntry {
+  date: string;
+  fieldChanged: string;
+  previousValue: string;
+  newValue: string;
+  trigger: string;
+  sourcesUsed: string[];
+  classifierVersion: string;
+}
+
+export interface ListFuelShortagesRequest {
+  country: string;
+  product: string;
+  severity: string;
+}
+
+export interface ListFuelShortagesResponse {
+  shortages: FuelShortageEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface FuelShortageEntry {
+  id: string;
+  country: string;
+  product: string;
+  severity: string;
+  firstSeen: string;
+  lastConfirmed: string;
+  resolvedAt: string;
+  impactTypes: string[];
+  causeChain: string[];
+  shortDescription: string;
+  evidence?: FuelShortageEvidence;
+}
+
+export interface FuelShortageEvidence {
+  evidenceSources: FuelShortageEvidenceSource[];
+  firstRegulatorConfirmation: string;
+  classifierVersion: string;
+  classifierConfidence: number;
+  lastEvidenceUpdate: string;
+}
+
+export interface FuelShortageEvidenceSource {
+  authority: string;
+  title: string;
+  url: string;
+  date: string;
+  sourceType: string;
+}
+
+export interface GetFuelShortageDetailRequest {
+  shortageId: string;
+}
+
+export interface GetFuelShortageDetailResponse {
+  shortage?: FuelShortageEntry;
+  fetchedAt: string;
+  unavailable: boolean;
+}
+
+export interface ListEnergyDisruptionsRequest {
+  assetId: string;
+  assetType: string;
+  ongoingOnly: boolean;
+}
+
+export interface ListEnergyDisruptionsResponse {
+  events: EnergyDisruptionEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface EnergyDisruptionEntry {
+  id: string;
+  assetId: string;
+  assetType: string;
+  eventType: string;
+  startAt: string;
+  endAt: string;
+  capacityOfflineBcmYr: number;
+  capacityOfflineMbd: number;
+  causeChain: string[];
+  shortDescription: string;
+  sources: EnergyDisruptionSource[];
+  classifierVersion: string;
+  classifierConfidence: number;
+  lastEvidenceUpdate: string;
+  countries: string[];
+}
+
+export interface EnergyDisruptionSource {
+  authority: string;
+  title: string;
+  url: string;
+  date: string;
+  sourceType: string;
 }
 
 export interface GetCriticalMineralsRequest {
@@ -221,6 +496,62 @@ export class SupplyChainServiceClient {
     }
 
     return await resp.json() as GetCriticalMineralsResponse;
+  }
+
+  async listEnergyDisruptions(req: ListEnergyDisruptionsRequest, options?: SupplyChainServiceCallOptions): Promise<ListEnergyDisruptionsResponse> {
+    const url = this.baseURL + "/api/supply-chain/v1/list-energy-disruptions";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as ListEnergyDisruptionsResponse;
+  }
+
+  async listFuelShortages(req: ListFuelShortagesRequest, options?: SupplyChainServiceCallOptions): Promise<ListFuelShortagesResponse> {
+    const url = this.baseURL + "/api/supply-chain/v1/list-fuel-shortages";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as ListFuelShortagesResponse;
+  }
+
+  async getFuelShortageDetail(req: GetFuelShortageDetailRequest, options?: SupplyChainServiceCallOptions): Promise<GetFuelShortageDetailResponse> {
+    const url = this.baseURL + "/api/supply-chain/v1/get-fuel-shortage-detail";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetFuelShortageDetailResponse;
+  }
+
+  async listPipelines(req: ListPipelinesRequest, options?: SupplyChainServiceCallOptions): Promise<ListPipelinesResponse> {
+    const url = this.baseURL + "/api/supply-chain/v1/list-pipelines";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as ListPipelinesResponse;
+  }
+
+  async getPipelineDetail(req: GetPipelineDetailRequest, options?: SupplyChainServiceCallOptions): Promise<GetPipelineDetailResponse> {
+    const url = this.baseURL + "/api/supply-chain/v1/get-pipeline-detail";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetPipelineDetailResponse;
+  }
+
+  async listStorageFacilities(req: ListStorageFacilitiesRequest, options?: SupplyChainServiceCallOptions): Promise<ListStorageFacilitiesResponse> {
+    const url = this.baseURL + "/api/supply-chain/v1/list-storage-facilities";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as ListStorageFacilitiesResponse;
+  }
+
+  async getStorageFacilityDetail(req: GetStorageFacilityDetailRequest, options?: SupplyChainServiceCallOptions): Promise<GetStorageFacilityDetailResponse> {
+    const url = this.baseURL + "/api/supply-chain/v1/get-storage-facility-detail";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetStorageFacilityDetailResponse;
   }
 
   private async handleError(resp: Response): Promise<never> {

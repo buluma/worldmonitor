@@ -2875,6 +2875,49 @@
     "invalidJson": "Invalid JSON",
     "confirmDelete": "Remove this MCP panel?",
     "quickConnect": "Quick Connect",
-    "or": "or enter a custom server"
+    "or": "or enter a custom server",
+    "chokepointStrip": {
+      "title": "Chokepoint Status Strip",
+      "infoTooltip": "Real-time status of critical maritime chokepoints — vessel flow, disruption score, AIS anomalies.",
+      "unknown": "Unknown",
+      "shortName": {
+        "hormuzStrait": "Hormuz",
+        "malaccaStrait": "Malacca",
+        "suez": "Suez",
+        "babElMandeb": "Bab el-Mandeb",
+        "bosphorus": "Bosphorus",
+        "danishStraits": "Dover",
+        "panama": "Panama"
+      },
+      "flow": {
+        "mbd": "{{value}} mb/d",
+        "pctOfBaseline": "{{pct}}% of baseline"
+      },
+      "attribution": {
+        "method": "AIS vessel tracking + PortWatch corridor risk",
+        "sampleLabel": "AIS disruptions",
+        "creditName": "UN Global Platform PortWatch / Marine Traffic"
+      },
+      "errors": {
+        "unavailable": "Chokepoint data unavailable",
+        "noData": "No chokepoint data"
+      }
+    },
+    "hormuzTracker": {
+      "title": "Strait of Hormuz Tracker",
+      "infoTooltip": "Daily vessel transits and flow estimates for the Strait of Hormuz — the world's most critical oil chokepoint.",
+      "noData": "No data",
+      "notAvailable": "N/A",
+      "chartUnavailable": "Chart data unavailable",
+      "sourcePrefix": "Source:",
+      "units": {
+        "ktPerDay": "kt/day",
+        "generic": ""
+      },
+      "errors": {
+        "unavailable": "Hormuz tracker data unavailable",
+        "failedToLoad": "Failed to load Hormuz tracker"
+      }
+    }
   }
 }

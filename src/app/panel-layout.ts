@@ -895,6 +895,27 @@ export class PanelLayoutManager implements AppModule {
     this.lazyPanel('wsb-ticker-scanner', () =>
       import('@/components/WsbTickerScannerPanel').then(m => new m.WsbTickerScannerPanel()),
     );
+    this.lazyPanel('energy-disruptions', () =>
+      import('@/components/EnergyDisruptionsPanel').then(m => new m.EnergyDisruptionsPanel()),
+    );
+    this.lazyPanel('fuel-shortages', () =>
+      import('@/components/FuelShortagePanel').then(m => new m.FuelShortagePanel()),
+    );
+    this.lazyPanel('pipeline-status', () =>
+      import('@/components/PipelineStatusPanel').then(m => new m.PipelineStatusPanel()),
+    );
+    this.lazyPanel('storage-facility-map', () =>
+      import('@/components/StorageFacilityMapPanel').then(m => new m.StorageFacilityMapPanel()),
+    );
+    this.lazyPanel('chokepoint-strip', () =>
+      import('@/components/ChokepointStripPanel').then(m => new m.ChokepointStripPanel()),
+    );
+    this.lazyPanel('hormuz-tracker', () =>
+      import('@/components/HormuzPanel').then(m => new m.HormuzPanel()),
+    );
+    this.lazyPanel('energy-risk-overview', () =>
+      import('@/components/EnergyRiskOverviewPanel').then(m => new m.EnergyRiskOverviewPanel()),
+    );
 
     if (this.ctx.isDesktopApp) {
       const runtimeConfigPanel = new RuntimeConfigPanel({ mode: 'alert' });

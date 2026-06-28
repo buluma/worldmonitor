@@ -71,6 +71,7 @@ export interface TransitSummary {
   disruptionPct: number;
   riskSummary: string;
   riskReportAction: string;
+  dataAvailable: boolean;
 }
 
 export interface TransitDayCount {
@@ -79,6 +80,231 @@ export interface TransitDayCount {
   cargo: number;
   other: number;
   total: number;
+}
+
+export interface FlowEstimate {
+  currentMbd: number;
+  baselineMbd: number;
+  flowRatio: number;
+  disrupted: boolean;
+  source: string;
+  hazardAlertLevel: string;
+  hazardAlertName: string;
+}
+
+export interface ListEnergyDisruptionsRequest {
+  assetId: string;
+  assetType: string;
+  ongoingOnly: boolean;
+}
+
+export interface ListEnergyDisruptionsResponse {
+  events: EnergyDisruptionEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface EnergyDisruptionEntry {
+  id: string;
+  assetId: string;
+  assetType: string;
+  eventType: string;
+  startAt: string;
+  endAt: string;
+  capacityOfflineBcmYr: number;
+  capacityOfflineMbd: number;
+  causeChain: string[];
+  shortDescription: string;
+  sources: EnergyDisruptionSource[];
+  classifierVersion: string;
+  classifierConfidence: number;
+  lastEvidenceUpdate: string;
+  countries: string[];
+}
+
+export interface EnergyDisruptionSource {
+  authority: string;
+  title: string;
+  url: string;
+  date: string;
+  sourceType: string;
+}
+
+export interface ListFuelShortagesRequest {
+  country: string;
+  product: string;
+  severity: string;
+}
+
+export interface ListFuelShortagesResponse {
+  shortages: FuelShortageEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface FuelShortageEntry {
+  id: string;
+  country: string;
+  product: string;
+  severity: string;
+  firstSeen: string;
+  lastConfirmed: string;
+  resolvedAt: string;
+  impactTypes: string[];
+  causeChain: string[];
+  shortDescription: string;
+  evidence?: FuelShortageEvidence;
+}
+
+export interface FuelShortageEvidence {
+  evidenceSources: FuelShortageEvidenceSource[];
+  firstRegulatorConfirmation: string;
+  classifierVersion: string;
+  classifierConfidence: number;
+  lastEvidenceUpdate: string;
+}
+
+export interface FuelShortageEvidenceSource {
+  authority: string;
+  title: string;
+  url: string;
+  date: string;
+  sourceType: string;
+}
+
+export interface GetFuelShortageDetailRequest {
+  shortageId: string;
+}
+
+export interface GetFuelShortageDetailResponse {
+  shortage?: FuelShortageEntry;
+  fetchedAt: string;
+  unavailable: boolean;
+}
+
+export interface ListPipelinesRequest {
+  commodityType: string;
+}
+
+export interface ListPipelinesResponse {
+  pipelines: PipelineEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface PipelineEntry {
+  id: string;
+  name: string;
+  operator: string;
+  commodityType: string;
+  fromCountry: string;
+  toCountry: string;
+  transitCountries: string[];
+  capacityBcmYr: number;
+  capacityMbd: number;
+  lengthKm: number;
+  inService: number;
+  startPoint?: { lat: number; lon: number };
+  endPoint?: { lat: number; lon: number };
+  waypoints: Array<{ lat: number; lon: number }>;
+  evidence?: PipelineEvidence;
+  publicBadge: string;
+}
+
+export interface PipelineEvidence {
+  physicalState: string;
+  physicalStateSource: string;
+  operatorStatement?: { text: string; url: string; date: string };
+  commercialState: string;
+  sanctionRefs: Array<{ authority: string; listId: string; date: string; url: string }>;
+  lastEvidenceUpdate: string;
+  classifierVersion: string;
+  classifierConfidence: number;
+}
+
+export interface GetPipelineDetailRequest {
+  pipelineId: string;
+}
+
+export interface GetPipelineDetailResponse {
+  pipeline?: PipelineEntry;
+  revisions: PipelineRevisionEntry[];
+  fetchedAt: string;
+  unavailable: boolean;
+}
+
+export interface PipelineRevisionEntry {
+  date: string;
+  fieldChanged: string;
+  previousValue: string;
+  newValue: string;
+  trigger: string;
+  sourcesUsed: string[];
+  classifierVersion: string;
+}
+
+export interface ListStorageFacilitiesRequest {
+  facilityType: string;
+}
+
+export interface ListStorageFacilitiesResponse {
+  facilities: StorageFacilityEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface StorageFacilityEntry {
+  id: string;
+  name: string;
+  operator: string;
+  facilityType: string;
+  country: string;
+  location?: { lat: number; lon: number };
+  capacityTwh: number;
+  capacityMb: number;
+  capacityMtpa: number;
+  workingCapacityUnit: string;
+  inService: number;
+  evidence?: StorageEvidence;
+  publicBadge: string;
+}
+
+export interface StorageEvidence {
+  physicalState: string;
+  physicalStateSource: string;
+  operatorStatement?: { text: string; url: string; date: string };
+  commercialState: string;
+  sanctionRefs: Array<{ authority: string; listId: string; date: string; url: string }>;
+  fillDisclosed: boolean;
+  fillSource: string;
+  lastEvidenceUpdate: string;
+  classifierVersion: string;
+  classifierConfidence: number;
+}
+
+export interface GetStorageFacilityDetailRequest {
+  facilityId: string;
+}
+
+export interface GetStorageFacilityDetailResponse {
+  facility?: StorageFacilityEntry;
+  revisions: StorageFacilityRevisionEntry[];
+  fetchedAt: string;
+  unavailable: boolean;
+}
+
+export interface StorageFacilityRevisionEntry {
+  date: string;
+  fieldChanged: string;
+  previousValue: string;
+  newValue: string;
+  trigger: string;
+  sourcesUsed: string[];
+  classifierVersion: string;
 }
 
 export interface GetCriticalMineralsRequest {
@@ -154,6 +380,13 @@ export interface SupplyChainServiceHandler {
   getShippingRates(ctx: ServerContext, req: GetShippingRatesRequest): Promise<GetShippingRatesResponse>;
   getChokepointStatus(ctx: ServerContext, req: GetChokepointStatusRequest): Promise<GetChokepointStatusResponse>;
   getCriticalMinerals(ctx: ServerContext, req: GetCriticalMineralsRequest): Promise<GetCriticalMineralsResponse>;
+  listEnergyDisruptions(ctx: ServerContext, req: ListEnergyDisruptionsRequest): Promise<ListEnergyDisruptionsResponse>;
+  listFuelShortages(ctx: ServerContext, req: ListFuelShortagesRequest): Promise<ListFuelShortagesResponse>;
+  getFuelShortageDetail(ctx: ServerContext, req: GetFuelShortageDetailRequest): Promise<GetFuelShortageDetailResponse>;
+  listPipelines(ctx: ServerContext, req: ListPipelinesRequest): Promise<ListPipelinesResponse>;
+  getPipelineDetail(ctx: ServerContext, req: GetPipelineDetailRequest): Promise<GetPipelineDetailResponse>;
+  listStorageFacilities(ctx: ServerContext, req: ListStorageFacilitiesRequest): Promise<ListStorageFacilitiesResponse>;
+  getStorageFacilityDetail(ctx: ServerContext, req: GetStorageFacilityDetailRequest): Promise<GetStorageFacilityDetailResponse>;
 }
 
 export function createSupplyChainServiceRoutes(
@@ -272,6 +505,27 @@ export function createSupplyChainServiceRoutes(
         }
       },
     },
+    ...(['listEnergyDisruptions', 'listFuelShortages', 'getFuelShortageDetail', 'listPipelines', 'getPipelineDetail', 'listStorageFacilities', 'getStorageFacilityDetail'] as const).map(
+      (methodName) => ({
+        method: "POST",
+        path: `/api/supply-chain/v1/${methodName.replace(/([A-Z])/g, '-$1').toLowerCase()}`,
+        handler: async (req: Request): Promise<Response> => {
+          try {
+            const body = await req.json().catch(() => ({}));
+            const ctx: ServerContext = { request: req, pathParams: {}, headers: Object.fromEntries(req.headers.entries()) };
+            const result = await (handler as any)[methodName](ctx, body);
+            return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
+          } catch (err: unknown) {
+            if (err instanceof ValidationError) {
+              return new Response(JSON.stringify({ violations: err.violations }), { status: 400, headers: { "Content-Type": "application/json" } });
+            }
+            if (options?.onError) return options.onError(err, req);
+            const message = err instanceof Error ? err.message : String(err);
+            return new Response(JSON.stringify({ message }), { status: 500, headers: { "Content-Type": "application/json" } });
+          }
+        },
+      })
+    ),
   ];
 }
 
