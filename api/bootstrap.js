@@ -69,6 +69,10 @@ const BOOTSTRAP_CACHE_KEYS = {
   nationalDebt: 'economic:national-debt:v1',
   hfPropagation: 'rf:propagation:v1',
   localAdsb: 'adsb:local:v1',
+  pipelinesGas: 'energy:pipelines:gas:v1',
+  pipelinesOil: 'energy:pipelines:oil:v1',
+  storageFacilities: 'energy:storage-facilities:v1',
+  fuelShortages: 'energy:fuel-shortages:v1',
 };
 
 const BOOTSTRAP_TIERS = {
@@ -85,6 +89,7 @@ const BOOTSTRAP_TIERS = {
   consumerPricesCategories: 'slow', consumerPricesMovers: 'slow', consumerPricesSpread: 'slow', groceryBasket: 'slow',
   bigmac: 'slow', cryptoSectors: 'slow', defiTokens: 'slow', aiTokens: 'slow', otherTokens: 'slow',
   nationalDebt: 'slow', hfPropagation: 'slow', localAdsb: 'fast',
+  pipelinesGas: 'slow', pipelinesOil: 'slow', storageFacilities: 'slow', fuelShortages: 'slow',
 };
 
 const SLOW_KEYS = new Set([
@@ -125,6 +130,10 @@ const SLOW_KEYS = new Set([
   'otherTokens',
   'nationalDebt',
   'hfPropagation',
+  'pipelinesGas',
+  'pipelinesOil',
+  'storageFacilities',
+  'fuelShortages',
 ]);
 
 const FAST_KEYS = new Set([

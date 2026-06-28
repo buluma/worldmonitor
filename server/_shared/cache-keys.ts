@@ -63,6 +63,10 @@ export const BOOTSTRAP_CACHE_KEYS: Record<string, string> = {
   nationalDebt:     'economic:national-debt:v1',
   hfPropagation:    'rf:propagation:v1',
   localAdsb:        'adsb:local:v1',
+  pipelinesGas:     'energy:pipelines:gas:v1',
+  pipelinesOil:     'energy:pipelines:oil:v1',
+  storageFacilities: 'energy:storage-facilities:v1',
+  fuelShortages:    'energy:fuel-shortages:v1',
 };
 
 export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
@@ -94,4 +98,8 @@ export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
   nationalDebt: 'slow',
   hfPropagation: 'slow',
   localAdsb: 'fast',
+  pipelinesGas: 'slow',
+  pipelinesOil: 'slow',
+  storageFacilities: 'slow',
+  fuelShortages: 'slow',
 };
