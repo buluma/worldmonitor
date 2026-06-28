@@ -100,6 +100,11 @@ const FULL_PANELS: Record<string, PanelConfig> = {
   'chokepoint-strip': { name: 'Chokepoint Status Strip', enabled: true, priority: 2 },
   'hormuz-tracker': { name: 'Strait of Hormuz Tracker', enabled: true, priority: 2 },
   'energy-risk-overview': { name: 'Global Energy Risk Overview', enabled: true, priority: 2 },
+  'climate-news': { name: 'Climate News', enabled: true, priority: 2 },
+  'defense-patents': { name: 'R&D Signal', enabled: true, priority: 2 },
+  'social-velocity': { name: 'Social Velocity', enabled: true, priority: 2 },
+  'internet-disruptions': { name: 'Internet Disruptions', enabled: true, priority: 2 },
+  'cross-source-signals': { name: 'Cross-Source Signals', enabled: true, priority: 2 },
 };
 
 const FULL_MAP_LAYERS: MapLayers = {

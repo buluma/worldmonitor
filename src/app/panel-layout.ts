@@ -916,6 +916,21 @@ export class PanelLayoutManager implements AppModule {
     this.lazyPanel('energy-risk-overview', () =>
       import('@/components/EnergyRiskOverviewPanel').then(m => new m.EnergyRiskOverviewPanel()),
     );
+    this.lazyPanel('climate-news', () =>
+      import('@/components/ClimateNewsPanel').then(m => new m.ClimateNewsPanel()),
+    );
+    this.lazyPanel('defense-patents', () =>
+      import('@/components/DefensePatentsPanel').then(m => new m.DefensePatentsPanel()),
+    );
+    this.lazyPanel('social-velocity', () =>
+      import('@/components/SocialVelocityPanel').then(m => new m.SocialVelocityPanel()),
+    );
+    this.lazyPanel('internet-disruptions', () =>
+      import('@/components/InternetDisruptionsPanel').then(m => new m.InternetDisruptionsPanel()),
+    );
+    this.lazyPanel('cross-source-signals', () =>
+      import('@/components/CrossSourceSignalsPanel').then(m => new m.CrossSourceSignalsPanel()),
+    );
 
     if (this.ctx.isDesktopApp) {
       const runtimeConfigPanel = new RuntimeConfigPanel({ mode: 'alert' });

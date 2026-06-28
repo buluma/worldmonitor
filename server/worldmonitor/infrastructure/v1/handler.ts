@@ -9,6 +9,8 @@ import { listTemporalAnomalies } from './list-temporal-anomalies';
 import { getIpGeo } from './get-ip-geo';
 import { reverseGeocode } from './reverse-geocode';
 import { getBootstrapData } from './get-bootstrap-data';
+import { listInternetDdosAttacks } from './list-ddos-attacks';
+import { listInternetTrafficAnomalies } from './list-traffic-anomalies';
 
 export const infrastructureHandler: InfrastructureServiceHandler = {
   getCableHealth,
@@ -20,4 +22,6 @@ export const infrastructureHandler: InfrastructureServiceHandler = {
   getIpGeo,
   reverseGeocode,
   getBootstrapData,
+  listInternetDdosAttacks,
+  listInternetTrafficAnomalies,
 };

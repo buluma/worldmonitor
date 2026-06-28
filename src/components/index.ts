@@ -94,3 +94,8 @@ export { StorageFacilityMapPanel } from './StorageFacilityMapPanel';
 export { ChokepointStripPanel } from './ChokepointStripPanel';
 export { HormuzPanel } from './HormuzPanel';
 export { EnergyRiskOverviewPanel } from './EnergyRiskOverviewPanel';
+export { ClimateNewsPanel } from './ClimateNewsPanel';
+export { DefensePatentsPanel } from './DefensePatentsPanel';
+export { SocialVelocityPanel } from './SocialVelocityPanel';
+export { InternetDisruptionsPanel } from './InternetDisruptionsPanel';
+export { CrossSourceSignalsPanel } from './CrossSourceSignalsPanel';

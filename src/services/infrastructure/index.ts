@@ -10,6 +10,8 @@ import { getRpcBaseUrl } from '@/services/rpc-client';
 import {
   InfrastructureServiceClient,
   type ListInternetOutagesResponse,
+  type ListInternetDdosAttacksResponse,
+  type ListInternetTrafficAnomaliesResponse,
   type ListServiceStatusesResponse,
   type InternetOutage as ProtoOutage,
   type ServiceStatus as ProtoServiceStatus,
@@ -25,9 +27,13 @@ const client = new InfrastructureServiceClient(getRpcBaseUrl(), { fetch: (...arg
 // Optimized: Disabled persistCache to reduce Upstash commands
 const outageBreaker = createCircuitBreaker<ListInternetOutagesResponse>({ name: 'Internet Outages', cacheTtlMs: 60 * 60 * 1000, persistCache: false }); // 30min → 60min
 const statusBreaker = createCircuitBreaker<ListServiceStatusesResponse>({ name: 'Service Statuses', cacheTtlMs: 60 * 60 * 1000, persistCache: false }); // 30min → 60min
+const ddosBreaker = createCircuitBreaker<ListInternetDdosAttacksResponse>({ name: 'DDoS Attacks', cacheTtlMs: 30 * 60 * 1000, persistCache: false });
+const trafficAnomaliesBreaker = createCircuitBreaker<ListInternetTrafficAnomaliesResponse>({ name: 'Traffic Anomalies', cacheTtlMs: 30 * 60 * 1000, persistCache: false });
 
 const emptyOutageFallback: ListInternetOutagesResponse = { outages: [], pagination: undefined };
 const emptyStatusFallback: ListServiceStatusesResponse = { statuses: [] };
+const emptyDdosFallback: ListInternetDdosAttacksResponse = { protocol: [], vector: [], dateRangeStart: '', dateRangeEnd: '', topTargetLocations: [] };
+const emptyAnomaliesFallback: ListInternetTrafficAnomaliesResponse = { anomalies: [], totalCount: 0 };
 
 // ---- Proto enum -> legacy string adapters ----
 
@@ -184,4 +190,26 @@ export async function fetchServiceStatuses(): Promise<ServiceStatusResponse> {
     summary: computeSummary(services),
     services,
   };
+}
+
+export async function fetchDdosAttacks(): Promise<ListInternetDdosAttacksResponse> {
+  const hydrated = getHydratedData('ddosAttacks') as ListInternetDdosAttacksResponse | undefined;
+  if (hydrated?.protocol?.length || hydrated?.vector?.length) return hydrated;
+
+  return ddosBreaker.execute(
+    () => client.listInternetDdosAttacks({}),
+    emptyDdosFallback,
+    { shouldCache: (r) => r.protocol.length > 0 || r.vector.length > 0 },
+  );
+}
+
+export async function fetchTrafficAnomalies(country?: string): Promise<ListInternetTrafficAnomaliesResponse> {
+  const hydrated = getHydratedData('trafficAnomalies') as ListInternetTrafficAnomaliesResponse | undefined;
+  if (hydrated?.anomalies !== undefined && !country) return hydrated;
+
+  return trafficAnomaliesBreaker.execute(
+    () => client.listInternetTrafficAnomalies({ country: country || '' }),
+    emptyAnomaliesFallback,
+    { shouldCache: (r) => r.anomalies.length > 0 },
+  );
 }

@@ -163,6 +163,12 @@ import {
   shouldRefreshDailyBrief,
 } from '@/services/daily-market-brief';
 import { fetchCachedRiskScores } from '@/services/cached-risk-scores';
+import { fetchSocialVelocity } from '@/services/social-velocity';
+import { fetchCrossSourceSignals } from '@/services/cross-source-signals';
+import { fetchDdosAttacks, fetchTrafficAnomalies } from '@/services/infrastructure/index';
+import type { SocialVelocityPanel } from '@/components/SocialVelocityPanel';
+import type { InternetDisruptionsPanel } from '@/components/InternetDisruptionsPanel';
+import type { CrossSourceSignalsPanel } from '@/components/CrossSourceSignalsPanel';
 import type { ThreatLevel as ClientThreatLevel } from '@/types';
 import type { NewsItem as ProtoNewsItem, ThreatLevel as ProtoThreatLevel } from '@/generated/client/worldmonitor/news/v1/service_client';
 
@@ -503,6 +509,12 @@ export class DataLoaderManager implements AppModule {
     }
     if (SITE_VARIANT !== 'happy' && shouldLoad('thermal-escalation')) {
       tasks.push({ name: 'thermalEscalation', task: runGuarded('thermalEscalation', () => this.loadThermalEscalations()) });
+    }
+    if (shouldLoad('social-velocity')) {
+      tasks.push({ name: 'socialVelocity', task: runGuarded('socialVelocity', () => this.loadSocialVelocity()) });
+    }
+    if (SITE_VARIANT !== 'happy' && shouldLoad('cross-source-signals')) {
+      tasks.push({ name: 'crossSourceSignals', task: runGuarded('crossSourceSignals', () => this.loadCrossSourceSignals()) });
     }
 
     // Stagger startup: run tasks in small batches to avoid hammering upstreams
@@ -1608,6 +1620,13 @@ export class DataLoaderManager implements AppModule {
           this.ctx.map?.setLayerReady('outages', outages.length > 0);
           this.ctx.statusPanel?.updateFeed('NetBlocks', { status: 'ok', itemCount: outages.length });
         }
+        (this.ctx.panels['internet-disruptions'] as InternetDisruptionsPanel | undefined)?.setOutages(outages);
+        fetchTrafficAnomalies().then(r => {
+          (this.ctx.panels['internet-disruptions'] as InternetDisruptionsPanel | undefined)?.setAnomalies(r.anomalies);
+        }).catch(() => {});
+        fetchDdosAttacks().then(r => {
+          (this.ctx.panels['internet-disruptions'] as InternetDisruptionsPanel | undefined)?.setDdos(r);
+        }).catch(() => {});
       } catch (error) {
         console.error('[Intelligence] Outages fetch failed:', error);
         dataFreshness.recordError('outages', String(error));
@@ -2823,6 +2842,28 @@ export class DataLoaderManager implements AppModule {
       dataFreshness.recordUpdate('thermal-escalation' as DataSourceId, result.clusters.length);
     } catch (error) {
       console.error('[App] Thermal escalation fetch failed:', error);
+    }
+  }
+
+  async loadSocialVelocity(): Promise<void> {
+    try {
+      const data = await fetchSocialVelocity();
+      if (data.posts?.length) {
+        const panel = this.ctx.panels['social-velocity'] as SocialVelocityPanel | undefined;
+        panel?.updateData(data.posts);
+      }
+    } catch (e) {
+      console.error('[App] Social velocity load failed:', e);
+    }
+  }
+
+  async loadCrossSourceSignals(): Promise<void> {
+    try {
+      const result = await fetchCrossSourceSignals();
+      (this.ctx.panels['cross-source-signals'] as CrossSourceSignalsPanel | undefined)?.setData(result);
+    } catch (e) {
+      console.error('[App] Cross-source signals load failed:', e);
+      (this.ctx.panels['cross-source-signals'] as CrossSourceSignalsPanel | undefined)?.showFetchError();
     }
   }
 }

@@ -74,6 +74,23 @@ export interface ClimateServiceCallOptions {
   signal?: AbortSignal;
 }
 
+export interface ListClimateNewsRequest {
+}
+
+export interface ListClimateNewsResponse {
+  items: ClimateNewsItem[];
+  fetchedAt: number;
+}
+
+export interface ClimateNewsItem {
+  id: string;
+  title: string;
+  url: string;
+  sourceName: string;
+  publishedAt: number;
+  summary: string;
+}
+
 export class ClimateServiceClient {
   private baseURL: string;
   private fetchFn: typeof fetch;
@@ -110,6 +127,29 @@ export class ClimateServiceClient {
     }
 
     return await resp.json() as ListClimateAnomaliesResponse;
+  }
+
+  async listClimateNews(_req: ListClimateNewsRequest, options?: ClimateServiceCallOptions): Promise<ListClimateNewsResponse> {
+    const path = "/api/climate/v1/list-climate-news";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
+    return await resp.json() as ListClimateNewsResponse;
   }
 
   private async handleError(resp: Response): Promise<never> {

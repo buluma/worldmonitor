@@ -423,7 +423,17 @@
     "cryptoHeatmap": "Crypto Heatmap",
     "defiTokens": "DeFi Tokens",
     "aiTokens": "AI Tokens",
-    "otherTokens": "Other Tokens"
+    "otherTokens": "Other Tokens",
+    "climateNews": "Climate News",
+    "defensePatents": "R&D Signal",
+    "socialVelocity": "Social Velocity",
+    "internetDisruptions": "Internet Disruptions",
+    "crossSourceSignals": "Cross-Source Signals",
+    "internetDisruptionsTabs": {
+      "outages": "Outages",
+      "ddos": "DDoS",
+      "anomalies": "Anomalies"
+    }
   },
   "commands": {
     "prefixes": {
@@ -2918,6 +2928,40 @@
         "unavailable": "Hormuz tracker data unavailable",
         "failedToLoad": "Failed to load Hormuz tracker"
       }
+    },
+    "climateNews": {
+      "infoTooltip": "<strong>Climate News</strong> Latest environment and climate intelligence from Carbon Brief, UNEP, NASA, The Guardian, and other authoritative sources. Updated every 30 minutes.",
+      "loadError": "Climate news temporarily unavailable"
+    },
+    "defensePatents": {
+      "title": "R&D Signal",
+      "infoTooltip": "Weekly defense and dual-use patent filings by Raytheon, Lockheed, Huawei, DARPA, and other strategic organizations. Categories: H04B (comms), H01L (semiconductors), F42B (ammunition), G06N (AI), C12N (biotech). Source: USPTO PatentsView.",
+      "loading": "Loading R&D filings…",
+      "error": "Failed to load patent data.",
+      "empty": "No filings in this category.",
+      "viewOnUspto": "View on USPTO",
+      "tabs": {
+        "all": "All"
+      },
+      "cpcLabels": {
+        "H04B": "Comms",
+        "H01L": "Semiconductors",
+        "F42B": "Ammunition",
+        "G06N": "AI",
+        "C12N": "Biotech"
+      }
+    },
+    "socialVelocity": {
+      "infoTooltip": "<strong>Social Velocity</strong> Trending topics and viral content with geopolitical significance. Measures social media velocity: how rapidly a story spreads relative to baseline. Helps surface emerging narratives before they hit mainstream news."
+    },
+    "internetDisruptions": {
+      "noOutages": "No active outages detected",
+      "noDdos": "No DDoS data available",
+      "noAnomalies": "No traffic anomalies detected",
+      "byProtocol": "Attack Protocol",
+      "byVector": "Attack Vector",
+      "topTargets": "Top Target Countries",
+      "infoTooltip": "<strong>Internet Disruptions</strong> Real-time internet outages, DDoS attacks, and traffic anomalies from global network monitoring."
     }
   }
 }

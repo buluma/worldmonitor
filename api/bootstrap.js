@@ -73,6 +73,11 @@ const BOOTSTRAP_CACHE_KEYS = {
   pipelinesOil: 'energy:pipelines:oil:v1',
   storageFacilities: 'energy:storage-facilities:v1',
   fuelShortages: 'energy:fuel-shortages:v1',
+  climateNews: 'climate:news-intelligence:v1',
+  crossSourceSignals: 'intelligence:cross-source-signals:v1',
+  socialVelocity: 'intelligence:social:reddit:v1',
+  ddosAttacks: 'cf:radar:ddos:v1',
+  trafficAnomalies: 'cf:radar:traffic-anomalies:v1',
 };
 
 const BOOTSTRAP_TIERS = {
@@ -90,6 +95,8 @@ const BOOTSTRAP_TIERS = {
   bigmac: 'slow', cryptoSectors: 'slow', defiTokens: 'slow', aiTokens: 'slow', otherTokens: 'slow',
   nationalDebt: 'slow', hfPropagation: 'slow', localAdsb: 'fast',
   pipelinesGas: 'slow', pipelinesOil: 'slow', storageFacilities: 'slow', fuelShortages: 'slow',
+  climateNews: 'slow', crossSourceSignals: 'slow', socialVelocity: 'fast',
+  ddosAttacks: 'fast', trafficAnomalies: 'fast',
 };
 
 const SLOW_KEYS = new Set([
@@ -134,6 +141,8 @@ const SLOW_KEYS = new Set([
   'pipelinesOil',
   'storageFacilities',
   'fuelShortages',
+  'climateNews',
+  'crossSourceSignals',
 ]);
 
 const FAST_KEYS = new Set([
@@ -160,6 +169,9 @@ const FAST_KEYS = new Set([
   'correlationCards',
   'forecasts',
   'localAdsb',
+  'socialVelocity',
+  'ddosAttacks',
+  'trafficAnomalies',
 ]);
 // @gen-cache-keys:end
 

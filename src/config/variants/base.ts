@@ -72,6 +72,10 @@ export const REFRESH_INTERVALS = {
   chokepointStrip: 5 * 60 * 1000,          // 5min — live AIS-backed
   hormuzTracker: 30 * 60 * 1000,           // 30min — server-cached REST
   energyRiskOverview: 5 * 60 * 1000,       // 5min — composed from 4 sources
+  climateNews: 30 * 60 * 1000,             // 30min — seeded every 30min
+  defensePatents: 24 * 60 * 60 * 1000,    // 24h — data is weekly
+  socialVelocity: 15 * 60 * 1000,         // 15min — Reddit velocity score
+  crossSourceSignals: 15 * 60 * 1000,     // 15min — 15+ feed aggregation
 };
 
 // Monitor colors - shared

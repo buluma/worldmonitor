@@ -224,6 +224,53 @@ export interface RouteDescriptor {
   handler: (req: Request) => Promise<Response>;
 }
 
+export interface ListInternetDdosAttacksRequest {
+}
+
+export interface ListInternetDdosAttacksResponse {
+  protocol: DdosAttackSummaryEntry[];
+  vector: DdosAttackSummaryEntry[];
+  dateRangeStart: string;
+  dateRangeEnd: string;
+  topTargetLocations: DdosLocationHit[];
+}
+
+export interface DdosAttackSummaryEntry {
+  label: string;
+  percentage: number;
+}
+
+export interface DdosLocationHit {
+  countryCode: string;
+  countryName: string;
+  percentage: number;
+  latitude: number;
+  longitude: number;
+}
+
+export interface ListInternetTrafficAnomaliesRequest {
+  country: string;
+}
+
+export interface ListInternetTrafficAnomaliesResponse {
+  anomalies: TrafficAnomaly[];
+  totalCount: number;
+}
+
+export interface TrafficAnomaly {
+  uuid: string;
+  type: string;
+  status: string;
+  startDate: number;
+  endDate: number;
+  asn: string;
+  asnName: string;
+  locationCode: string;
+  locationName: string;
+  latitude: number;
+  longitude: number;
+}
+
 export interface InfrastructureServiceHandler {
   listInternetOutages(ctx: ServerContext, req: ListInternetOutagesRequest): Promise<ListInternetOutagesResponse>;
   listServiceStatuses(ctx: ServerContext, req: ListServiceStatusesRequest): Promise<ListServiceStatusesResponse>;
@@ -234,6 +281,8 @@ export interface InfrastructureServiceHandler {
   recordBaselineSnapshot(ctx: ServerContext, req: RecordBaselineSnapshotRequest): Promise<RecordBaselineSnapshotResponse>;
   getCableHealth(ctx: ServerContext, req: GetCableHealthRequest): Promise<GetCableHealthResponse>;
   listTemporalAnomalies(ctx: ServerContext, req: ListTemporalAnomaliesRequest): Promise<ListTemporalAnomaliesResponse>;
+  listInternetDdosAttacks(ctx: ServerContext, req: ListInternetDdosAttacksRequest): Promise<ListInternetDdosAttacksResponse>;
+  listInternetTrafficAnomalies(ctx: ServerContext, req: ListInternetTrafficAnomaliesRequest): Promise<ListInternetTrafficAnomaliesResponse>;
 }
 
 export function createInfrastructureServiceRoutes(
@@ -627,6 +676,68 @@ export function createInfrastructureServiceRoutes(
               headers: { "Content-Type": "application/json" },
             });
           }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/infrastructure/v1/list-internet-ddos-attacks",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const body: ListInternetDdosAttacksRequest = {};
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+          const result = await handler.listInternetDdosAttacks(ctx, body);
+          return new Response(JSON.stringify(result as ListInternetDdosAttacksResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/infrastructure/v1/list-internet-traffic-anomalies",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: ListInternetTrafficAnomaliesRequest = {
+            country: params.get("country") ?? "",
+          };
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+          const result = await handler.listInternetTrafficAnomalies(ctx, body);
+          return new Response(JSON.stringify(result as ListInternetTrafficAnomaliesResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
           if (options?.onError) {
             return options.onError(err, req);
           }

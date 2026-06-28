@@ -67,6 +67,11 @@ export const BOOTSTRAP_CACHE_KEYS: Record<string, string> = {
   pipelinesOil:     'energy:pipelines:oil:v1',
   storageFacilities: 'energy:storage-facilities:v1',
   fuelShortages:    'energy:fuel-shortages:v1',
+  climateNews:      'climate:news-intelligence:v1',
+  crossSourceSignals: 'intelligence:cross-source-signals:v1',
+  socialVelocity:   'intelligence:social:reddit:v1',
+  ddosAttacks:      'cf:radar:ddos:v1',
+  trafficAnomalies: 'cf:radar:traffic-anomalies:v1',
 };
 
 export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
@@ -102,4 +107,9 @@ export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
   pipelinesOil: 'slow',
   storageFacilities: 'slow',
   fuelShortages: 'slow',
+  climateNews: 'slow',
+  crossSourceSignals: 'slow',
+  socialVelocity: 'fast',
+  ddosAttacks: 'fast',
+  trafficAnomalies: 'fast',
 };
