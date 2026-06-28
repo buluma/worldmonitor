@@ -328,6 +328,263 @@ export interface ListOtherTokensResponse {
   tokens: CryptoQuote[];
 }
 
+export interface GetFearGreedIndexRequest {}
+
+export interface FearGreedCategory {
+  score: number;
+  weight: number;
+  contribution: number;
+  degraded: boolean;
+  inputsJson: string;
+}
+
+export interface FearGreedSectorPerformance {
+  symbol: string;
+  name: string;
+  change1d: number;
+}
+
+export interface GetFearGreedIndexResponse {
+  compositeScore: number;
+  compositeLabel: string;
+  previousScore: number;
+  seededAt: string;
+  sentiment?: FearGreedCategory;
+  volatility?: FearGreedCategory;
+  positioning?: FearGreedCategory;
+  trend?: FearGreedCategory;
+  breadth?: FearGreedCategory;
+  momentum?: FearGreedCategory;
+  liquidity?: FearGreedCategory;
+  credit?: FearGreedCategory;
+  macro?: FearGreedCategory;
+  crossAsset?: FearGreedCategory;
+  vix: number;
+  hySpread: number;
+  yield10y: number;
+  putCallRatio: number;
+  pctAbove200d: number;
+  cnnFearGreed: number;
+  cnnLabel: string;
+  aaiiBull: number;
+  aaiiBear: number;
+  fedRate: string;
+  unavailable: boolean;
+  fsiValue: number;
+  fsiLabel: string;
+  hygPrice: number;
+  tltPrice: number;
+  sectorPerformance: FearGreedSectorPerformance[];
+}
+
+export interface GetMarketBreadthHistoryRequest {}
+
+export interface BreadthSnapshot {
+  date: string;
+  pctAbove20d: number | null;
+  pctAbove50d: number | null;
+  pctAbove200d: number | null;
+}
+
+export interface GetMarketBreadthHistoryResponse {
+  currentPctAbove20d: number | null;
+  currentPctAbove50d: number | null;
+  currentPctAbove200d: number | null;
+  updatedAt: string;
+  history: BreadthSnapshot[];
+  unavailable: boolean;
+}
+
+export interface GetCotPositioningRequest {}
+
+export interface CotInstrument {
+  name: string;
+  code: string;
+  reportDate: string;
+  assetManagerLong: number;
+  assetManagerShort: number;
+  leveragedFundsLong: number;
+  leveragedFundsShort: number;
+  dealerLong: number;
+  dealerShort: number;
+  netPct: number;
+}
+
+export interface GetCotPositioningResponse {
+  instruments: CotInstrument[];
+  reportDate: string;
+  unavailable: boolean;
+}
+
+export interface GetGoldIntelligenceRequest {}
+
+export interface GoldCrossCurrencyPrice {
+  currency: string;
+  flag: string;
+  price: number;
+}
+
+export interface GoldSessionRange {
+  dayHigh: number;
+  dayLow: number;
+  prevClose: number;
+}
+
+export interface GoldReturns {
+  w1: number;
+  m1: number;
+  ytd: number;
+  y1: number;
+}
+
+export interface GoldRange52w {
+  hi: number;
+  lo: number;
+  positionPct: number;
+}
+
+export interface GoldCotCategory {
+  longPositions: number;
+  shortPositions: number;
+  netPct: number;
+  oiSharePct: number;
+  wowNetDelta: number;
+}
+
+export interface GoldCotPositioning {
+  reportDate: string;
+  nextReleaseDate: string;
+  openInterest: number;
+  managedMoney?: GoldCotCategory;
+  producerSwap?: GoldCotCategory;
+}
+
+export interface GoldDriver {
+  symbol: string;
+  label: string;
+  value: number;
+  changePct: number;
+  correlation30d: number;
+}
+
+export interface GoldCbHolder {
+  iso3: string;
+  name: string;
+  tonnes: number;
+  pctOfReserves: number;
+}
+
+export interface GoldCbMover {
+  iso3: string;
+  name: string;
+  deltaTonnes12m: number;
+}
+
+export interface GoldCbReserves {
+  asOfMonth: string;
+  totalTonnes: number;
+  topHolders: GoldCbHolder[];
+  topBuyers12m: GoldCbMover[];
+  topSellers12m: GoldCbMover[];
+}
+
+export interface GoldEtfFlows {
+  asOfDate: string;
+  tonnes: number;
+  aumUsd: number;
+  nav: number;
+  changeW1Tonnes: number;
+  changeM1Tonnes: number;
+  changeY1Tonnes: number;
+  changeW1Pct: number;
+  changeM1Pct: number;
+  changeY1Pct: number;
+  sparkline90d: number[];
+}
+
+export interface GetGoldIntelligenceResponse {
+  goldPrice: number;
+  goldChangePct: number;
+  goldSparkline: number[];
+  silverPrice: number;
+  platinumPrice: number;
+  palladiumPrice: number;
+  goldSilverRatio?: number;
+  goldPlatinumPremiumPct?: number;
+  crossCurrencyPrices: GoldCrossCurrencyPrice[];
+  cot?: GoldCotPositioning;
+  updatedAt: string;
+  unavailable: boolean;
+  session?: GoldSessionRange;
+  returns?: GoldReturns;
+  range52w?: GoldRange52w;
+  drivers: GoldDriver[];
+  etfFlows?: GoldEtfFlows;
+  cbReserves?: GoldCbReserves;
+}
+
+export interface GetHyperliquidFlowRequest {}
+
+export interface HyperliquidAssetFlow {
+  symbol: string;
+  display: string;
+  assetClass: string;
+  group: string;
+  funding: string;
+  openInterest: string;
+  markPx: string;
+  oraclePx: string;
+  dayNotional: string;
+  fundingScore: number;
+  volumeScore: number;
+  oiScore: number;
+  basisScore: number;
+  composite: number;
+  sparkFunding: number[];
+  sparkOi: number[];
+  sparkScore: number[];
+  warmup: boolean;
+  stale: boolean;
+  staleSince: number;
+  missingPolls: number;
+  alerts: string[];
+}
+
+export interface GetHyperliquidFlowResponse {
+  ts: number;
+  fetchedAt: string;
+  warmup: boolean;
+  assetCount: number;
+  assets: HyperliquidAssetFlow[];
+  unavailable: boolean;
+}
+
+export interface ListEarningsCalendarRequest {
+  fromDate: string;
+  toDate: string;
+}
+
+export interface EarningsEntry {
+  symbol: string;
+  company: string;
+  date: string;
+  hour: string;
+  epsEstimate: number | null;
+  revenueEstimate: number | null;
+  epsActual: number | null;
+  revenueActual: number | null;
+  hasActuals: boolean;
+  surpriseDirection: string;
+}
+
+export interface ListEarningsCalendarResponse {
+  earnings: EarningsEntry[];
+  fromDate: string;
+  toDate: string;
+  total: number;
+  unavailable: boolean;
+}
+
 export interface FieldViolation {
   field: string;
   description: string;
@@ -769,6 +1026,57 @@ export class MarketServiceClient {
     }
 
     return await resp.json() as ListOtherTokensResponse;
+  }
+
+  async getFearGreedIndex(_req: GetFearGreedIndexRequest, options?: MarketServiceCallOptions): Promise<GetFearGreedIndexResponse> {
+    const url = this.baseURL + "/api/market/v1/get-fear-greed-index";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetFearGreedIndexResponse;
+  }
+
+  async getMarketBreadthHistory(_req: GetMarketBreadthHistoryRequest, options?: MarketServiceCallOptions): Promise<GetMarketBreadthHistoryResponse> {
+    const url = this.baseURL + "/api/market/v1/get-market-breadth-history";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetMarketBreadthHistoryResponse;
+  }
+
+  async getCotPositioning(_req: GetCotPositioningRequest, options?: MarketServiceCallOptions): Promise<GetCotPositioningResponse> {
+    const url = this.baseURL + "/api/market/v1/get-cot-positioning";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetCotPositioningResponse;
+  }
+
+  async getGoldIntelligence(_req: GetGoldIntelligenceRequest, options?: MarketServiceCallOptions): Promise<GetGoldIntelligenceResponse> {
+    const url = this.baseURL + "/api/market/v1/get-gold-intelligence";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetGoldIntelligenceResponse;
+  }
+
+  async getHyperliquidFlow(_req: GetHyperliquidFlowRequest, options?: MarketServiceCallOptions): Promise<GetHyperliquidFlowResponse> {
+    const url = this.baseURL + "/api/market/v1/get-hyperliquid-flow";
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as GetHyperliquidFlowResponse;
+  }
+
+  async listEarningsCalendar(req: ListEarningsCalendarRequest, options?: MarketServiceCallOptions): Promise<ListEarningsCalendarResponse> {
+    const params = new URLSearchParams();
+    if (req.fromDate != null && req.fromDate !== "") params.set("fromDate", req.fromDate);
+    if (req.toDate != null && req.toDate !== "") params.set("toDate", req.toDate);
+    const url = this.baseURL + "/api/market/v1/list-earnings-calendar" + (params.toString() ? "?" + params.toString() : "");
+    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
+    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
+    if (!resp.ok) return this.handleError(resp);
+    return await resp.json() as ListEarningsCalendarResponse;
   }
 
   private async handleError(resp: Response): Promise<never> {

@@ -411,6 +411,15 @@
     "yieldCurve": "Yield Curve & Rates",
     "economicCalendar": "Economic Calendar",
     "faoFoodPriceIndex": "FAO Food Price Index",
+    "fearGreed": "Fear & Greed",
+    "marketBreadth": "Market Breadth",
+    "cotPositioning": "COT Positioning",
+    "liquidityShifts": "Liquidity Shifts",
+    "positioning247": "24/7 Positioning",
+    "goldIntelligence": "Gold Intelligence",
+    "aaiiSentiment": "AAII Sentiment",
+    "earningsCalendar": "Earnings Calendar",
+    "wsbTickerScanner": "WSB Ticker Scanner",
     "cryptoHeatmap": "Crypto Heatmap",
     "defiTokens": "DeFi Tokens",
     "aiTokens": "AI Tokens",
@@ -1966,6 +1975,65 @@
       "dairy": "Dairy",
       "oils": "Oils",
       "sugar": "Sugar"
+    },
+    "fearGreed": {
+      "infoTooltip": "<strong>Fear & Greed Index</strong> Composite sentiment index from 10 weighted categories: volatility, positioning, breadth, momentum, liquidity, credit, macro, cross-asset, sentiment, and trend. Score 0-100; below 20 = extreme fear, above 80 = extreme greed."
+    },
+    "marketBreadth": {
+      "infoTooltip": "<strong>Market Breadth</strong> Percentage of S&P 500 stocks trading above their 20, 50, and 200-day simple moving averages. A measure of market participation and internal strength."
+    },
+    "cotPositioning": {
+      "infoTooltip": "<strong>CFTC COT Positioning</strong> Commitment of Traders report — net positions of asset managers and leveraged funds across major futures markets. Source: CFTC Disaggregated + TFF reports, released weekly."
+    },
+    "liquidityShifts": {
+      "title": "Liquidity Shifts",
+      "infoTooltip": "<strong>Liquidity Shifts</strong> Net positioning from the CFTC COT report combined with live large-cap stock flows. Asset manager net % = (long−short)/(long+short). Leveraged funds column only shown where applicable (TFF-reported instruments).",
+      "cotSection": "CFTC Positioning",
+      "stocksSection": "Mega-Cap Flows",
+      "noCot": "COT data unavailable",
+      "noStocks": "Stock data unavailable",
+      "lev": "Lev:",
+      "longShort": "L {{long}} / S {{short}}",
+      "reportDate": "Report date: {{date}}",
+      "unavailable": "Liquidity data unavailable",
+      "failed": "Failed to load liquidity data"
+    },
+    "positioning247": {
+      "title": "24/7 Positioning",
+      "infoTooltip": "<strong>24/7 Positioning</strong> Real-time perpetual futures positioning via Hyperliquid. Composite score (0-100) combines funding rate, open interest, volume, and basis. Elevated scores (≥40) highlight instruments with significant directional pressure.",
+      "commodities": "Commodities",
+      "crypto": "Crypto",
+      "fx": "FX",
+      "warmup": "Warming up — building baseline samples. Data appears within a few minutes.",
+      "footer": "Hyperliquid perpetuals · scores update every 5 minutes"
+    },
+    "goldIntelligence": {
+      "infoTooltip": "<strong>Gold Intelligence</strong> Comprehensive gold market dashboard: spot price, session range, 52-week range, returns, metals complex (silver/platinum/palladium), cross-currency pricing, CFTC COT positioning, SPDR GLD physical flows, central bank reserves, and macro drivers."
+    },
+    "aaiiSentiment": {
+      "infoTooltip": "<strong>AAII Investor Sentiment</strong> Weekly survey of individual investors reporting their 6-month market outlook as bullish, neutral, or bearish. Bull-bear spread below -20% is a historical contrarian buy signal. Source: American Association of Individual Investors."
+    },
+    "earningsCalendar": {
+      "title": "Earnings Calendar",
+      "infoTooltip": "<strong>Earnings Calendar</strong> Upcoming and recent earnings reports with EPS and revenue estimates vs actuals. BMO = before market open, AMC = after market close.",
+      "today": "TODAY · {{date}}",
+      "tomorrow": "TOMORROW · {{date}}",
+      "epsEstimate": "Est. {{value}}",
+      "epsActual": "{{value}}",
+      "revenueEstimate": "Rev est. {{value}}",
+      "revenueActual": "Rev {{value}}",
+      "surprise": {
+        "beat": "Beat",
+        "miss": "Miss",
+        "inLine": "In-line"
+      },
+      "errors": {
+        "noData": "No earnings data available",
+        "failedToLoad": "Failed to load earnings data"
+      }
+    },
+    "wsbTickerScanner": {
+      "infoTooltip": "<strong>WSB Ticker Scanner</strong> Trending stock tickers from Reddit: r/wallstreetbets, r/stocks, r/investing. Sorted by mention count. Velocity score measures rate of mention acceleration."
     },
     "panel": {
       "showMethodologyInfo": "Show methodology info",

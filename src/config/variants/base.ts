@@ -56,6 +56,15 @@ export const REFRESH_INTERVALS = {
   yieldCurve: 60 * 60 * 1000,               // 1h — FRED/ECB
   economicCalendar: 60 * 60 * 1000,         // 1h — upcoming events
   faoFoodPriceIndex: 24 * 60 * 60 * 1000,  // 24h — FAO monthly data
+  fearGreed: 30 * 60 * 1000,               // 30min — composite sentiment
+  marketBreadth: 4 * 60 * 60 * 1000,       // 4h — S&P breadth
+  cotPositioning: 6 * 60 * 60 * 1000,      // 6h — CFTC COT (weekly release)
+  liquidityShifts: 15 * 60 * 1000,         // 15min — COT + live quotes
+  positioning247: 5 * 60 * 1000,           // 5min — Hyperliquid live
+  goldIntelligence: 30 * 60 * 1000,        // 30min — price + positioning
+  aaiiSentiment: 24 * 60 * 60 * 1000,      // 24h — weekly AAII survey
+  earningsCalendar: 2 * 60 * 60 * 1000,    // 2h — earnings dates
+  wsbTickerScanner: 15 * 60 * 1000,        // 15min — Reddit mentions
 };
 
 // Monitor colors - shared

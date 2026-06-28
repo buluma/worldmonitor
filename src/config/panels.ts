@@ -83,6 +83,15 @@ const FULL_PANELS: Record<string, PanelConfig> = {
   'yield-curve': { name: 'Yield Curve & Rates', enabled: true, priority: 2 },
   'economic-calendar': { name: 'Economic Calendar', enabled: true, priority: 2 },
   'fao-food-price-index': { name: 'FAO Food Price Index', enabled: true, priority: 2 },
+  'fear-greed': { name: 'Fear & Greed', enabled: true, priority: 2 },
+  'market-breadth': { name: 'Market Breadth', enabled: true, priority: 2 },
+  'cot-positioning': { name: 'COT Positioning', enabled: true, priority: 2 },
+  'liquidity-shifts': { name: 'Liquidity Shifts', enabled: true, priority: 2 },
+  'positioning-247': { name: '24/7 Positioning', enabled: true, priority: 2 },
+  'gold-intelligence': { name: 'Gold Intelligence', enabled: true, priority: 2 },
+  'aaii-sentiment': { name: 'AAII Sentiment', enabled: true, priority: 2 },
+  'earnings-calendar': { name: 'Earnings Calendar', enabled: true, priority: 2 },
+  'wsb-ticker-scanner': { name: 'WSB Ticker Scanner', enabled: true, priority: 2 },
 };
 
 const FULL_MAP_LAYERS: MapLayers = {

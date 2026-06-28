@@ -868,6 +868,33 @@ export class PanelLayoutManager implements AppModule {
     this.lazyPanel('fao-food-price-index', () =>
       import('@/components/FaoFoodPriceIndexPanel').then(m => new m.FaoFoodPriceIndexPanel()),
     );
+    this.lazyPanel('fear-greed', () =>
+      import('@/components/FearGreedPanel').then(m => new m.FearGreedPanel()),
+    );
+    this.lazyPanel('market-breadth', () =>
+      import('@/components/MarketBreadthPanel').then(m => new m.MarketBreadthPanel()),
+    );
+    this.lazyPanel('cot-positioning', () =>
+      import('@/components/CotPositioningPanel').then(m => new m.CotPositioningPanel()),
+    );
+    this.lazyPanel('liquidity-shifts', () =>
+      import('@/components/LiquidityShiftsPanel').then(m => new m.LiquidityShiftsPanel()),
+    );
+    this.lazyPanel('positioning-247', () =>
+      import('@/components/PositioningPanel').then(m => new m.PositioningPanel()),
+    );
+    this.lazyPanel('gold-intelligence', () =>
+      import('@/components/GoldIntelligencePanel').then(m => new m.GoldIntelligencePanel()),
+    );
+    this.lazyPanel('aaii-sentiment', () =>
+      import('@/components/AAIISentimentPanel').then(m => new m.AAIISentimentPanel()),
+    );
+    this.lazyPanel('earnings-calendar', () =>
+      import('@/components/EarningsCalendarPanel').then(m => new m.EarningsCalendarPanel()),
+    );
+    this.lazyPanel('wsb-ticker-scanner', () =>
+      import('@/components/WsbTickerScannerPanel').then(m => new m.WsbTickerScannerPanel()),
+    );
 
     if (this.ctx.isDesktopApp) {
       const runtimeConfigPanel = new RuntimeConfigPanel({ mode: 'alert' });
