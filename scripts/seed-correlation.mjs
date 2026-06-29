@@ -115,7 +115,7 @@ function normalizeToCode(country, lat, lon) {
 const COUNTRY_NAME_ENTRIES = Object.entries(COUNTRY_NAME_TO_ISO2)
   .filter(([name]) => name.length >= 2)
   .sort((a, b) => b[0].length - a[0].length)
-  .map(([name, code]) => ({ name, code, regex: new RegExp(`\b${name.replace(/[.*+?^${}()|[\]\]/g, '\$&')}\b`, 'i') }));
+  .map(([name, code]) => ({ name, code, regex: new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i') }));
 
 export function matchCountryNamesInText(text) {
   const matched = [];
