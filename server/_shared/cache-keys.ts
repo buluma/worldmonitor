@@ -73,6 +73,15 @@ export const BOOTSTRAP_CACHE_KEYS: Record<string, string> = {
   ddosAttacks:      'cf:radar:ddos:v1',
   trafficAnomalies: 'cf:radar:traffic-anomalies:v1',
   diseaseOutbreaks: 'health:disease-outbreaks:v1',
+  fearGreedIndex:    'market:fear-greed:v1',
+  breadthHistory:    'market:breadth-history:v1',
+  cotPositioning:    'market:cot:v1',
+  aaiiSentiment:     'market:aaii-sentiment:v1',
+  earningsCalendar:  'market:earnings-calendar:v1',
+  econCalendar:      'economic:econ-calendar:v1',
+  energyCrisisPolicies: 'energy:crisis-policies:v1',
+  faoFoodPriceIndex: 'economic:fao-ffpi:v1',
+  yieldCurveEu:      'economic:yield-curve-eu:v1',
 };
 
 export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
@@ -114,6 +123,9 @@ export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
   ddosAttacks: 'fast',
   trafficAnomalies: 'fast',
   diseaseOutbreaks: 'slow',
+  fearGreedIndex: 'slow', breadthHistory: 'slow', cotPositioning: 'slow',
+  aaiiSentiment: 'slow', earningsCalendar: 'slow', econCalendar: 'slow',
+  energyCrisisPolicies: 'slow', faoFoodPriceIndex: 'slow', yieldCurveEu: 'slow',
 };
 
 export const HEALTH_AIR_QUALITY_KEY = 'health:air-quality:v1';

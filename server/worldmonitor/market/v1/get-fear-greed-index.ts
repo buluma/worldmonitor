@@ -6,7 +6,7 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/market/v1/service_server';
 import { getCachedJson } from '../../../_shared/redis';
 
-const SEED_KEY = 'market:fear-greed-index:v1';
+const SEED_KEY = 'market:fear-greed:v1';
 
 const EMPTY: GetFearGreedIndexResponse = {
   compositeScore: 0, compositeLabel: '', previousScore: 0, seededAt: '',

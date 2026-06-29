@@ -79,6 +79,15 @@ const BOOTSTRAP_CACHE_KEYS = {
   ddosAttacks: 'cf:radar:ddos:v1',
   trafficAnomalies: 'cf:radar:traffic-anomalies:v1',
   diseaseOutbreaks: 'health:disease-outbreaks:v1',
+  fearGreedIndex:    'market:fear-greed:v1',
+  breadthHistory:    'market:breadth-history:v1',
+  cotPositioning:    'market:cot:v1',
+  aaiiSentiment:     'market:aaii-sentiment:v1',
+  earningsCalendar:  'market:earnings-calendar:v1',
+  econCalendar:      'economic:econ-calendar:v1',
+  energyCrisisPolicies: 'energy:crisis-policies:v1',
+  faoFoodPriceIndex: 'economic:fao-ffpi:v1',
+  yieldCurveEu:      'economic:yield-curve-eu:v1',
 };
 
 const BOOTSTRAP_TIERS = {
@@ -99,6 +108,9 @@ const BOOTSTRAP_TIERS = {
   climateNews: 'slow', crossSourceSignals: 'slow', socialVelocity: 'fast',
   ddosAttacks: 'fast', trafficAnomalies: 'fast',
   diseaseOutbreaks: 'slow',
+  fearGreedIndex: 'slow', breadthHistory: 'slow', cotPositioning: 'slow',
+  aaiiSentiment: 'slow', earningsCalendar: 'slow', econCalendar: 'slow',
+  energyCrisisPolicies: 'slow', faoFoodPriceIndex: 'slow', yieldCurveEu: 'slow',
 };
 
 const SLOW_KEYS = new Set([
@@ -146,6 +158,15 @@ const SLOW_KEYS = new Set([
   'climateNews',
   'crossSourceSignals',
   'diseaseOutbreaks',
+  'fearGreedIndex',
+  'breadthHistory',
+  'cotPositioning',
+  'aaiiSentiment',
+  'earningsCalendar',
+  'econCalendar',
+  'energyCrisisPolicies',
+  'faoFoodPriceIndex',
+  'yieldCurveEu',
 ]);
 
 const FAST_KEYS = new Set([

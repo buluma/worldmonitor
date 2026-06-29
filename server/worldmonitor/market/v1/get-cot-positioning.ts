@@ -6,7 +6,7 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/market/v1/service_server';
 import { getCachedJson } from '../../../_shared/redis';
 
-const SEED_KEY = 'market:cot-positioning:v1';
+const SEED_KEY = 'market:cot:v1';
 
 const EMPTY: GetCotPositioningResponse = { instruments: [], reportDate: '', unavailable: true };
 
