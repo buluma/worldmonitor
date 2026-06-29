@@ -1,3 +1,5 @@
+import { unwrapEnvelope } from './seed-envelope';
+
 const REDIS_OP_TIMEOUT_MS = 1_500;
 const REDIS_PIPELINE_TIMEOUT_MS = 5_000;
 
@@ -59,7 +61,8 @@ export async function getCachedJson(key: string, raw = false): Promise<unknown |
     const { localCacheGet } = await import('./local-cache-store');
     try {
       const rawValue = await localCacheGet(finalKey);
-      return rawValue ? JSON.parse(rawValue) : null;
+      // Envelope-aware: unwrap contract-mode canonical keys; legacy values pass through.
+      return rawValue ? unwrapEnvelope(JSON.parse(rawValue)).data : null;
     } catch (err) {
       console.warn('[redis] local getCachedJson failed:', errMsg(err));
       return null;
@@ -76,7 +79,10 @@ export async function getCachedJson(key: string, raw = false): Promise<unknown |
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as { result?: string };
-    return data.result ? JSON.parse(data.result) : null;
+    // Envelope-aware by default — RPC consumers get the bare payload regardless
+    // of whether the writer has migrated to contract mode. Legacy shapes pass
+    // through unchanged (unwrapEnvelope returns {_seed: null, data: raw}).
+    return data.result ? unwrapEnvelope(JSON.parse(data.result)).data : null;
   } catch (err) {
     console.warn('[redis] getCachedJson failed:', errMsg(err));
     return null;
@@ -138,7 +144,7 @@ export async function getCachedJsonBatch(keys: string[]): Promise<Map<string, un
         if (!raw) continue;
         try {
           const parsed = JSON.parse(raw);
-          if (parsed !== NEG_SENTINEL) result.set(key, parsed);
+          if (parsed !== NEG_SENTINEL) result.set(key, unwrapEnvelope(parsed).data);
         } catch {
           // skip malformed local entries
         }
@@ -169,7 +175,8 @@ export async function getCachedJsonBatch(keys: string[]): Promise<Map<string, un
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          if (parsed !== NEG_SENTINEL) result.set(keys[i]!, parsed);
+          // Envelope-aware: unwrap contract-mode canonical keys; legacy values pass through.
+          if (parsed !== NEG_SENTINEL) result.set(keys[i]!, unwrapEnvelope(parsed).data);
         } catch { /* skip malformed */ }
       }
     }

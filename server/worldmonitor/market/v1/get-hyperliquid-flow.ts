@@ -6,59 +6,108 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/market/v1/service_server';
 import { getCachedJson } from '../../../_shared/redis';
 
-const SEED_KEY = 'market:hyperliquid-flow:v1';
+const SEED_CACHE_KEY = 'market:hyperliquid:flow:v1';
 
-const EMPTY: GetHyperliquidFlowResponse = {
-  ts: 0, fetchedAt: '', warmup: false, assetCount: 0, assets: [], unavailable: true,
-};
+interface SeededAsset {
+  symbol?: string;
+  display?: string;
+  class?: string;
+  group?: string;
+  funding?: number | null;
+  openInterest?: number | null;
+  markPx?: number | null;
+  oraclePx?: number | null;
+  dayNotional?: number | null;
+  fundingScore?: number;
+  volumeScore?: number;
+  oiScore?: number;
+  basisScore?: number;
+  composite?: number;
+  sparkFunding?: number[];
+  sparkOi?: number[];
+  sparkScore?: number[];
+  warmup?: boolean;
+  stale?: boolean;
+  staleSince?: number | null;
+  missingPolls?: number;
+  alerts?: string[];
+}
+
+interface SeededSnapshot {
+  ts?: number;
+  fetchedAt?: string;
+  warmup?: boolean;
+  assetCount?: number;
+  assets?: SeededAsset[];
+}
+
+function numToStr(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '' : String(v);
+}
+
+function arr(a: number[] | undefined): number[] {
+  return Array.isArray(a) ? a.filter((v) => Number.isFinite(v)) : [];
+}
 
 export async function getHyperliquidFlow(
   _ctx: ServerContext,
   _req: GetHyperliquidFlowRequest,
 ): Promise<GetHyperliquidFlowResponse> {
   try {
-    const raw = await getCachedJson(SEED_KEY, true) as Record<string, unknown> | null;
-    if (!raw || raw.unavailable) return EMPTY;
-
-    const assets: HyperliquidAssetFlow[] = (Array.isArray(raw.assets) ? raw.assets : []).map(
-      (e: unknown) => {
-        const r = e as Record<string, unknown>;
-        return {
-          symbol: String(r.symbol ?? ''),
-          display: String(r.display ?? ''),
-          assetClass: String(r.assetClass ?? r.asset_class ?? ''),
-          group: String(r.group ?? ''),
-          funding: String(r.funding ?? ''),
-          openInterest: String(r.openInterest ?? r.open_interest ?? ''),
-          markPx: String(r.markPx ?? r.mark_px ?? ''),
-          oraclePx: String(r.oraclePx ?? r.oracle_px ?? ''),
-          dayNotional: String(r.dayNotional ?? r.day_notional ?? ''),
-          fundingScore: Number(r.fundingScore ?? r.funding_score ?? 0),
-          volumeScore: Number(r.volumeScore ?? r.volume_score ?? 0),
-          oiScore: Number(r.oiScore ?? r.oi_score ?? 0),
-          basisScore: Number(r.basisScore ?? r.basis_score ?? 0),
-          composite: Number(r.composite ?? 0),
-          sparkFunding: Array.isArray(r.sparkFunding ?? r.spark_funding) ? (r.sparkFunding ?? r.spark_funding) as number[] : [],
-          sparkOi: Array.isArray(r.sparkOi ?? r.spark_oi) ? (r.sparkOi ?? r.spark_oi) as number[] : [],
-          sparkScore: Array.isArray(r.sparkScore ?? r.spark_score) ? (r.sparkScore ?? r.spark_score) as number[] : [],
-          warmup: Boolean(r.warmup),
-          stale: Boolean(r.stale),
-          staleSince: Number(r.staleSince ?? r.stale_since ?? 0),
-          missingPolls: Number(r.missingPolls ?? r.missing_polls ?? 0),
-          alerts: Array.isArray(r.alerts) ? r.alerts as string[] : [],
-        };
-      },
-    );
-
+    const raw = await getCachedJson(SEED_CACHE_KEY, true) as SeededSnapshot | null;
+    if (!raw?.assets || raw.assets.length === 0) {
+      // No error — seeder hasn't run yet, or empty snapshot. Distinguish from
+      // parse/Redis failures below (those hit the catch and log).
+      return {
+        ts: '0',
+        fetchedAt: '',
+        warmup: true,
+        assetCount: 0,
+        assets: [],
+        unavailable: true,
+      };
+    }
+    const assets: HyperliquidAssetFlow[] = raw.assets.map((a) => ({
+      symbol: String(a.symbol ?? ''),
+      display: String(a.display ?? ''),
+      assetClass: String(a.class ?? ''),
+      group: String(a.group ?? ''),
+      funding: numToStr(a.funding ?? null),
+      openInterest: numToStr(a.openInterest ?? null),
+      markPx: numToStr(a.markPx ?? null),
+      oraclePx: numToStr(a.oraclePx ?? null),
+      dayNotional: numToStr(a.dayNotional ?? null),
+      fundingScore: Number(a.fundingScore ?? 0),
+      volumeScore: Number(a.volumeScore ?? 0),
+      oiScore: Number(a.oiScore ?? 0),
+      basisScore: Number(a.basisScore ?? 0),
+      composite: Number(a.composite ?? 0),
+      sparkFunding: arr(a.sparkFunding),
+      sparkOi: arr(a.sparkOi),
+      sparkScore: arr(a.sparkScore),
+      warmup: Boolean(a.warmup),
+      stale: Boolean(a.stale),
+      staleSince: String(a.staleSince ?? 0),
+      missingPolls: Number(a.missingPolls ?? 0),
+      alerts: Array.isArray(a.alerts) ? a.alerts.map((x) => String(x)) : [],
+    }));
     return {
-      ts: Number(raw.ts ?? 0),
-      fetchedAt: String(raw.fetchedAt ?? raw.fetched_at ?? ''),
+      ts: String(raw.ts ?? 0),
+      fetchedAt: String(raw.fetchedAt ?? ''),
       warmup: Boolean(raw.warmup),
-      assetCount: Number(raw.assetCount ?? raw.asset_count ?? assets.length),
+      assetCount: assets.length,
       assets,
       unavailable: false,
     };
-  } catch {
-    return EMPTY;
+  } catch (err) {
+    console.error('[getHyperliquidFlow] Redis read or parse failed:', err instanceof Error ? err.message : err);
+    return {
+      ts: '0',
+      fetchedAt: '',
+      warmup: true,
+      assetCount: 0,
+      assets: [],
+      unavailable: true,
+    };
   }
 }

@@ -13,28 +13,17 @@ import { getCachedJson } from '../../../_shared/redis';
 
 const SEED_CACHE_KEY = 'economic:fuel-prices:v1';
 
-const EMPTY: ListFuelPricesResponse = {
-  countries: [],
-  fetchedAt: '',
-  cheapestGasoline: '',
-  cheapestDiesel: '',
-  mostExpensiveGasoline: '',
-  mostExpensiveDiesel: '',
-  wowAvailable: false,
-  prevFetchedAt: '',
-  sourceCount: 0,
-  countryCount: 0,
-};
-
 export async function listFuelPrices(
   _ctx: ServerContext,
   _req: ListFuelPricesRequest,
 ): Promise<ListFuelPricesResponse> {
   try {
     const result = await getCachedJson(SEED_CACHE_KEY, true) as ListFuelPricesResponse | null;
-    if (!result?.countries?.length) return EMPTY;
+    if (!result?.countries?.length) {
+      return { countries: [], fetchedAt: '', cheapestGasoline: '', cheapestDiesel: '', mostExpensiveGasoline: '', mostExpensiveDiesel: '', wowAvailable: false, prevFetchedAt: '', sourceCount: 0, countryCount: 0 };
+    }
     return result;
   } catch {
-    return EMPTY;
+    return { countries: [], fetchedAt: '', cheapestGasoline: '', cheapestDiesel: '', mostExpensiveGasoline: '', mostExpensiveDiesel: '', wowAvailable: false, prevFetchedAt: '', sourceCount: 0, countryCount: 0 };
   }
 }

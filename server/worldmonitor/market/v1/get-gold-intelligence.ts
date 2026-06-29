@@ -2,31 +2,182 @@ import type {
   ServerContext,
   GetGoldIntelligenceRequest,
   GetGoldIntelligenceResponse,
+  GoldCrossCurrencyPrice,
+  GoldCotPositioning,
+  GoldCotCategory,
+  GoldSessionRange,
+  GoldReturns,
+  GoldRange52w,
+  GoldDriver,
+  GoldEtfFlows,
+  GoldCbReserves,
   GoldCbHolder,
   GoldCbMover,
-  GoldDriver,
-  GoldCrossCurrencyPrice,
 } from '../../../../src/generated/server/worldmonitor/market/v1/service_server';
 import { getCachedJson } from '../../../_shared/redis';
 
-const SEED_KEY = 'market:gold-intelligence:v1';
+const COMMODITY_KEY = 'market:commodities-bootstrap:v1';
+const COT_KEY = 'market:cot:v1';
+const GOLD_EXTENDED_KEY = 'market:gold-extended:v1';
+const GOLD_ETF_FLOWS_KEY = 'market:gold-etf-flows:v1';
+const GOLD_CB_RESERVES_KEY = 'market:gold-cb-reserves:v1';
 
-const EMPTY: GetGoldIntelligenceResponse = {
-  goldPrice: 0, goldChangePct: 0, goldSparkline: [],
-  silverPrice: 0, platinumPrice: 0, palladiumPrice: 0,
-  crossCurrencyPrices: [], updatedAt: '', unavailable: true,
-  drivers: [],
-};
+interface RawQuote {
+  symbol: string;
+  name?: string;
+  display?: string;
+  price: number | null;
+  change: number | null;
+  sparkline?: number[];
+}
 
-function toCategory(raw: unknown): { longPositions: number; shortPositions: number; netPct: number; oiSharePct: number; wowNetDelta: number } | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const r = raw as Record<string, unknown>;
+interface RawCotCategory {
+  longPositions: number;
+  shortPositions: number;
+  netPct: number;
+  oiSharePct: number;
+  wowNetDelta: number;
+}
+
+interface RawCotInstrument {
+  name: string;
+  code: string;
+  reportDate: string;
+  nextReleaseDate?: string;
+  openInterest?: number;
+  managedMoney?: RawCotCategory;
+  producerSwap?: RawCotCategory;
+  // legacy
+  assetManagerLong?: number;
+  assetManagerShort?: number;
+  dealerLong?: number;
+  dealerShort?: number;
+  netPct?: number;
+}
+
+interface GoldExtendedMetal {
+  price: number;
+  dayHigh: number;
+  dayLow: number;
+  prevClose: number;
+  returns: { w1: number; m1: number; ytd: number; y1: number };
+  range52w: { hi: number; lo: number; positionPct: number };
+}
+
+interface GoldExtendedDriver {
+  symbol: string;
+  label: string;
+  value: number;
+  changePct: number;
+  correlation30d: number;
+}
+
+interface GoldExtendedPayload {
+  updatedAt: string;
+  gold?: GoldExtendedMetal | null;
+  silver?: GoldExtendedMetal | null;
+  drivers?: GoldExtendedDriver[];
+}
+
+interface GoldCbHolderRaw { iso3: string; name: string; tonnes: number; pctOfReserves: number }
+interface GoldCbMoverRaw { iso3: string; name: string; deltaTonnes12m: number }
+interface GoldCbReservesPayload {
+  updatedAt: string;
+  asOfMonth: string;
+  totalTonnes: number;
+  topHolders: GoldCbHolderRaw[];
+  topBuyers12m: GoldCbMoverRaw[];
+  topSellers12m: GoldCbMoverRaw[];
+}
+
+interface GoldEtfFlowsPayload {
+  updatedAt: string;
+  asOfDate: string;
+  tonnes: number;
+  aumUsd: number;
+  nav: number;
+  changeW1Tonnes: number;
+  changeM1Tonnes: number;
+  changeY1Tonnes: number;
+  changeW1Pct: number;
+  changeM1Pct: number;
+  changeY1Pct: number;
+  sparkline90d: number[];
+}
+
+const XAU_FX = [
+  { symbol: 'EURUSD=X', label: 'EUR', flag: '\u{1F1EA}\u{1F1FA}', multiply: false },
+  { symbol: 'GBPUSD=X', label: 'GBP', flag: '\u{1F1EC}\u{1F1E7}', multiply: false },
+  { symbol: 'USDJPY=X', label: 'JPY', flag: '\u{1F1EF}\u{1F1F5}', multiply: true },
+  { symbol: 'USDCNY=X', label: 'CNY', flag: '\u{1F1E8}\u{1F1F3}', multiply: true },
+  { symbol: 'USDINR=X', label: 'INR', flag: '\u{1F1EE}\u{1F1F3}', multiply: true },
+  { symbol: 'USDCHF=X', label: 'CHF', flag: '\u{1F1E8}\u{1F1ED}', multiply: false },
+];
+
+function emptyResponse(): GetGoldIntelligenceResponse {
   return {
-    longPositions: Number(r.longPositions ?? r.long_positions ?? 0),
-    shortPositions: Number(r.shortPositions ?? r.short_positions ?? 0),
-    netPct: Number(r.netPct ?? r.net_pct ?? 0),
-    oiSharePct: Number(r.oiSharePct ?? r.oi_share_pct ?? 0),
-    wowNetDelta: Number(r.wowNetDelta ?? r.wow_net_delta ?? 0),
+    goldPrice: 0,
+    goldChangePct: 0,
+    goldSparkline: [],
+    silverPrice: 0,
+    platinumPrice: 0,
+    palladiumPrice: 0,
+    crossCurrencyPrices: [],
+    drivers: [],
+    updatedAt: '',
+    unavailable: true,
+  };
+}
+
+function mapCategory(c: RawCotCategory | undefined): GoldCotCategory | undefined {
+  if (!c) return undefined;
+  return {
+    longPositions: String(Math.round(c.longPositions ?? 0)),
+    shortPositions: String(Math.round(c.shortPositions ?? 0)),
+    netPct: Number(c.netPct ?? 0),
+    oiSharePct: Number(c.oiSharePct ?? 0),
+    wowNetDelta: String(Math.round(c.wowNetDelta ?? 0)),
+  };
+}
+
+function mapCot(raw: RawCotInstrument | undefined): GoldCotPositioning | undefined {
+  if (!raw) return undefined;
+  // Legacy fallback: derive v2 category fields from flat long/short so a
+  // pre-migration seed payload still renders the new panel correctly. OI share
+  // stays 0 because old payloads don't carry open_interest; WoW delta stays 0
+  // because the prior-week row wasn't captured before this migration.
+  const netPctFrom = (long: number, short: number) => {
+    const gross = Math.max(long + short, 1);
+    return ((long - short) / gross) * 100;
+  };
+  const mmLong = raw.assetManagerLong ?? 0;
+  const mmShort = raw.assetManagerShort ?? 0;
+  const psLong = raw.dealerLong ?? 0;
+  const psShort = raw.dealerShort ?? 0;
+  const managedMoney = raw.managedMoney
+    ? mapCategory(raw.managedMoney)
+    : mapCategory({
+      longPositions: mmLong,
+      shortPositions: mmShort,
+      netPct: raw.netPct ?? netPctFrom(mmLong, mmShort),
+      oiSharePct: 0,
+      wowNetDelta: 0,
+    });
+  const producerSwap = raw.producerSwap
+    ? mapCategory(raw.producerSwap)
+    : mapCategory({
+      longPositions: psLong,
+      shortPositions: psShort,
+      netPct: netPctFrom(psLong, psShort),
+      oiSharePct: 0,
+      wowNetDelta: 0,
+    });
+  return {
+    reportDate: String(raw.reportDate ?? ''),
+    nextReleaseDate: String(raw.nextReleaseDate ?? ''),
+    openInterest: String(Math.round(raw.openInterest ?? 0)),
+    managedMoney,
+    producerSwap,
   };
 }
 
@@ -35,99 +186,119 @@ export async function getGoldIntelligence(
   _req: GetGoldIntelligenceRequest,
 ): Promise<GetGoldIntelligenceResponse> {
   try {
-    const raw = await getCachedJson(SEED_KEY, true) as Record<string, unknown> | null;
-    if (!raw || raw.unavailable) return EMPTY;
+    const [rawPayload, rawCot, rawExtended, rawEtfFlows, rawCbReserves] = await Promise.all([
+      getCachedJson(COMMODITY_KEY, true) as Promise<{ quotes?: RawQuote[] } | null>,
+      getCachedJson(COT_KEY, true) as Promise<{ instruments?: RawCotInstrument[]; reportDate?: string } | null>,
+      getCachedJson(GOLD_EXTENDED_KEY, true) as Promise<GoldExtendedPayload | null>,
+      getCachedJson(GOLD_ETF_FLOWS_KEY, true) as Promise<GoldEtfFlowsPayload | null>,
+      getCachedJson(GOLD_CB_RESERVES_KEY, true) as Promise<GoldCbReservesPayload | null>,
+    ]);
 
-    const crossCurrencyPrices: GoldCrossCurrencyPrice[] = (Array.isArray(raw.crossCurrencyPrices ?? raw.cross_currency_prices)
-      ? (raw.crossCurrencyPrices ?? raw.cross_currency_prices) as unknown[]
-      : []).map((e: unknown) => {
-      const r = e as Record<string, unknown>;
-      return { currency: String(r.currency ?? ''), flag: String(r.flag ?? ''), price: Number(r.price ?? 0) };
-    });
+    const rawQuotes = rawPayload?.quotes;
+    if (!rawQuotes || !Array.isArray(rawQuotes) || rawQuotes.length === 0) return emptyResponse();
 
-    const drivers: GoldDriver[] = (Array.isArray(raw.drivers) ? raw.drivers : []).map((e: unknown) => {
-      const r = e as Record<string, unknown>;
-      return {
-        symbol: String(r.symbol ?? ''),
-        label: String(r.label ?? ''),
-        value: Number(r.value ?? 0),
-        changePct: Number(r.changePct ?? r.change_pct ?? 0),
-        correlation30d: Number(r.correlation30d ?? r.correlation_30d ?? 0),
-      };
-    });
+    const quoteMap = new Map(rawQuotes.map(q => [q.symbol, q]));
+    const gold = quoteMap.get('GC=F');
+    if (!gold) return emptyResponse();
 
-    const cotRaw = raw.cot as Record<string, unknown> | undefined;
-    const cot = cotRaw ? {
-      reportDate: String(cotRaw.reportDate ?? cotRaw.report_date ?? ''),
-      nextReleaseDate: String(cotRaw.nextReleaseDate ?? cotRaw.next_release_date ?? ''),
-      openInterest: Number(cotRaw.openInterest ?? cotRaw.open_interest ?? 0),
-      managedMoney: toCategory(cotRaw.managedMoney ?? cotRaw.managed_money),
-      producerSwap: toCategory(cotRaw.producerSwap ?? cotRaw.producer_swap),
-    } : undefined;
+    const silver = quoteMap.get('SI=F');
+    const platinum = quoteMap.get('PL=F');
+    const palladium = quoteMap.get('PA=F');
 
-    const sessRaw = raw.session as Record<string, unknown> | undefined;
-    const session = sessRaw ? { dayHigh: Number(sessRaw.dayHigh ?? sessRaw.day_high ?? 0), dayLow: Number(sessRaw.dayLow ?? sessRaw.day_low ?? 0), prevClose: Number(sessRaw.prevClose ?? sessRaw.prev_close ?? 0) } : undefined;
+    const goldPrice = gold?.price ?? 0;
+    const silverPrice = silver?.price ?? 0;
+    const platinumPrice = platinum?.price ?? 0;
+    const palladiumPrice = palladium?.price ?? 0;
 
-    const retRaw = raw.returns as Record<string, unknown> | undefined;
-    const returns = retRaw ? { w1: Number(retRaw.w1 ?? 0), m1: Number(retRaw.m1 ?? 0), ytd: Number(retRaw.ytd ?? 0), y1: Number(retRaw.y1 ?? 0) } : undefined;
+    const goldSilverRatio = (goldPrice > 0 && silverPrice > 0) ? goldPrice / silverPrice : undefined;
+    const goldPlatinumPremiumPct = (goldPrice > 0 && platinumPrice > 0)
+      ? ((goldPrice - platinumPrice) / platinumPrice) * 100
+      : undefined;
 
-    const r52w = raw.range52w as Record<string, unknown> | undefined;
-    const range52w = r52w ? { hi: Number(r52w.hi ?? 0), lo: Number(r52w.lo ?? 0), positionPct: Number(r52w.positionPct ?? r52w.position_pct ?? 0) } : undefined;
+    const crossCurrencyPrices: GoldCrossCurrencyPrice[] = [];
+    if (goldPrice > 0) {
+      for (const cfg of XAU_FX) {
+        const fx = quoteMap.get(cfg.symbol);
+        if (!fx?.price || !Number.isFinite(fx.price) || fx.price <= 0) continue;
+        const xauPrice = cfg.multiply ? goldPrice * fx.price : goldPrice / fx.price;
+        if (!Number.isFinite(xauPrice) || xauPrice <= 0) continue;
+        crossCurrencyPrices.push({ currency: cfg.label, flag: cfg.flag, price: xauPrice });
+      }
+    }
 
-    const etfRaw = raw.etfFlows ?? raw.etf_flows as Record<string, unknown> | undefined;
-    const etfFlows = etfRaw && typeof etfRaw === 'object' ? {
-      asOfDate: String((etfRaw as Record<string, unknown>).asOfDate ?? (etfRaw as Record<string, unknown>).as_of_date ?? ''),
-      tonnes: Number((etfRaw as Record<string, unknown>).tonnes ?? 0),
-      aumUsd: Number((etfRaw as Record<string, unknown>).aumUsd ?? (etfRaw as Record<string, unknown>).aum_usd ?? 0),
-      nav: Number((etfRaw as Record<string, unknown>).nav ?? 0),
-      changeW1Tonnes: Number((etfRaw as Record<string, unknown>).changeW1Tonnes ?? (etfRaw as Record<string, unknown>).change_w1_tonnes ?? 0),
-      changeM1Tonnes: Number((etfRaw as Record<string, unknown>).changeM1Tonnes ?? (etfRaw as Record<string, unknown>).change_m1_tonnes ?? 0),
-      changeY1Tonnes: Number((etfRaw as Record<string, unknown>).changeY1Tonnes ?? (etfRaw as Record<string, unknown>).change_y1_tonnes ?? 0),
-      changeW1Pct: Number((etfRaw as Record<string, unknown>).changeW1Pct ?? (etfRaw as Record<string, unknown>).change_w1_pct ?? 0),
-      changeM1Pct: Number((etfRaw as Record<string, unknown>).changeM1Pct ?? (etfRaw as Record<string, unknown>).change_m1_pct ?? 0),
-      changeY1Pct: Number((etfRaw as Record<string, unknown>).changeY1Pct ?? (etfRaw as Record<string, unknown>).change_y1_pct ?? 0),
-      sparkline90d: Array.isArray((etfRaw as Record<string, unknown>).sparkline90d ?? (etfRaw as Record<string, unknown>).sparkline_90d) ? ((etfRaw as Record<string, unknown>).sparkline90d ?? (etfRaw as Record<string, unknown>).sparkline_90d) as number[] : [],
-    } : undefined;
+    const cot = mapCot(rawCot?.instruments?.find(i => i.code === 'GC'));
 
-    const cbRaw = raw.cbReserves ?? raw.cb_reserves as Record<string, unknown> | undefined;
-    const cbReserves = cbRaw && typeof cbRaw === 'object' ? {
-      asOfMonth: String((cbRaw as Record<string, unknown>).asOfMonth ?? (cbRaw as Record<string, unknown>).as_of_month ?? ''),
-      totalTonnes: Number((cbRaw as Record<string, unknown>).totalTonnes ?? (cbRaw as Record<string, unknown>).total_tonnes ?? 0),
-      topHolders: (Array.isArray((cbRaw as Record<string, unknown>).topHolders ?? (cbRaw as Record<string, unknown>).top_holders) ? ((cbRaw as Record<string, unknown>).topHolders ?? (cbRaw as Record<string, unknown>).top_holders) as unknown[] : []).map((h: unknown): GoldCbHolder => {
-        const r = h as Record<string, unknown>;
-        return { iso3: String(r.iso3 ?? ''), name: String(r.name ?? ''), tonnes: Number(r.tonnes ?? 0), pctOfReserves: Number(r.pctOfReserves ?? r.pct_of_reserves ?? 0) };
-      }),
-      topBuyers12m: (Array.isArray((cbRaw as Record<string, unknown>).topBuyers12m ?? (cbRaw as Record<string, unknown>).top_buyers_12m) ? ((cbRaw as Record<string, unknown>).topBuyers12m ?? (cbRaw as Record<string, unknown>).top_buyers_12m) as unknown[] : []).map((m: unknown): GoldCbMover => {
-        const r = m as Record<string, unknown>;
-        return { iso3: String(r.iso3 ?? ''), name: String(r.name ?? ''), deltaTonnes12m: Number(r.deltaTonnes12m ?? r.delta_tonnes_12m ?? 0) };
-      }),
-      topSellers12m: (Array.isArray((cbRaw as Record<string, unknown>).topSellers12m ?? (cbRaw as Record<string, unknown>).top_sellers_12m) ? ((cbRaw as Record<string, unknown>).topSellers12m ?? (cbRaw as Record<string, unknown>).top_sellers_12m) as unknown[] : []).map((m: unknown): GoldCbMover => {
-        const r = m as Record<string, unknown>;
-        return { iso3: String(r.iso3 ?? ''), name: String(r.name ?? ''), deltaTonnes12m: Number(r.deltaTonnes12m ?? r.delta_tonnes_12m ?? 0) };
-      }),
-    } : undefined;
+    const goldExt = rawExtended?.gold;
+    const session: GoldSessionRange | undefined = goldExt
+      ? { dayHigh: goldExt.dayHigh, dayLow: goldExt.dayLow, prevClose: goldExt.prevClose }
+      : undefined;
+    const returns: GoldReturns | undefined = goldExt ? { ...goldExt.returns } : undefined;
+    const range52w: GoldRange52w | undefined = goldExt ? { ...goldExt.range52w } : undefined;
+    const drivers: GoldDriver[] = (rawExtended?.drivers ?? []).map(d => ({
+      symbol: d.symbol,
+      label: d.label,
+      value: d.value,
+      changePct: d.changePct,
+      correlation30d: d.correlation30d,
+    }));
+
+    const cbReserves: GoldCbReserves | undefined = rawCbReserves && Array.isArray(rawCbReserves.topHolders) && rawCbReserves.topHolders.length >= 5
+      ? {
+        asOfMonth: rawCbReserves.asOfMonth,
+        totalTonnes: rawCbReserves.totalTonnes,
+        topHolders: rawCbReserves.topHolders.map<GoldCbHolder>(h => ({
+          iso3: h.iso3, name: h.name, tonnes: h.tonnes, pctOfReserves: h.pctOfReserves,
+        })),
+        topBuyers12m: (rawCbReserves.topBuyers12m ?? []).map<GoldCbMover>(m => ({
+          iso3: m.iso3, name: m.name, deltaTonnes12m: m.deltaTonnes12m,
+        })),
+        topSellers12m: (rawCbReserves.topSellers12m ?? []).map<GoldCbMover>(m => ({
+          iso3: m.iso3, name: m.name, deltaTonnes12m: m.deltaTonnes12m,
+        })),
+      }
+      : undefined;
+
+    const etfFlows: GoldEtfFlows | undefined = rawEtfFlows && Number.isFinite(rawEtfFlows.tonnes) && rawEtfFlows.tonnes > 0
+      ? {
+        asOfDate: rawEtfFlows.asOfDate,
+        tonnes: rawEtfFlows.tonnes,
+        aumUsd: rawEtfFlows.aumUsd,
+        nav: rawEtfFlows.nav,
+        changeW1Tonnes: rawEtfFlows.changeW1Tonnes,
+        changeM1Tonnes: rawEtfFlows.changeM1Tonnes,
+        changeY1Tonnes: rawEtfFlows.changeY1Tonnes,
+        changeW1Pct: rawEtfFlows.changeW1Pct,
+        changeM1Pct: rawEtfFlows.changeM1Pct,
+        changeY1Pct: rawEtfFlows.changeY1Pct,
+        sparkline90d: rawEtfFlows.sparkline90d ?? [],
+      }
+      : undefined;
 
     return {
-      goldPrice: Number(raw.goldPrice ?? raw.gold_price ?? 0),
-      goldChangePct: Number(raw.goldChangePct ?? raw.gold_change_pct ?? 0),
-      goldSparkline: Array.isArray(raw.goldSparkline ?? raw.gold_sparkline) ? (raw.goldSparkline ?? raw.gold_sparkline) as number[] : [],
-      silverPrice: Number(raw.silverPrice ?? raw.silver_price ?? 0),
-      platinumPrice: Number(raw.platinumPrice ?? raw.platinum_price ?? 0),
-      palladiumPrice: Number(raw.palladiumPrice ?? raw.palladium_price ?? 0),
-      goldSilverRatio: raw.goldSilverRatio != null ? Number(raw.goldSilverRatio ?? raw.gold_silver_ratio) : undefined,
-      goldPlatinumPremiumPct: raw.goldPlatinumPremiumPct != null ? Number(raw.goldPlatinumPremiumPct ?? raw.gold_platinum_premium_pct) : undefined,
+      goldPrice,
+      goldChangePct: gold?.change ?? 0,
+      goldSparkline: gold?.sparkline ?? [],
+      silverPrice,
+      platinumPrice,
+      palladiumPrice,
+      goldSilverRatio,
+      goldPlatinumPremiumPct,
       crossCurrencyPrices,
       cot,
-      updatedAt: String(raw.updatedAt ?? raw.updated_at ?? ''),
-      unavailable: false,
       session,
       returns,
       range52w,
       drivers,
       etfFlows,
       cbReserves,
+      // updatedAt reflects the *enrichment* layer's freshness. If the extended
+      // key is missing we deliberately emit empty so the panel renders "Updated —"
+      // rather than a misleading "just now" stamp while session/returns/drivers
+      // are all absent.
+      updatedAt: rawExtended?.updatedAt ?? '',
+      unavailable: false,
     };
   } catch {
-    return EMPTY;
+    return emptyResponse();
   }
 }

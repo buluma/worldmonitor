@@ -6,42 +6,50 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/market/v1/service_server';
 import { getCachedJson } from '../../../_shared/redis';
 
-const SEED_KEY = 'market:cot:v1';
+const SEED_CACHE_KEY = 'market:cot:v1';
 
-const EMPTY: GetCotPositioningResponse = { instruments: [], reportDate: '', unavailable: true };
+interface RawInstrument {
+  name: string;
+  code: string;
+  reportDate: string;
+  assetManagerLong: number;
+  assetManagerShort: number;
+  leveragedFundsLong: number;
+  leveragedFundsShort: number;
+  dealerLong: number;
+  dealerShort: number;
+  netPct: number;
+}
 
 export async function getCotPositioning(
   _ctx: ServerContext,
   _req: GetCotPositioningRequest,
 ): Promise<GetCotPositioningResponse> {
   try {
-    const raw = await getCachedJson(SEED_KEY, true) as Record<string, unknown> | null;
-    if (!raw || raw.unavailable) return EMPTY;
+    const raw = await getCachedJson(SEED_CACHE_KEY, true) as { instruments?: RawInstrument[]; reportDate?: string } | null;
+    if (!raw?.instruments || raw.instruments.length === 0) {
+      return { instruments: [], reportDate: '', unavailable: true };
+    }
 
-    const instruments: CotInstrument[] = (Array.isArray(raw.instruments) ? raw.instruments : []).map(
-      (e: unknown) => {
-        const r = e as Record<string, unknown>;
-        return {
-          name: String(r.name ?? ''),
-          code: String(r.code ?? ''),
-          reportDate: String(r.reportDate ?? r.report_date ?? ''),
-          assetManagerLong: Number(r.assetManagerLong ?? r.asset_manager_long ?? 0),
-          assetManagerShort: Number(r.assetManagerShort ?? r.asset_manager_short ?? 0),
-          leveragedFundsLong: Number(r.leveragedFundsLong ?? r.leveraged_funds_long ?? 0),
-          leveragedFundsShort: Number(r.leveragedFundsShort ?? r.leveraged_funds_short ?? 0),
-          dealerLong: Number(r.dealerLong ?? r.dealer_long ?? 0),
-          dealerShort: Number(r.dealerShort ?? r.dealer_short ?? 0),
-          netPct: Number(r.netPct ?? r.net_pct ?? 0),
-        };
-      },
-    );
+    const instruments: CotInstrument[] = raw.instruments.map(item => ({
+      name: String(item.name ?? ''),
+      code: String(item.code ?? ''),
+      reportDate: String(item.reportDate ?? ''),
+      assetManagerLong: String(item.assetManagerLong ?? 0),
+      assetManagerShort: String(item.assetManagerShort ?? 0),
+      leveragedFundsLong: String(item.leveragedFundsLong ?? 0),
+      leveragedFundsShort: String(item.leveragedFundsShort ?? 0),
+      dealerLong: String(item.dealerLong ?? 0),
+      dealerShort: String(item.dealerShort ?? 0),
+      netPct: Number(item.netPct ?? 0),
+    }));
 
     return {
       instruments,
-      reportDate: String(raw.reportDate ?? raw.report_date ?? ''),
+      reportDate: String(raw.reportDate ?? ''),
       unavailable: false,
     };
   } catch {
-    return EMPTY;
+    return { instruments: [], reportDate: '', unavailable: true };
   }
 }

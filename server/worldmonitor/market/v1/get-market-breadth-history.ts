@@ -6,21 +6,35 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/market/v1/service_server';
 import { getCachedJson } from '../../../_shared/redis';
 
-const SEED_KEY = 'market:breadth-history:v1';
+const SEED_CACHE_KEY = 'market:breadth-history:v1';
 
-const EMPTY: GetMarketBreadthHistoryResponse = {
-  currentPctAbove20d: null,
-  currentPctAbove50d: null,
-  currentPctAbove200d: null,
-  updatedAt: '',
-  history: [],
-  unavailable: true,
-};
+interface SeedEntry {
+  date: string;
+  pctAbove20d: number | null;
+  pctAbove50d: number | null;
+  pctAbove200d: number | null;
+}
 
-function toNullable(v: unknown): number | null {
-  if (v === null || v === undefined) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+interface SeedPayload {
+  updatedAt: string;
+  current: {
+    pctAbove20d: number | null;
+    pctAbove50d: number | null;
+    pctAbove200d: number | null;
+  };
+  history: SeedEntry[];
+}
+
+function emptyUnavailable(): GetMarketBreadthHistoryResponse {
+  return {
+    updatedAt: '',
+    history: [],
+    unavailable: true,
+  };
+}
+
+function nullToUndefined(v: number | null | undefined): number | undefined {
+  return v == null ? undefined : v;
 }
 
 export async function getMarketBreadthHistory(
@@ -28,31 +42,30 @@ export async function getMarketBreadthHistory(
   _req: GetMarketBreadthHistoryRequest,
 ): Promise<GetMarketBreadthHistoryResponse> {
   try {
-    const raw = await getCachedJson(SEED_KEY, true) as Record<string, unknown> | null;
-    if (!raw || raw.unavailable) return EMPTY;
+    const raw = await getCachedJson(SEED_CACHE_KEY, true) as SeedPayload | null;
+    if (!raw?.current || !Array.isArray(raw.history) || raw.history.length === 0) {
+      return emptyUnavailable();
+    }
 
-    const current = raw.current as Record<string, unknown> | undefined;
-    const history: BreadthSnapshot[] = (Array.isArray(raw.history) ? raw.history : []).map(
-      (e: unknown) => {
-        const entry = e as Record<string, unknown>;
-        return {
-          date: String(entry.date ?? ''),
-          pctAbove20d: toNullable(entry.pctAbove20d ?? entry.pct_above_20d),
-          pctAbove50d: toNullable(entry.pctAbove50d ?? entry.pct_above_50d),
-          pctAbove200d: toNullable(entry.pctAbove200d ?? entry.pct_above_200d),
-        };
-      },
-    );
+    // Preserve missing readings as undefined (proto `optional` → JSON omits
+    // the field) so a partial seed failure can be distinguished from a real
+    // 0% breadth reading in the UI. Panel treats undefined as "missing".
+    const history: BreadthSnapshot[] = raw.history.map((e) => ({
+      date: e.date,
+      pctAbove20d: nullToUndefined(e.pctAbove20d),
+      pctAbove50d: nullToUndefined(e.pctAbove50d),
+      pctAbove200d: nullToUndefined(e.pctAbove200d),
+    }));
 
     return {
-      currentPctAbove20d: toNullable(raw.currentPctAbove20d ?? raw.current_pct_above_20d ?? current?.pctAbove20d),
-      currentPctAbove50d: toNullable(raw.currentPctAbove50d ?? raw.current_pct_above_50d ?? current?.pctAbove50d),
-      currentPctAbove200d: toNullable(raw.currentPctAbove200d ?? raw.current_pct_above_200d ?? current?.pctAbove200d),
-      updatedAt: String(raw.updatedAt ?? raw.updated_at ?? ''),
+      currentPctAbove20d: nullToUndefined(raw.current.pctAbove20d),
+      currentPctAbove50d: nullToUndefined(raw.current.pctAbove50d),
+      currentPctAbove200d: nullToUndefined(raw.current.pctAbove200d),
+      updatedAt: raw.updatedAt ?? '',
       history,
       unavailable: false,
     };
   } catch {
-    return EMPTY;
+    return emptyUnavailable();
   }
 }
