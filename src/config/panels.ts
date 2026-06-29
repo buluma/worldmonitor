@@ -105,6 +105,7 @@ const FULL_PANELS: Record<string, PanelConfig> = {
   'social-velocity': { name: 'Social Velocity', enabled: true, priority: 2 },
   'internet-disruptions': { name: 'Internet Disruptions', enabled: true, priority: 2 },
   'cross-source-signals': { name: 'Cross-Source Signals', enabled: true, priority: 2 },
+  'disease-outbreaks': { name: 'Disease Outbreaks', enabled: true, priority: 2 },
 };
 
 const FULL_MAP_LAYERS: MapLayers = {

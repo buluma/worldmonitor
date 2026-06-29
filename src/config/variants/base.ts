@@ -76,6 +76,7 @@ export const REFRESH_INTERVALS = {
   defensePatents: 24 * 60 * 60 * 1000,    // 24h — data is weekly
   socialVelocity: 15 * 60 * 1000,         // 15min — Reddit velocity score
   crossSourceSignals: 15 * 60 * 1000,     // 15min — 15+ feed aggregation
+  diseaseOutbreaks: 30 * 60 * 1000,       // 30min — WHO/ProMED cadence
 };
 
 // Monitor colors - shared

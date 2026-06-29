@@ -112,6 +112,18 @@ export function safeHtml(html: string): DocumentFragment {
   return tpl.content;
 }
 
+// Opaque type for HTML strings that have been explicitly approved for raw
+// insertion. Use trustedHtml() to construct; setTrustedHtml() to apply.
+export type TrustedHtml = string & { __trustedHtml: true };
+
+export function trustedHtml(html: string, _reason: string): TrustedHtml {
+  return html as TrustedHtml;
+}
+
+export function setTrustedHtml(el: Element, html: TrustedHtml): void {
+  el.innerHTML = html as string;
+}
+
 function applyProps(el: HTMLElement, props: DomProps): void {
   for (const key in props) {
     const value = props[key];

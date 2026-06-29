@@ -11,6 +11,10 @@ const __seed_dirname = dirname(fileURLToPath(import.meta.url));
 
 export { CHROME_UA };
 
+// Distinct exit code for graceful upstream fetch failures (rate-limits, 503s, etc.)
+// so the cron scheduler can distinguish seed logic failures from transient HTTP errors.
+export const GRACEFUL_FETCH_FAILURE_EXIT_CODE = 3;
+
 export function loadSharedConfig(filename) {
   for (const base of [join(__seed_dirname, '..', 'shared'), join(__seed_dirname, 'shared')]) {
     const p = join(base, filename);

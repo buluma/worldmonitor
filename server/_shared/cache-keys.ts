@@ -72,6 +72,7 @@ export const BOOTSTRAP_CACHE_KEYS: Record<string, string> = {
   socialVelocity:   'intelligence:social:reddit:v1',
   ddosAttacks:      'cf:radar:ddos:v1',
   trafficAnomalies: 'cf:radar:traffic-anomalies:v1',
+  diseaseOutbreaks: 'health:disease-outbreaks:v1',
 };
 
 export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
@@ -112,4 +113,7 @@ export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
   socialVelocity: 'fast',
   ddosAttacks: 'fast',
   trafficAnomalies: 'fast',
+  diseaseOutbreaks: 'slow',
 };
+
+export const HEALTH_AIR_QUALITY_KEY = 'health:air-quality:v1';

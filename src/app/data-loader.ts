@@ -166,6 +166,7 @@ import { fetchCachedRiskScores } from '@/services/cached-risk-scores';
 import { fetchSocialVelocity } from '@/services/social-velocity';
 import { fetchCrossSourceSignals } from '@/services/cross-source-signals';
 import { fetchDdosAttacks, fetchTrafficAnomalies } from '@/services/infrastructure/index';
+import { fetchDiseaseOutbreaks } from '@/services/disease-outbreaks';
 import type { SocialVelocityPanel } from '@/components/SocialVelocityPanel';
 import type { InternetDisruptionsPanel } from '@/components/InternetDisruptionsPanel';
 import type { CrossSourceSignalsPanel } from '@/components/CrossSourceSignalsPanel';
@@ -515,6 +516,9 @@ export class DataLoaderManager implements AppModule {
     }
     if (SITE_VARIANT !== 'happy' && shouldLoad('cross-source-signals')) {
       tasks.push({ name: 'crossSourceSignals', task: runGuarded('crossSourceSignals', () => this.loadCrossSourceSignals()) });
+    }
+    if (shouldLoad('disease-outbreaks')) {
+      tasks.push({ name: 'diseaseOutbreaks', task: runGuarded('diseaseOutbreaks', () => this.loadDiseaseOutbreaks()) });
     }
 
     // Stagger startup: run tasks in small batches to avoid hammering upstreams
@@ -2864,6 +2868,16 @@ export class DataLoaderManager implements AppModule {
     } catch (e) {
       console.error('[App] Cross-source signals load failed:', e);
       (this.ctx.panels['cross-source-signals'] as CrossSourceSignalsPanel | undefined)?.showFetchError();
+    }
+  }
+
+  async loadDiseaseOutbreaks(): Promise<void> {
+    try {
+      const data = await fetchDiseaseOutbreaks();
+      const panel = this.ctx.panels['disease-outbreaks'] as { updateData?: (outbreaks: unknown[]) => void } | undefined;
+      panel?.updateData?.(data.outbreaks);
+    } catch (e) {
+      console.error('[App] Disease outbreaks load failed:', e);
     }
   }
 }

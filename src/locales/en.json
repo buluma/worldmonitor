@@ -429,6 +429,7 @@
     "socialVelocity": "Social Velocity",
     "internetDisruptions": "Internet Disruptions",
     "crossSourceSignals": "Cross-Source Signals",
+    "diseaseOutbreaks": "Disease Outbreaks",
     "internetDisruptionsTabs": {
       "outages": "Outages",
       "ddos": "DDoS",
@@ -2962,6 +2963,38 @@
       "byVector": "Attack Vector",
       "topTargets": "Top Target Countries",
       "infoTooltip": "<strong>Internet Disruptions</strong> Real-time internet outages, DDoS attacks, and traffic anomalies from global network monitoring."
+    },
+    "diseaseOutbreaks": {
+      "infoTooltip": "<strong>Disease Outbreaks</strong> Active outbreak alerts from WHO, ProMED, and health ministries worldwide.",
+      "methodologyNote": "Alert / Warning / Watch levels come from an editorial keyword classifier applied to outbreak reports.",
+      "title": "Disease Outbreaks",
+      "empty": "No outbreaks match filter",
+      "sourceFallback": "Source",
+      "attribution": "WHO · ProMED · HealthMap",
+      "levels": {
+        "alert": "ALERT",
+        "warning": "WARNING",
+        "watch": "WATCH"
+      },
+      "time": {
+        "justNow": "just now",
+        "hoursAgo_one": "{{count}}h ago",
+        "hoursAgo_other": "{{count}}h ago",
+        "daysAgo_one": "{{count}}d ago",
+        "daysAgo_other": "{{count}}d ago"
+      },
+      "filters": {
+        "alert_one": "{{count}} Alert",
+        "alert_other": "{{count}} Alerts",
+        "warning_one": "{{count}} Warning",
+        "warning_other": "{{count}} Warnings",
+        "watch_one": "{{count}} Watch",
+        "watch_other": "{{count}} Watches"
+      },
+      "errors": {
+        "noData": "No outbreak data available",
+        "failedToLoad": "Failed to load"
+      }
     }
   }
 }

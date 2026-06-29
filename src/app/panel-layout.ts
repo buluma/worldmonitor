@@ -931,6 +931,9 @@ export class PanelLayoutManager implements AppModule {
     this.lazyPanel('cross-source-signals', () =>
       import('@/components/CrossSourceSignalsPanel').then(m => new m.CrossSourceSignalsPanel()),
     );
+    this.lazyPanel('disease-outbreaks', () =>
+      import('@/components/DiseaseOutbreaksPanel').then(m => new m.DiseaseOutbreaksPanel()),
+    );
 
     if (this.ctx.isDesktopApp) {
       const runtimeConfigPanel = new RuntimeConfigPanel({ mode: 'alert' });

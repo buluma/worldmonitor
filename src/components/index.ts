@@ -99,3 +99,4 @@ export { DefensePatentsPanel } from './DefensePatentsPanel';
 export { SocialVelocityPanel } from './SocialVelocityPanel';
 export { InternetDisruptionsPanel } from './InternetDisruptionsPanel';
 export { CrossSourceSignalsPanel } from './CrossSourceSignalsPanel';
+export { DiseaseOutbreaksPanel } from './DiseaseOutbreaksPanel';
