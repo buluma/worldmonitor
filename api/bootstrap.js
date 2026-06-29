@@ -410,6 +410,20 @@ var TIER_CDN_CACHE = {
   fast: "public, s-maxage=600, stale-while-revalidate=120, stale-if-error=900"
 };
 var NEG_SENTINEL = "__WM_NEG__";
+function unwrapEnvelope(raw) {
+  if (raw == null) return { _seed: null, data: null };
+  const value = typeof raw === "string" ? (() => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  })() : raw;
+  if (typeof value !== "object" || Array.isArray(value)) return { _seed: null, data: value };
+  const seed = value._seed;
+  if (seed && typeof seed === "object" && typeof seed.fetchedAt === "number") return { _seed: seed, data: value.data };
+  return { _seed: null, data: value };
+}
 function getCacheBackend() {
   const configuredBackend = (process.env.WM_CACHE_BACKEND || "").trim().toLowerCase();
   if (configuredBackend === "local-file") return "local-file";
@@ -436,7 +450,7 @@ async function localFileGetCachedJsonBatch(keys) {
       if (typeof entry.expiresAt === "number" && entry.expiresAt <= now) continue;
       try {
         const parsed = JSON.parse(entry.value);
-        if (parsed !== NEG_SENTINEL) result.set(key, parsed);
+        if (parsed !== NEG_SENTINEL) result.set(key, unwrapEnvelope(parsed).data);
       } catch {
       }
     }
@@ -472,7 +486,7 @@ async function getCachedJsonBatch(keys) {
     if (raw) {
       try {
         const parsed = JSON.parse(raw);
-        if (parsed !== NEG_SENTINEL) result.set(keys[i], parsed);
+        if (parsed !== NEG_SENTINEL) result.set(keys[i], unwrapEnvelope(parsed).data);
       } catch {
       }
     }
