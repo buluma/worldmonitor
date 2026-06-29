@@ -83,8 +83,7 @@ function loadEnvFile() {
   const envPath = join(__dirname, '..', '.env.local');
   if (!existsSync(envPath)) return;
 
-  const lines = readFileSync(envPath, 'utf8').split('
-');
+  const lines = readFileSync(envPath, 'utf8').split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -520,7 +519,7 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('
-FATAL:', err.message || err);
+  console.error(`
+FATAL:`, err.message || err);
   process.exit(0); // graceful for cron
 });

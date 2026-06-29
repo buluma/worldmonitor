@@ -30,8 +30,7 @@ function loadEnvFile() {
     envPath = join('/Users/eliehabib/Documents/GitHub/worldmonitor', '.env.local');
   }
   if (!existsSync(envPath)) return;
-  const lines = readFileSync(envPath, 'utf8').split('
-');
+  const lines = readFileSync(envPath, 'utf8').split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -267,8 +266,8 @@ async function main() {
     }
   }
 
-  console.log('
-=== Done ===');
+  console.log(`
+=== Done ===`);
 }
 
 export { buildVersionCandidates, discoverVersion };

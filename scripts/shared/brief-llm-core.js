@@ -75,8 +75,7 @@ export function buildWhyMattersUserPrompt(story, todayIso) {
     `Country: ${story.country}`,
     '',
     'One editorial sentence on why this matters:',
-  ].join('
-');
+  ].join('\n');
   return { system: `${WHY_MATTERS_SYSTEM}
 ${briefDateLine(todayIso)}`, user };
 }
@@ -174,44 +173,27 @@ export async function hashBriefStory(story) {
 export const WHY_MATTERS_ANALYST_SYSTEM_V2 =
   'You are the lead analyst at WorldMonitor Brief, a geopolitical intelligence magazine. ' +
   'Using the Live WorldMonitor Context AND the story, write 2–3 sentences (40–70 words total) ' +
-  'on why the story matters.
-
-' +
-  'STRUCTURE:
-' +
+  'on why the story matters.\n\n' +
+  'STRUCTURE:\n' +
   '1. SITUATION — what is happening right now, grounded in a SPECIFIC named actor, ' +
-  'metric, date, or place relevant to this story.
-' +
+  'metric, date, or place relevant to this story.\n' +
   '2. ANALYSIS — the structural consequence (why this forces a repricing, shifts ' +
-  'the balance, triggers a cascade).
-' +
-  '3. (Optional) WATCH — the threshold or indicator to track, if clear from the context.
-
-' +
-  'HARD CONSTRAINTS:
-' +
-  '- Total length 40–70 words across 2–3 sentences.
-' +
+  'the balance, triggers a cascade).\n' +
+  '3. (Optional) WATCH — the threshold or indicator to track, if clear from the context.\n\n' +
+  'HARD CONSTRAINTS:\n' +
+  '- Total length 40–70 words across 2–3 sentences.\n' +
   '- MUST reference at least ONE specific: named person / country / organization / ' +
-  'number / percentage / date / city.
-' +
-  '- No preamble ("This matters because…", "The importance of…").
-' +
-  '- No markdown, no bullet points, no section labels in the output — plain prose.
-' +
-  '- Editorial, impersonal, serious. No calls to action, no questions, no quotes.
-
-' +
-  'RELEVANCE RULE (critical, read carefully):
-' +
+  'number / percentage / date / city.\n' +
+  '- No preamble ("This matters because…", "The importance of…").\n' +
+  '- No markdown, no bullet points, no section labels in the output — plain prose.\n' +
+  '- Editorial, impersonal, serious. No calls to action, no questions, no quotes.\n\n' +
+  'RELEVANCE RULE (critical, read carefully):\n' +
   '- The context block may contain facts from world-brief, country-brief, risk scores, ' +
   'forecasts, macro signals, and market data. These are BACKGROUND — only cite what is ' +
-  "directly relevant to this story's category and country.
-" +
+  "directly relevant to this story's category and country.\n" +
   '- If NO context fact clearly fits, ground instead in a named actor, place, date, ' +
   'or figure drawn from the headline or description. That is a VALID grounding — do ' +
-  'NOT invent a market reading, VIX value, or forecast probability to satisfy the rule.
-' +
+  'NOT invent a market reading, VIX value, or forecast probability to satisfy the rule.\n' +
   '- NEVER drag an off-topic market metric, FX reading, or probability into a ' +
   'humanitarian, aviation, diplomacy, or cyber story. A story about a refugee flow ' +
   'does not need a VIX number; a story about a drone incursion does not need an FX ' +
@@ -483,8 +465,7 @@ export function extractProperNounSequences(text) {
   const preprocessed = normalizeDottedAcronyms(text);
 
   // Split into sentences so sentence-start handling can run per-sentence.
-  const sentences = preprocessed.split(/[.!?]+\s+|
-+/);
+  const sentences = preprocessed.split(/[.!?]+\s+|\n+/);
 
   const sequences = [];
   for (const rawSentence of sentences) {

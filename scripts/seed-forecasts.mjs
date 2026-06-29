@@ -35,7 +35,7 @@ import {
   pkgFingerprint,
 } from './_simulation-queue-constants.mjs';
 
-const _isDirectRun = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\/g, '/'));
+const _isDirectRun = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 if (_isDirectRun) loadEnvFile(import.meta.url);
 
 const CANONICAL_KEY = 'forecast:predictions:v2';
@@ -994,7 +994,7 @@ function detectConflictScenarios(inputs, emaRiskScores) {
     // Use word-boundary regex to prevent substring false positives (IL matching Chile)
     const countryName = c.name.toLowerCase();
     const countryCode = c.code.toLowerCase();
-    const matchRegex = new RegExp(`\b(${countryName.replace(/[.*+?^${}()|[\]\]/g, '\$&')}|${countryCode.replace(/[.*+?^${}()|[\]\]/g, '\$&')})\b`, 'i');
+    const matchRegex = new RegExp(`\b(${countryName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|${countryCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\b`, 'i');
     const matchingIran = iran.filter(e => matchRegex.test(e.country || e.location || ''));
     if (matchingIran.length > 0) {
       signals.push({ type: 'conflict_events', value: `${matchingIran.length} Iran-related events`, weight: 0.2 });
@@ -2479,12 +2479,10 @@ function buildRegistryConstraintTable() {
     return `${bucket}: [${channels.join(',')}]`;
   });
   return `Variable constraints (each row: variableKey → allowed channels, targetBuckets, orderAllowed):
-${varLines.join('
-')}
+${varLines.join('\n')}
 
 Bucket-channel constraints (each targetBucket only accepts these channels):
-${bucketLines.join('
-')}`;
+${bucketLines.join('\n')}`;
 }
 
 // Derived from module-level constants — computed once and reused across all prompt calls.
@@ -2891,11 +2889,8 @@ ${candidates.map((item) => {
     `Title: ${sanitizeForPrompt(item.title)}`,
     item.summary ? `Summary: ${sanitizeForPrompt(item.summary)}` : '',
   ].filter(Boolean);
-  return parts.join('
-');
-}).join('
-
-')}`;
+  return parts.join('\n');
+}).join('\n\n')}`;
 }
 
 function normalizeCriticalSignalImpactHints(hints) {
@@ -3466,7 +3461,7 @@ function extractImpactRouteFacilityKey(texts = [], dominantRegion = '') {
   const joined = texts.filter(Boolean).join(' ');
   const knownRoutes = Object.keys(CHOKEPOINT_MARKET_REGIONS).sort((a, b) => b.length - a.length);
   for (const route of knownRoutes) {
-    const pattern = new RegExp(`\b${route.replace(/[.*+?^${}()|[\]\]/g, '\$&')}\b`, 'i');
+    const pattern = new RegExp(`\b${route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\b`, 'i');
     if (pattern.test(joined)) return route;
   }
   const facilityMatch = joined.match(IMPACT_FACILITY_RE);
@@ -3764,10 +3759,7 @@ ${candidatePackets.map((packet) => [
     `criticalSignalTypes=${(packet.criticalSignalTypes || []).join(',') || 'none'}`,
     'Evidence:',
     ...(packet.evidenceTable || []).map((entry) => `- ${entry.key} [${entry.kind}] ${sanitizeForPrompt(entry.text)}`),
-  ].join('
-')).join('
-
-')}
+  ].join('\n')).join('\n\n')}
 
 Return ONLY a single JSON object with a top-level "candidates" array.`;
 }
@@ -4546,8 +4538,7 @@ const COMPACT_NARRATIVE_MAX_LENGTH = 220;
 
 function sanitizeForOutput(text, maxLength = CANONICAL_NARRATIVE_MAX_LENGTH) {
   const normalized = (text || '')
-    .replace(/[
-]+/g, ' ')
+    .replace(/[\r\n]+/g, ' ')
     .replace(/[<>{} -]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -14216,8 +14207,7 @@ function validateCaseNarratives(items, predictions) {
 }
 
 function sanitizeForPrompt(text) {
-  return (text || '').replace(/[
-  ]/g, ' ').replace(/[<>{} -]/g, '').slice(0, 200).trim();
+  return (text || '').replace(/[\r\n]/g, ' ').replace(/[<>{} -]/g, '').slice(0, 200).trim();
 }
 
 // Sanitizes LLM-returned text before writing to Redis as a prompt section.
@@ -14238,15 +14228,13 @@ function sanitizeProposedLlmAddition(text) {
     /^\s*#{1,3}\s+(system|instruction|rule|override)/im,
   ];
   return text
-    .split('
-')
+    .split('\n')
     .filter((line) => {
       const trimmed = line.trim();
       if (!trimmed) return true;
       return !BLOCKED.some((re) => re.test(trimmed));
     })
-    .join('
-')
+    .join('\n')
     .replace(/[<>{}]/g, '')
     .trim();
 }
@@ -14536,8 +14524,7 @@ function buildCacheHash(preds) {
 
 function buildUserPrompt(preds) {
   const predsText = preds.map((p, i) => {
-    const sigs = p.signals.map(s => `[SIGNAL] ${sanitizeForPrompt(s.value)}`).join('
-');
+    const sigs = p.signals.map(s => `[SIGNAL] ${sanitizeForPrompt(s.value)}`).join('\n');
     const cal = p.calibration ? `
 [CALIBRATION] ${sanitizeForPrompt(p.calibration.marketTitle)} at ${Math.round(p.calibration.marketPrice * 100)}%` : '';
     const projections = p.projections
@@ -14548,43 +14535,34 @@ function buildUserPrompt(preds) {
       ? `
 [CASCADES] ${p.cascades.map(c => `${sanitizeForPrompt(c.domain)} via ${sanitizeForPrompt(c.effect)} (${Math.round(c.probability * 100)}%)`).join('; ')}`
       : '';
-    const headlines = (p.newsContext || []).slice(0, 3).map(h => `- ${sanitizeForPrompt(h)}`).join('
-');
+    const headlines = (p.newsContext || []).slice(0, 3).map(h => `- ${sanitizeForPrompt(h)}`).join('\n');
     const news = headlines ? `
 [HEADLINES]
-${headlines}` : '
+${headlines}` : `
 [HEADLINES]
-- No directly matched headlines';
+- No directly matched headlines`;
     const caseFile = p.caseFile || {};
     const support = (caseFile.supportingEvidence || [])
       .slice(0, 4)
       .map(item => `- ${sanitizeForPrompt(item.summary)} (${Math.round((item.weight || 0) * 100)}%)`)
-      .join('
-');
+      .join('\n');
     const counter = (caseFile.counterEvidence || [])
       .slice(0, 3)
       .map(item => `- ${sanitizeForPrompt(item.summary)}`)
-      .join('
-');
-    const triggers = (caseFile.triggers || []).slice(0, 3).map(item => `- ${sanitizeForPrompt(item)}`).join('
-');
+      .join('\n');
+    const triggers = (caseFile.triggers || []).slice(0, 3).map(item => `- ${sanitizeForPrompt(item)}`).join('\n');
     const actors = (caseFile.actors || [])
       .slice(0, 3)
       .map(actor => `- ${sanitizeForPrompt(actor.name)} [${sanitizeForPrompt(actor.category)}]: ${sanitizeForPrompt(actor.role)} | objective: ${sanitizeForPrompt(actor.objectives?.[0] || '')} | likely action: ${sanitizeForPrompt(actor.likelyActions?.[0] || '')}`)
-      .join('
-');
+      .join('\n');
     const worldSummary = caseFile.worldState?.summary ? sanitizeForPrompt(caseFile.worldState.summary) : '';
-    const worldPressures = (caseFile.worldState?.activePressures || []).slice(0, 3).map(item => `- ${sanitizeForPrompt(item)}`).join('
-');
-    const worldStabilizers = (caseFile.worldState?.stabilizers || []).slice(0, 2).map(item => `- ${sanitizeForPrompt(item)}`).join('
-');
-    const worldUnknowns = (caseFile.worldState?.keyUnknowns || []).slice(0, 3).map(item => `- ${sanitizeForPrompt(item)}`).join('
-');
+    const worldPressures = (caseFile.worldState?.activePressures || []).slice(0, 3).map(item => `- ${sanitizeForPrompt(item)}`).join('\n');
+    const worldStabilizers = (caseFile.worldState?.stabilizers || []).slice(0, 2).map(item => `- ${sanitizeForPrompt(item)}`).join('\n');
+    const worldUnknowns = (caseFile.worldState?.keyUnknowns || []).slice(0, 3).map(item => `- ${sanitizeForPrompt(item)}`).join('\n');
     const branches = (caseFile.branches || [])
       .slice(0, 3)
       .map(branch => `- ${sanitizeForPrompt(branch.kind)}: ${sanitizeForPrompt(branch.summary)} | outcome: ${sanitizeForPrompt(branch.outcome)} | projected: ${Math.round((branch.projectedProbability || 0) * 100)}%`)
-      .join('
-');
+      .join('\n');
     const caseSections = `${support ? `
 [SUPPORTING_EVIDENCE]
 ${support}` : ''}${counter ? `
@@ -14607,9 +14585,7 @@ ${branches}` : ''}`;
     return `[${i}] "${sanitizeForPrompt(p.title)}" (${p.domain}, ${p.region})
 Probability: ${Math.round(p.probability * 100)}% | Confidence: ${Math.round(p.confidence * 100)}% | Trend: ${p.trend} | Horizon: ${p.timeHorizon}
 ${sigs}${cal}${projections}${cascades}${news}${caseSections}`;
-  }).join('
-
-');
+  }).join('\n\n');
   return `Predictions to analyze:
 
 ${predsText}`;
@@ -15733,12 +15709,10 @@ Rules for proposed_addition:
 function buildImpactPromptCritiqueUserPrompt(qualityMetrics, mapped, candidatePackets) {
   const sample = mapped.slice(0, 6).map((h) => (
     `  [${h.order}][cand${h.candidateIndex}] key=${h.hypothesisKey || h.variableKey || 'unknown'} geo=${h.geography || h.region || 'none'} com=${h.commodity || 'none'} assets=${(h.affectedAssets || h.assetsOrSectors || []).join(',') || 'none'} | ${(h.description || h.summary || '').slice(0, 80)}`
-  )).join('
-');
+  )).join('\n');
   const candidates = candidatePackets.slice(0, 3).map((p) => (
     `  [${p.candidateIndex}] stateKind=${p.stateKind} region=${p.dominantRegion} route=${p.routeFacilityKey || 'none'} commodity=${p.commodityKey || 'none'} signals=${(p.criticalSignalTypes || []).join(',') || 'none'}`
-  )).join('
-');
+  )).join('\n');
   const directMapped = mapped.filter((h) => h.order === 'direct');
   const uniqueDirectComs = [...new Set(directMapped.map((h) => h.commodity || '').filter(Boolean))];
   const uniqueDirectGeos = [...new Set(directMapped.map((h) => (h.geography || h.region || '').split(',')[0].trim()).filter(Boolean))];
@@ -15992,32 +15966,28 @@ function buildMarketImplicationsContext(inputs) {
       return `- ${sanitizeForPrompt(label)}${strength}${conf}${domains}${evidence}`;
     });
     parts.push(`[CRITICAL INTELLIGENCE SIGNALS]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
   const commodities = inputs.commodityQuotes?.quotes;
   if (Array.isArray(commodities) && commodities.length > 0) {
     const top = commodities.slice(0, 8).map(q => `${q.display || q.symbol}: ${q.price != null ? q.price.toFixed(2) : 'N/A'} (${q.change != null ? (q.change >= 0 ? '+' : '') + q.change.toFixed(2) + '%' : 'N/A'})`);
     parts.push(`[COMMODITIES]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
   const stocks = inputs.marketQuotes?.quotes;
   if (Array.isArray(stocks) && stocks.length > 0) {
     const top = stocks.slice(0, 10).map(q => `${q.display || q.symbol}: ${q.price != null ? q.price.toFixed(2) : 'N/A'} (${q.change != null ? (q.change >= 0 ? '+' : '') + q.change.toFixed(2) + '%' : 'N/A'})`);
     parts.push(`[EQUITIES]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
   const sectors = inputs.sectorSummary?.sectors;
   if (Array.isArray(sectors) && sectors.length > 0) {
     const top = sectors.slice(0, 8).map(s => `${s.name}: ${s.change != null ? (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%' : 'N/A'}`);
     parts.push(`[SECTORS]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
   // ETF flows — sector rotation signal
@@ -16029,8 +15999,7 @@ ${top.join('
       return `${e.name || e.symbol}: ${flow != null ? (flow >= 0 ? '+' : '') + flow.toFixed(1) + '% flow' : 'N/A'}`;
     });
     parts.push(`[ETF FLOWS]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
   // Central bank policy rates — essential for forex/rates cards
@@ -16038,8 +16007,7 @@ ${top.join('
   if (policyRates.length > 0) {
     const rateLines = policyRates.slice(0, 8).map(r => `${r.country || r.code || r.name}: ${r.rate != null ? r.rate.toFixed(2) + '%' : 'N/A'}`);
     parts.push(`[CENTRAL BANK POLICY RATES]
-${rateLines.join('
-')}`);
+${rateLines.join('\n')}`);
   }
 
   const theaters = inputs.theaterPosture?.theaters;
@@ -16052,8 +16020,7 @@ ${rateLines.join('
         return `${region}: alert=${t.alertLevel} escalation=${t.escalationScore ?? 'N/A'}${commodity}`;
       });
       parts.push(`[ACTIVE THEATERS]
-${lines.join('
-')}`);
+${lines.join('\n')}`);
     }
   }
 
@@ -16065,8 +16032,7 @@ ${lines.join('
     const atRisk = chokepointList.filter(c => c.riskLevel === 'HIGH' || c.riskLevel === 'CRITICAL').slice(0, 4);
     if (atRisk.length > 0) {
       parts.push(`[AT-RISK CHOKEPOINTS]
-${atRisk.map(c => `${c.name}: risk=${c.riskLevel} commodity=${c.commodity || 'N/A'}`).join('
-')}`);
+${atRisk.map(c => `${c.name}: risk=${c.riskLevel} commodity=${c.commodity || 'N/A'}`).join('\n')}`);
     }
   }
 
@@ -16079,8 +16045,7 @@ ${atRisk.map(c => `${c.name}: risk=${c.riskLevel} commodity=${c.commodity || 'N/
       return `${idx.name || idx.route || idx.id}:${val}${change}`;
     });
     parts.push(`[SHIPPING INDICES]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
   // FRED macro indicators
@@ -16094,8 +16059,7 @@ ${top.join('
     if (fredSeries.UNRATE?.value != null) fredParts.push(`Unemployment Rate: ${fredSeries.UNRATE.value}%`);
     if (fredSeries.CPIAUCSL?.value != null) fredParts.push(`CPI YoY: ${fredSeries.CPIAUCSL.value}`);
     if (fredParts.length > 0) parts.push(`[MACRO INDICATORS]
-${fredParts.join('
-')}`);
+${fredParts.join('\n')}`);
   }
 
   // Prediction markets — forward-looking probability anchors
@@ -16107,8 +16071,7 @@ ${fredParts.join('
       .slice(0, 6)
       .map(m => `- ${sanitizeForPrompt(m.title.slice(0, 100))}: ${Math.round(m.yesPrice)}% YES (${m.source || 'Polymarket'})`);
     if (top.length > 0) parts.push(`[PREDICTION MARKETS — GEOPOLITICAL]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
   // Sanctions — affects USDRUB, USDTRY, USDCNY, relevant commodity flows
@@ -16119,8 +16082,7 @@ ${top.join('
       .slice(0, 5)
       .map(c => `${c.name || c.country || c.code}: pressure=${c.score ?? c.pressureScore ?? 'N/A'}`);
     if (high.length > 0) parts.push(`[HIGH-PRESSURE SANCTIONS]
-${high.join('
-')}`);
+${high.join('\n')}`);
   }
 
   // News signals (fallback / supplementary)
@@ -16128,13 +16090,10 @@ ${high.join('
   if (Array.isArray(insights) && insights.length > 0) {
     const top = insights.slice(0, 5).map(s => `- ${sanitizeForPrompt(s.title || s.summary || '')}`);
     parts.push(`[NEWS SIGNALS]
-${top.join('
-')}`);
+${top.join('\n')}`);
   }
 
-  return parts.length > 0 ? parts.join('
-
-') : 'No live world state available.';
+  return parts.length > 0 ? parts.join('\n\n') : 'No live world state available.';
 }
 
 const VALID_IMPACT_TYPES = new Set([
@@ -16422,8 +16381,7 @@ if (_isDirectRun) {
         }
       } catch (err) {
         console.warn(`  [Trace] Export failed: ${err.message}`);
-        if (err.stack) console.warn(`  [Trace] Stack: ${err.stack.split('
-').slice(0, 3).join(' | ')}`);
+        if (err.stack) console.warn(`  [Trace] Stack: ${err.stack.split('\n').slice(0, 3).join(' | ')}`);
       }
 
       try {
@@ -16446,22 +16404,18 @@ function buildSimulationRound1SystemPrompt(theater, pkg) {
   );
   const entityList = theaterEntities.slice(0, 10).map(
     (e) => `- ${sanitizeForPrompt(e.entityId)} | ${sanitizeForPrompt(e.name)} | class=${sanitizeForPrompt(e.class)} | stance=${sanitizeForPrompt(e.stance || 'unknown')}`,
-  ).join('
-');
+  ).join('\n');
 
   const theaterSeeds = (pkg.eventSeeds || []).filter((s) => s.theaterId === theater.theaterId);
   const seedList = theaterSeeds.slice(0, 8).map(
     (s) => `- ${sanitizeForPrompt(s.seedId)} [${sanitizeForPrompt(s.type)}] ${sanitizeForPrompt(s.summary)} (${sanitizeForPrompt(s.timing)})`,
-  ).join('
-');
+  ).join('\n');
 
   const constraints = (pkg.constraints?.[theater.theaterId] || [])
-    .map((c) => `- [${c.hard ? 'hard' : 'soft'}] ${sanitizeForPrompt(c.class)}: ${sanitizeForPrompt(c.statement)}`).join('
-') || '- No explicit constraints';
+    .map((c) => `- [${c.hard ? 'hard' : 'soft'}] ${sanitizeForPrompt(c.class)}: ${sanitizeForPrompt(c.statement)}`).join('\n') || '- No explicit constraints';
   const theaterEvalTargets = pkg.evaluationTargets?.[theater.theaterId];
   const evalTargets = (theaterEvalTargets?.requiredPaths || [])
-    .map((p) => `- ${sanitizeForPrompt(p.pathType)}: ${sanitizeForPrompt(p.question)}`).join('
-') || '- General market and security dynamics';
+    .map((p) => `- ${sanitizeForPrompt(p.pathType)}: ${sanitizeForPrompt(p.question)}`).join('\n') || '- General market and security dynamics';
   const requirement = sanitizeForPrompt(
     pkg.simulationRequirement?.[theater.theaterId] || theater.theaterLabel || theater.theaterId,
   );
@@ -16519,8 +16473,7 @@ function buildSimulationRound2SystemPrompt(theater, pkg, round1) {
   const r1Paths = (round1?.paths || []).slice(0, 3);
   const pathSummaries = r1Paths.map(
     (p) => `- ${p.pathId}: ${sanitizeForPrompt(p.summary || '')} — actors: ${(p.initialReactions || []).slice(0, 3).map((r) => sanitizeForPrompt(r.actorId || '')).join(', ')}`,
-  ).join('
-') || '- (no round 1 paths available)';
+  ).join('\n') || '- (no round 1 paths available)';
 
   const theaterEntities = (pkg.entities || []).filter(
     (e) => !e.relevanceToTheater || e.relevanceToTheater === theater.theaterId,
@@ -16529,15 +16482,13 @@ function buildSimulationRound2SystemPrompt(theater, pkg, round1) {
 
   const r2EvalTargets = pkg.evaluationTargets?.[theater.theaterId];
   const evalTargets = (r2EvalTargets?.requiredPaths || [])
-    .map((p) => `- ${sanitizeForPrompt(p.pathType)}: ${sanitizeForPrompt(p.question)}`).join('
-') || '- General market and security dynamics';
+    .map((p) => `- ${sanitizeForPrompt(p.pathType)}: ${sanitizeForPrompt(p.question)}`).join('\n') || '- General market and security dynamics';
 
   const actorRoles = Array.isArray(theater.actorRoles) ? theater.actorRoles : [];
   const rolesSection = actorRoles.length > 0
     ? `
 CANDIDATE ACTOR ROLES (copy these EXACT strings into keyActorRoles; return [] if none apply):
-${actorRoles.map((r) => `- "${sanitizeForPrompt(r)}"`).join('
-')}`
+${actorRoles.map((r) => `- "${sanitizeForPrompt(r)}"`).join('\n')}`
     : '';
 
   return `You are a geopolitical simulation engine. This is ROUND 2 of a 2-round theater simulation.

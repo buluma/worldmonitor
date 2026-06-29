@@ -16,8 +16,7 @@
 export function cleanJsonText(text) {
   return text
     .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/[^
-]*/g, '')
+    .replace(/\/\/[^\n]*/g, '')
     .replace(/,(\s*[}\]])/g, '$1')
     .trim();
 }
@@ -32,7 +31,7 @@ function extractFirstDelimited(text, open, close) {
   for (let i = start; i < cleaned.length; i++) {
     const char = cleaned[i];
     if (escaped) { escaped = false; continue; }
-    if (char === '\') { escaped = true; continue; }
+    if (char === '\\') { escaped = true; continue; }
     if (char === '"') { inString = !inString; continue; }
     if (inString) continue;
     if (char === open) depth++;
