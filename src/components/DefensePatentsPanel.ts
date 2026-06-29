@@ -10,11 +10,11 @@ type ViewMode = 'all' | 'H04B' | 'H01L' | 'F42B' | 'G06N' | 'C12N';
 
 function cpcLabel(code: string): string {
   switch (code) {
-    case 'H04B': return t('components.defensePatents.cpcLabels.H04B');
-    case 'H01L': return t('components.defensePatents.cpcLabels.H01L');
-    case 'F42B': return t('components.defensePatents.cpcLabels.F42B');
-    case 'G06N': return t('components.defensePatents.cpcLabels.G06N');
-    case 'C12N': return t('components.defensePatents.cpcLabels.C12N');
+    case 'H04B': return t('mcp.defensePatents.cpcLabels.H04B');
+    case 'H01L': return t('mcp.defensePatents.cpcLabels.H01L');
+    case 'F42B': return t('mcp.defensePatents.cpcLabels.F42B');
+    case 'G06N': return t('mcp.defensePatents.cpcLabels.G06N');
+    case 'C12N': return t('mcp.defensePatents.cpcLabels.C12N');
     default: return code;
   }
 }
@@ -46,9 +46,9 @@ export class DefensePatentsPanel extends Panel {
   constructor() {
     super({
       id: 'defense-patents',
-      title: t('components.defensePatents.title'),
+      title: t('mcp.defensePatents.title'),
       showCount: true,
-      infoTooltip: t('components.defensePatents.infoTooltip'),
+      infoTooltip: t('mcp.defensePatents.infoTooltip'),
     });
     this.element.classList.add('panel-tall');
     void this.fetchPatents();
@@ -68,7 +68,7 @@ export class DefensePatentsPanel extends Panel {
     } catch (err) {
       if (this.isAbortError(err)) return;
       if (!this.element?.isConnected) return;
-      this._error = t('components.defensePatents.error');
+      this._error = t('mcp.defensePatents.error');
       console.error('[DefensePatents] Fetch error:', err);
     }
     this.loading = false;
@@ -80,7 +80,7 @@ export class DefensePatentsPanel extends Panel {
       replaceChildren(this.content,
         h('div', { className: 'defense-patents-loading' },
           h('div', { className: 'loading-spinner' }),
-          h('span', null, t('components.defensePatents.loading')),
+          h('span', null, t('mcp.defensePatents.loading')),
         ),
       );
       return;
@@ -94,7 +94,7 @@ export class DefensePatentsPanel extends Panel {
     this.setErrorState(false);
 
     const tabs: [ViewMode, string][] = [
-      ['all', t('components.defensePatents.tabs.all')],
+      ['all', t('mcp.defensePatents.tabs.all')],
       ...CPC_CODES.map((code): [ViewMode, string] => [code, cpcLabel(code)]),
     ];
 
@@ -113,7 +113,7 @@ export class DefensePatentsPanel extends Panel {
         h('div', { className: 'defense-patents-list' },
           ...(filtered.length > 0
             ? filtered.map(p => this.buildRow(p))
-            : [h('div', { className: 'empty-state' }, t('components.defensePatents.empty'))]),
+            : [h('div', { className: 'empty-state' }, t('mcp.defensePatents.empty'))]),
         ),
       ),
     );
@@ -135,7 +135,7 @@ export class DefensePatentsPanel extends Panel {
         h('div', { className: 'patent-header' },
           h('span', { className: 'patent-assignee' }, p.assignee),
           safeUrl
-            ? h('a', { href: safeUrl, target: '_blank', rel: 'noopener', className: 'patent-link', title: t('components.defensePatents.viewOnUspto') }, '↗')
+            ? h('a', { href: safeUrl, target: '_blank', rel: 'noopener', className: 'patent-link', title: t('mcp.defensePatents.viewOnUspto') }, '↗')
             : false,
         ),
         h('div', { className: 'patent-title' }, p.title),

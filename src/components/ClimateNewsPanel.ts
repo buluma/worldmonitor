@@ -46,7 +46,7 @@ function renderNewsCard(item: ClimateNewsItem): SafeHtml {
 
 export class ClimateNewsPanel extends Panel {
   constructor() {
-    super({ id: 'climate-news', title: t('panels.climateNews'), infoTooltip: t('components.climateNews.infoTooltip') });
+    super({ id: 'climate-news', title: t('panels.climateNews'), infoTooltip: t('mcp.climateNews.infoTooltip') });
   }
 
   public async fetchData(): Promise<void> {
@@ -67,13 +67,13 @@ export class ClimateNewsPanel extends Panel {
     } catch (err) {
       if (this.isAbortError(err)) return;
       if (!this.element?.isConnected) return;
-      this.showError(t('components.climateNews.loadError'), () => void this.fetchData());
+      this.showError(t('mcp.climateNews.loadError'), () => void this.fetchData());
     }
   }
 
   private renderNewsList(data: ListClimateNewsResponse): void {
     if (!data.items?.length) {
-      this.showError(t('components.climateNews.loadError'), () => void this.fetchData());
+      this.showError(t('mcp.climateNews.loadError'), () => void this.fetchData());
       return;
     }
 

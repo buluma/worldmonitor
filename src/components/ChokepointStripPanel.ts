@@ -18,13 +18,13 @@ const STRIP_ORDER = [
 
 function shortName(id: string): string {
   switch (id) {
-    case 'hormuz_strait': return t('components.chokepointStrip.shortName.hormuzStrait');
-    case 'malacca_strait': return t('components.chokepointStrip.shortName.malaccaStrait');
-    case 'suez': return t('components.chokepointStrip.shortName.suez');
-    case 'bab_el_mandeb': return t('components.chokepointStrip.shortName.babElMandeb');
-    case 'bosphorus': return t('components.chokepointStrip.shortName.bosphorus');
-    case 'dover_strait': return t('components.chokepointStrip.shortName.danishStraits');
-    case 'panama': return t('components.chokepointStrip.shortName.panama');
+    case 'hormuz_strait': return t('mcp.chokepointStrip.shortName.hormuzStrait');
+    case 'malacca_strait': return t('mcp.chokepointStrip.shortName.malaccaStrait');
+    case 'suez': return t('mcp.chokepointStrip.shortName.suez');
+    case 'bab_el_mandeb': return t('mcp.chokepointStrip.shortName.babElMandeb');
+    case 'bosphorus': return t('mcp.chokepointStrip.shortName.bosphorus');
+    case 'dover_strait': return t('mcp.chokepointStrip.shortName.danishStraits');
+    case 'panama': return t('mcp.chokepointStrip.shortName.panama');
     default: return '';
   }
 }
@@ -41,8 +41,8 @@ function formatFlow(cp: ChokepointInfo): string {
   const est = cp.flowEstimate;
   if (!est || typeof est.currentMbd !== 'number' || typeof est.baselineMbd !== 'number') return '—';
   const pct = est.baselineMbd > 0 ? Math.round((est.currentMbd / est.baselineMbd) * 100) : null;
-  if (pct == null) return t('components.chokepointStrip.flow.mbd', { value: est.currentMbd.toFixed(1) });
-  return t('components.chokepointStrip.flow.pctOfBaseline', { pct });
+  if (pct == null) return t('mcp.chokepointStrip.flow.mbd', { value: est.currentMbd.toFixed(1) });
+  return t('mcp.chokepointStrip.flow.pctOfBaseline', { pct });
 }
 
 export class ChokepointStripPanel extends Panel {
@@ -51,8 +51,8 @@ export class ChokepointStripPanel extends Panel {
   constructor() {
     super({
       id: 'chokepoint-strip',
-      title: t('components.chokepointStrip.title'),
-      infoTooltip: t('components.chokepointStrip.infoTooltip'),
+      title: t('mcp.chokepointStrip.title'),
+      infoTooltip: t('mcp.chokepointStrip.infoTooltip'),
     });
   }
 
@@ -76,13 +76,13 @@ export class ChokepointStripPanel extends Panel {
     } catch (err) {
       if (this.isAbortError(err)) return;
       if (!this.element?.isConnected) return;
-      this.showError(t('components.chokepointStrip.errors.unavailable'), () => void this.fetchData());
+      this.showError(t('mcp.chokepointStrip.errors.unavailable'), () => void this.fetchData());
     }
   }
 
   private render(): void {
     if (!this.data?.chokepoints?.length) {
-      this.showError(t('components.chokepointStrip.errors.noData'), () => void this.fetchData());
+      this.showError(t('mcp.chokepointStrip.errors.noData'), () => void this.fetchData());
       return;
     }
 
@@ -99,7 +99,7 @@ export class ChokepointStripPanel extends Panel {
         ? safeHtml`<span class="cp-chip-warn">${cp.activeWarnings}</span>`
         : safeHtml``;
       return safeHtml`
-        <div class="cp-chip" data-cp="${cp.id}" title="${cp.name} - ${cp.status || t('components.chokepointStrip.unknown')}">
+        <div class="cp-chip" data-cp="${cp.id}" title="${cp.name} - ${cp.status || t('mcp.chokepointStrip.unknown')}">
           <div class="cp-chip-dot" style="background:${color}"></div>
           <div class="cp-chip-body">
             <div class="cp-chip-name">${short}${warnings}</div>
@@ -111,11 +111,11 @@ export class ChokepointStripPanel extends Panel {
     const nAis = ordered.reduce((sum, cp) => sum + (cp.aisDisruptions ?? 0), 0);
     const footer: SafeHtml = unsafeRawHtml(attributionFooterHtml({
       sourceType: 'ais',
-      method: t('components.chokepointStrip.attribution.method'),
+      method: t('mcp.chokepointStrip.attribution.method'),
       sampleSize: nAis || undefined,
-      sampleLabel: t('components.chokepointStrip.attribution.sampleLabel'),
+      sampleLabel: t('mcp.chokepointStrip.attribution.sampleLabel'),
       updatedAt: this.data.fetchedAt,
-      creditName: t('components.chokepointStrip.attribution.creditName'),
+      creditName: t('mcp.chokepointStrip.attribution.creditName'),
     }), 'attributionFooterHtml escapes fields and returns shared footer markup');
 
     this.setSafeContent(safeHtml`

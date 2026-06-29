@@ -22,7 +22,7 @@ export class InternetDisruptionsPanel extends Panel {
       showCount: true,
       trackActivity: true,
       defaultRowSpan: 2,
-      infoTooltip: t('components.internetDisruptions.infoTooltip'),
+      infoTooltip: t('mcp.internetDisruptions.infoTooltip'),
     });
     this.content.addEventListener('click', (e: Event) => {
       const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
@@ -91,7 +91,7 @@ export class InternetDisruptionsPanel extends Panel {
 
   private buildOutages(): HTMLElement {
     if (!this.outages.length) {
-      return h('div', { className: 'id-empty' }, t('components.internetDisruptions.noOutages'));
+      return h('div', { className: 'id-empty' }, t('mcp.internetDisruptions.noOutages'));
     }
     const sorted = [...this.outages].sort((a, b) => {
       const order: Record<string, number> = { total: 0, major: 1, partial: 2 };
@@ -120,7 +120,7 @@ export class InternetDisruptionsPanel extends Panel {
 
   private buildDdos(): HTMLElement {
     if (!this.ddos || (!this.ddos.protocol.length && !this.ddos.vector.length)) {
-      return h('div', { className: 'id-empty' }, t('components.internetDisruptions.noDdos'));
+      return h('div', { className: 'id-empty' }, t('mcp.internetDisruptions.noDdos'));
     }
     const d = this.ddos;
     const dateRange = d.dateRangeStart
@@ -132,21 +132,21 @@ export class InternetDisruptionsPanel extends Panel {
 
       d.protocol.length > 0
         ? h('div', { className: 'id-section' },
-            h('div', { className: 'id-section-title' }, t('components.internetDisruptions.byProtocol')),
+            h('div', { className: 'id-section-title' }, t('mcp.internetDisruptions.byProtocol')),
             ...d.protocol.slice(0, 6).map(e => this.buildBar(e.label, e.percentage, '#b400ff')),
           )
         : false,
 
       d.vector.length > 0
         ? h('div', { className: 'id-section' },
-            h('div', { className: 'id-section-title' }, t('components.internetDisruptions.byVector')),
+            h('div', { className: 'id-section-title' }, t('mcp.internetDisruptions.byVector')),
             ...d.vector.slice(0, 6).map(e => this.buildBar(e.label, e.percentage, '#ff4400')),
           )
         : false,
 
       d.topTargetLocations.length > 0
         ? h('div', { className: 'id-section' },
-            h('div', { className: 'id-section-title' }, t('components.internetDisruptions.topTargets')),
+            h('div', { className: 'id-section-title' }, t('mcp.internetDisruptions.topTargets')),
             ...d.topTargetLocations.slice(0, 8).map(loc =>
               this.buildBar(loc.countryName || loc.countryCode, loc.percentage, '#cc0044'),
             ),
@@ -167,7 +167,7 @@ export class InternetDisruptionsPanel extends Panel {
 
   private buildAnomalies(): HTMLElement {
     if (!this.anomalies.length) {
-      return h('div', { className: 'id-empty' }, t('components.internetDisruptions.noAnomalies'));
+      return h('div', { className: 'id-empty' }, t('mcp.internetDisruptions.noAnomalies'));
     }
     const sorted = [...this.anomalies].sort((a, b) => {
       if (a.status === 'ONGOING' && b.status !== 'ONGOING') return -1;
