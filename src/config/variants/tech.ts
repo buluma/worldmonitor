@@ -45,7 +45,7 @@ export const FEEDS: Record<string, Feed[]> = {
   // AI & Machine Learning
   ai: [
     { name: 'AI News', url: rss('https://news.google.com/rss/search?q=(OpenAI+OR+Anthropic+OR+Google+AI+OR+"large+language+model"+OR+ChatGPT+OR+Claude+OR+"AI+model")+when:2d&hl=en-US&gl=US&ceid=US:en') },
-    { name: 'VentureBeat AI', url: rss('https://venturebeat.com/category/ai/feed/') },
+    { name: 'VentureBeat AI', url: rss('https://venturebeat.com/category/ai/feed') },
     { name: 'The Verge AI', url: rss('https://www.theverge.com/rss/ai-artificial-intelligence/index.xml') },
     { name: 'MIT Tech Review AI', url: rss('https://www.technologyreview.com/topic/artificial-intelligence/feed') },
     { name: 'MIT Research', url: rss('https://news.mit.edu/rss/research') },
@@ -59,7 +59,7 @@ export const FEEDS: Record<string, Feed[]> = {
   // Startups & VC - Comprehensive coverage
   startups: [
     { name: 'TechCrunch Startups', url: rss('https://techcrunch.com/category/startups/feed/') },
-    { name: 'VentureBeat', url: rss('https://venturebeat.com/feed/') },
+    { name: 'VentureBeat', url: rss('https://venturebeat.com/feed') },
     { name: 'Crunchbase News', url: rss('https://news.crunchbase.com/feed/') },
     { name: 'SaaStr', url: rss('https://www.saastr.com/feed/') },
     { name: 'TechCrunch Venture', url: rss('https://techcrunch.com/category/venture/feed/') },

@@ -592,7 +592,7 @@ const FULL_FEEDS: Record<string, Feed[]> = {
   ],
   ai: [
     { name: 'AI News', url: rss('https://news.google.com/rss/search?q=(OpenAI+OR+Anthropic+OR+Google+AI+OR+"large+language+model"+OR+ChatGPT)+when:2d&hl=en-US&gl=US&ceid=US:en') },
-    { name: 'VentureBeat AI', url: rss('https://venturebeat.com/category/ai/feed/') },
+    { name: 'VentureBeat AI', url: rss('https://venturebeat.com/category/ai/feed') },
     { name: 'The Verge AI', url: rss('https://www.theverge.com/rss/ai-artificial-intelligence/index.xml') },
     { name: 'MIT Tech Review', url: rss('https://www.technologyreview.com/topic/artificial-intelligence/feed') },
     { name: 'ArXiv AI', url: rss('https://export.arxiv.org/rss/cs.AI') },
@@ -619,13 +619,13 @@ const FULL_FEEDS: Record<string, Feed[]> = {
     { name: 'CISA', url: railwayRss('https://www.cisa.gov/cybersecurity-advisories/all.xml') },
   ],
   layoffs: [
-    { name: 'Layoffs.fyi', url: rss('https://news.google.com/rss/search?q=tech+company+layoffs+announced&hl=en&gl=US&ceid=US:en') },
+    { name: 'Layoffs.fyi', url: rss('https://news.google.com/rss/search?q=tech+company+layoffs+announced&hl=en-US&gl=US&ceid=US:en') },
     { name: 'TechCrunch Layoffs', url: rss('https://techcrunch.com/tag/layoffs/feed/') },
     { name: 'Layoffs News', url: rss('https://news.google.com/rss/search?q=(layoffs+OR+"job+cuts"+OR+"workforce+reduction")+when:3d&hl=en-US&gl=US&ceid=US:en') },
   ],
   thinktanks: [
     { name: 'Foreign Policy', url: rss('https://foreignpolicy.com/feed/') },
-    { name: 'Atlantic Council', url: railwayRss('https://www.atlanticcouncil.org/feed/') },
+    { name: 'Atlantic Council', url: rss('https://news.google.com/rss/search?q=site:atlanticcouncil.org&hl=en-US&gl=US&ceid=US:en') },
     { name: 'Foreign Affairs', url: rss('https://www.foreignaffairs.com/rss.xml') },
     { name: 'CSIS', url: rss('https://news.google.com/rss/search?q=site:csis.org+when:7d&hl=en-US&gl=US&ceid=US:en') },
     { name: 'RAND', url: rss('https://www.rand.org/pubs/articles.xml') },
@@ -742,7 +742,7 @@ const TECH_FEEDS: Record<string, Feed[]> = {
   ],
   ai: [
     { name: 'AI News', url: rss('https://news.google.com/rss/search?q=(OpenAI+OR+Anthropic+OR+Google+AI+OR+"large+language+model"+OR+ChatGPT+OR+Claude+OR+"AI+model")+when:2d&hl=en-US&gl=US&ceid=US:en') },
-    { name: 'VentureBeat AI', url: rss('https://venturebeat.com/category/ai/feed/') },
+    { name: 'VentureBeat AI', url: rss('https://venturebeat.com/category/ai/feed') },
     { name: 'The Verge AI', url: rss('https://www.theverge.com/rss/ai-artificial-intelligence/index.xml') },
     { name: 'MIT Tech Review AI', url: rss('https://www.technologyreview.com/topic/artificial-intelligence/feed') },
     { name: 'MIT Research', url: rss('https://news.mit.edu/rss/research') },
@@ -754,7 +754,7 @@ const TECH_FEEDS: Record<string, Feed[]> = {
   ],
   startups: [
     { name: 'TechCrunch Startups', url: rss('https://techcrunch.com/category/startups/feed/') },
-    { name: 'VentureBeat', url: rss('https://venturebeat.com/feed/') },
+    { name: 'VentureBeat', url: rss('https://venturebeat.com/feed') },
     { name: 'Crunchbase News', url: rss('https://news.crunchbase.com/feed/') },
     { name: 'SaaStr', url: rss('https://www.saastr.com/feed/') },
     { name: 'AngelList News', url: rss('https://news.google.com/rss/search?q=site:angellist.com+OR+"AngelList"+funding+when:7d&hl=en-US&gl=US&ceid=US:en') },
@@ -1247,7 +1247,7 @@ export const INTEL_SOURCES: Feed[] = [
   { name: 'ECFR', url: rss('https://news.google.com/rss/search?q=site:ecfr.eu+when:7d&hl=en-US&gl=US&ceid=US:en'), type: 'intl' },
   { name: 'Foreign Policy', url: rss('https://foreignpolicy.com/feed/'), type: 'intl' },
   { name: 'Foreign Affairs', url: rss('https://www.foreignaffairs.com/rss.xml'), type: 'intl' },
-  { name: 'Atlantic Council', url: railwayRss('https://www.atlanticcouncil.org/feed/'), type: 'intl' },
+  { name: 'Atlantic Council', url: rss('https://news.google.com/rss/search?q=site:atlanticcouncil.org&hl=en-US&gl=US&ceid=US:en'), type: 'intl' },
   { name: 'Middle East Institute', url: rss('https://news.google.com/rss/search?q=site:mei.edu+when:7d&hl=en-US&gl=US&ceid=US:en'), type: 'intl' },
 
   // Think Tanks & Research (Tier 3)

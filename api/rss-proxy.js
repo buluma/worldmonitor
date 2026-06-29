@@ -4,6 +4,7 @@ import { validateApiKey } from './_api-key.js';
 import { checkRateLimit } from './_rate-limit.js';
 import { getRelayBaseUrl, getRelayHeaders, fetchWithTimeout } from './_relay.js';
 import RSS_ALLOWED_DOMAINS from './_rss-allowed-domains.js';
+import { isAllowedDomain } from './_rss-allowed-domain-match.js';
 import { withEdgeObservability } from './_observability.js';
 
 export const config = { runtime: 'edge' };
@@ -28,7 +29,6 @@ const RELAY_ONLY_DOMAINS = new Set([
   'feeds.24.com',
   'feeds.capi24.com',
   'islandtimes.org',
-  'www.atlanticcouncil.org',
 ]);
 
 const DIRECT_FETCH_HEADERS = Object.freeze({
@@ -51,6 +51,14 @@ async function fetchViaRailway(feedUrl, timeoutMs) {
 
 // Allowed RSS feed domains — shared source of truth (shared/rss-allowed-domains.js)
 const ALLOWED_DOMAINS = RSS_ALLOWED_DOMAINS;
+
+function isGoogleNewsFeedUrl(feedUrl) {
+  try {
+    return new URL(feedUrl).hostname === 'news.google.com';
+  } catch {
+    return false;
+  }
+}
 
 async function handler(req) {
   const corsHeaders = getCorsHeaders(req, 'GET, OPTIONS');
