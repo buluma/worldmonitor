@@ -26,7 +26,7 @@ export const OPENAQ_SOURCE_VERSION = 'openaq-v3-pm25-waqi-optional-v2';
 const OPENAQ_LOCATIONS_URL = 'https://api.openaq.org/v3/locations';
 const OPENAQ_PM25_LATEST_URL = 'https://api.openaq.org/v3/parameters/2/latest';
 const OPENAQ_PAGE_LIMIT = 1000;
-const OPENAQ_MAX_PAGES = 20;
+const OPENAQ_MAX_PAGES = Number(process.env.OPENAQ_MAX_PAGES) || 20;
 // Worst case: 2 OpenAQ calls × 20 pages × (30s timeout × 3 attempts) ≈ 3600s
 const AIR_QUALITY_LOCK_TTL_MS = 3_600_000;
 
