@@ -13,7 +13,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { redisPipeline as sharedRedisPipeline, getRedisCredentials } from './_seed-utils.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -28,13 +27,12 @@ const RETRY_BASE_MS = 1000;
 const WEIGHTS = { internet: 30, mobile: 15, broadband: 20, rdSpend: 35 };
 const NORMALIZE_MAX = { internet: 100, mobile: 150, broadband: 50, rdSpend: 5 };
 
-// WB indicators. The seed always queries through the current year so it can
-// pick up newly-published World Bank vintages (for example 2025 once available).
+// WB indicators + date ranges matching the RPC handler
 const INDICATORS = [
-  { key: 'internet',  id: 'IT.NET.USER.ZS', lookbackYears: 7 },
-  { key: 'mobile',    id: 'IT.CEL.SETS.P2', lookbackYears: 7 },
-  { key: 'broadband', id: 'IT.NET.BBND.P2', lookbackYears: 7 },
-  { key: 'rdSpend',   id: 'GB.XPD.RSDV.GD.ZS', lookbackYears: 8 },
+  { key: 'internet',  id: 'IT.NET.USER.ZS', dateRange: '2019:2024' },
+  { key: 'mobile',    id: 'IT.CEL.SETS.P2', dateRange: '2019:2024' },
+  { key: 'broadband', id: 'IT.NET.BBND.P2', dateRange: '2019:2024' },
+  { key: 'rdSpend',   id: 'GB.XPD.RSDV.GD.ZS', dateRange: '2018:2024' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -85,7 +83,8 @@ function loadEnvFile() {
   const envPath = join(__dirname, '..', '.env.local');
   if (!existsSync(envPath)) return;
 
-  const lines = readFileSync(envPath, 'utf8').split('\n');
+  const lines = readFileSync(envPath, 'utf8').split('
+');
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -110,7 +109,7 @@ async function fetchWithRetry(url, attempt = 1) {
   try {
     const resp = await fetch(url, {
       headers: {
-        'User-Agent': 'WorldMonitor-Seed/1.0 (https://wm.opsio.space)',
+        'User-Agent': 'WorldMonitor-Seed/1.0 (https://worldmonitor.app)',
         'Accept': 'application/json',
       },
       signal: AbortSignal.timeout(30_000),
@@ -131,7 +130,20 @@ async function fetchWithRetry(url, attempt = 1) {
 }
 
 async function redisPipeline(redisUrl, token, commands) {
-  return sharedRedisPipeline(redisUrl, token, commands);
+  const resp = await fetch(`${redisUrl}/pipeline`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(commands),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Redis pipeline failed: HTTP ${resp.status} — ${text.slice(0, 200)}`);
+  }
+  return resp.json();
 }
 
 // ---------------------------------------------------------------------------
@@ -368,7 +380,17 @@ async function main() {
   const { env, sha } = parseArgs();
   const prefix = getKeyPrefix(env, sha);
 
-  const { url: redisUrl, token: redisToken } = getRedisCredentials();
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (!redisUrl) {
+    console.error('Missing UPSTASH_REDIS_REST_URL. Set it in .env.local or as an env var.');
+    process.exit(1);
+  }
+  if (!redisToken) {
+    console.error('Missing UPSTASH_REDIS_REST_TOKEN. Set it in .env.local or as an env var.');
+    process.exit(1);
+  }
 
   const fullKey = `${prefix}${BOOTSTRAP_KEY}`;
   const progressKey = `${prefix}${PROGRESS_KEY}`;
@@ -384,38 +406,40 @@ async function main() {
   console.log();
 
   const t0 = Date.now();
-  const currentYear = new Date().getFullYear();
 
   // ── 1. Tech Readiness rankings ──
   console.log('── Tech Readiness ──');
   const indicatorData = {};
-  for (const { key, id, lookbackYears } of INDICATORS) {
-    const startYear = currentYear - lookbackYears;
-    const dateRange = `${startYear}:${currentYear}`;
+  for (const { key, id, dateRange } of INDICATORS) {
     console.log(`Fetching indicator: ${id} (${dateRange})`);
     indicatorData[key] = await fetchWbIndicator(id, dateRange);
     const count = Object.keys(indicatorData[key]).length;
-    console.log(`  → ${count} countries with non-null data\n`);
+    console.log(`  → ${count} countries with non-null data
+`);
   }
 
   const rankings = computeRankings(indicatorData);
   console.log(`  → ${rankings.length} countries ranked`);
-  console.log(`  Top 5: ${rankings.slice(0, 5).map(r => `${r.rank}. ${r.countryName} (${r.score})`).join(', ')}\n`);
+  console.log(`  Top 5: ${rankings.slice(0, 5).map(r => `${r.rank}. ${r.countryName} (${r.score})`).join(', ')}
+`);
 
   // ── 2. Progress indicators ──
   console.log('── Progress Indicators ──');
   const progressData = await fetchProgressData();
   const progressWithData = progressData.filter(p => p.data.length > 0);
-  console.log(`  → ${progressWithData.length}/${progressData.length} indicators with data\n`);
+  console.log(`  → ${progressWithData.length}/${progressData.length} indicators with data
+`);
 
   // ── 3. Renewable energy ──
   console.log('── Renewable Energy ──');
   const renewableData = await fetchRenewableData();
   console.log(`  → Global: ${renewableData.globalPercentage}% (${renewableData.globalYear})`);
-  console.log(`  → ${renewableData.regions.length} regions\n`);
+  console.log(`  → ${renewableData.regions.length} regions
+`);
 
   const fetchElapsed = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(`All data fetched in ${fetchElapsed}s\n`);
+  console.log(`All data fetched in ${fetchElapsed}s
+`);
 
   // Validate
   if (rankings.length === 0) {
@@ -491,10 +515,12 @@ async function main() {
   }
 
   const total = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(`\n=== Done in ${total}s ===`);
+  console.log(`
+=== Done in ${total}s ===`);
 }
 
 main().catch(err => {
-  console.error('\nFATAL:', err.message || err);
+  console.error('
+FATAL:', err.message || err);
   process.exit(0); // graceful for cron
 });

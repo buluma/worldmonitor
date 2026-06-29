@@ -1638,3 +1638,16 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     throw err;
   }
 }
+
+// Export internal Redis helpers for seeders that import them directly.
+export { redisCommand, redisGet, redisSet, redisDel };
+export async function redisPipeline(url, token, commands) {
+  const resp = await fetch(`${url}/pipeline`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(commands),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!resp.ok) throw new Error(`Redis pipeline failed: HTTP ${resp.status}`);
+  return resp.json();
+}

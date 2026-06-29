@@ -7,15 +7,18 @@
  * Env:   WINDY_API_KEY, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
  */
 
-import { redisPipeline, getRedisCredentials } from './_seed-utils.mjs';
-
 const WINDY_API_KEY = process.env.WINDY_API_KEY;
 if (!WINDY_API_KEY) {
   console.log('WINDY_API_KEY not set — skipping webcam seed');
   process.exit(0);
 }
 
-const { url: REDIS_URL, token: REDIS_TOKEN } = getRedisCredentials();
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+if (!REDIS_URL || !REDIS_TOKEN) {
+  console.error('Redis credentials not set');
+  process.exit(1);
+}
 
 const PREFIX = process.env.KEY_PREFIX || '';
 const WINDY_BASE = 'https://api.windy.com/webcams/api/v3/webcams';
@@ -37,7 +40,16 @@ const REGIONS = [
 ];
 
 async function pipelineRequest(commands) {
-  return redisPipeline(REDIS_URL, REDIS_TOKEN, commands);
+  const resp = await fetch(`${REDIS_URL}/pipeline`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${REDIS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(commands),
+  });
+  if (!resp.ok) throw new Error(`Redis pipeline failed: ${resp.status}`);
+  return resp.json();
 }
 
 const MAX_SPLIT_DEPTH = 3;

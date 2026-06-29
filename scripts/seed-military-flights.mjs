@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
-import { loadEnvFile, CHROME_UA, getRedisCredentials, acquireLockSafely, releaseLock, withRetry, writeFreshnessMetadata, logSeedResult, verifySeedKey, extendExistingTtl, redisSet as sharedRedisSet, redisGet as sharedRedisGet } from './_seed-utils.mjs';
+import { loadEnvFile, CHROME_UA, getRedisCredentials, acquireLockSafely, releaseLock, withRetry, writeFreshnessMetadata, logSeedResult, verifySeedKey, extendExistingTtl } from './_seed-utils.mjs';
 import { summarizeMilitaryTheaters, buildMilitarySurges, appendMilitaryHistory } from './_military-surges.mjs';
-import http from 'node:http';
-import https from 'node:https';
-import tls from 'node:tls';
+import { unwrapEnvelope } from './_seed-envelope-source.mjs';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 loadEnvFile(import.meta.url);
 
@@ -40,7 +39,7 @@ const FORECAST_REFRESH_REQUEST_KEY = 'forecast:refresh-request:v1';
 const FORECAST_REFRESH_REQUEST_TTL = 60 * 60;
 
 // ── Proxy Config ─────────────────────────────────────────
-const OPENSKY_PROXY_AUTH = process.env.OPENSKY_PROXY_AUTH || process.env.OREF_PROXY_AUTH || '';
+const OPENSKY_PROXY_AUTH = process.env.OPENSKY_PROXY_AUTH || process.env.PROXY_URL || '';
 const PROXY_ENABLED = !!OPENSKY_PROXY_AUTH;
 
 // ── Query Regions ──────────────────────────────────────────
@@ -430,8 +429,8 @@ function deriveSourceHints(sourceMeta = {}) {
   const hintText = getSourceHintText(sourceMeta);
   return {
     hintText,
-    militaryHint: /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|MILIT|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|\bUSAF\b|\bUSN\b|\bUSMC\b|\bRAF\b|\bRCAF\b|\bRAAF\b|NATO|\bPLAAF\b|\bPLAN\b|\bVKS\b|RECON|AWACS|TANKER|AIRLIFT|FIGHTER|BOMBER|DRONE)/.test(hintText),
-    militaryOperatorHint: /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|EMIRI AIR FORCE|ROYAL .* AIR FORCE|AEROSPACE FORCES|\bPLAAF\b|\bPLAN\b|NATO)/.test(hintText),
+    militaryHint: /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|MILIT|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|USAF|USN|USMC|RAF|RCAF|RAAF|NATO|PLAAF|PLAN|VKS|RECON|AWACS|TANKER|AIRLIFT|FIGHTER|BOMBER|DRONE)/.test(hintText),
+    militaryOperatorHint: /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|EMIRI AIR FORCE|ROYAL .* AIR FORCE|AEROSPACE FORCES|PLAAF|PLAN|NATO)/.test(hintText),
     commercialHint: /(AIRLINES|AIRWAYS|LOGISTICS|EXPRESS|CARGOLUX|TURKISH AIRLINES|ETHIOPIAN AIRLINES|QATAR AIRWAYS|EMIRATES SKYCARGO|SAUDIA)/.test(hintText),
   };
 }
@@ -452,30 +451,30 @@ function detectAircraftTypeFromSourceMeta(sourceMeta = {}) {
 function deriveOperatorFromSourceMeta(sourceMeta = {}) {
   const hintText = getSourceHintText(sourceMeta);
   if (!hintText) return null;
-  if (/PEOPLE'?S LIBERATION ARMY AIR FORCE|\bPLAAF\b|CHINESE AIR FORCE/.test(hintText)) return { operator: 'plaaf', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
-  if (/PEOPLE'?S LIBERATION ARMY NAVY|\bPLAN\b/.test(hintText)) return { operator: 'plan', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
-  if (/UNITED STATES AIR FORCE|US AIR FORCE|\bUSAF\b/.test(hintText)) return { operator: 'usaf', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
-  if (/UNITED STATES NAVY|US NAVY|\bUSN\b/.test(hintText)) return { operator: 'usn', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
-  if (/UNITED STATES MARINE CORPS|US MARINE|\bUSMC\b/.test(hintText)) return { operator: 'usmc', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
+  if (/PEOPLE'?S LIBERATION ARMY AIR FORCE|PLAAF|CHINESE AIR FORCE/.test(hintText)) return { operator: 'plaaf', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
+  if (/PEOPLE'?S LIBERATION ARMY NAVY|PLAN/.test(hintText)) return { operator: 'plan', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
+  if (/UNITED STATES AIR FORCE|US AIR FORCE|USAF/.test(hintText)) return { operator: 'usaf', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
+  if (/UNITED STATES NAVY|US NAVY|USN/.test(hintText)) return { operator: 'usn', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
+  if (/UNITED STATES MARINE CORPS|US MARINE|USMC/.test(hintText)) return { operator: 'usmc', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
   if (/UNITED STATES ARMY|US ARMY/.test(hintText)) return { operator: 'usa', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL AIR FORCE|\bRAF\b/.test(hintText)) return { operator: 'raf', operatorCountry: 'UK', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL AIR FORCE|RAF/.test(hintText)) return { operator: 'raf', operatorCountry: 'UK', reason: 'source_operator', confidence: 'high' };
   if (/ROYAL NAVY/.test(hintText)) return { operator: 'rn', operatorCountry: 'UK', reason: 'source_operator', confidence: 'high' };
-  if (/FRENCH AIR FORCE|ARMEE DE L'?AIR|ARMÉE DE L'?AIR|\bFAF\b/.test(hintText)) return { operator: 'faf', operatorCountry: 'France', reason: 'source_operator', confidence: 'high' };
-  if (/GERMAN AIR FORCE|LUFTWAFFE|\bGAF\b/.test(hintText)) return { operator: 'gaf', operatorCountry: 'Germany', reason: 'source_operator', confidence: 'high' };
-  if (/ISRAELI AIR FORCE|\bIAF\b/.test(hintText)) return { operator: 'iaf', operatorCountry: 'Israel', reason: 'source_operator', confidence: 'high' };
+  if (/FRENCH AIR FORCE|ARMEE DE L'?AIR|ARMÉE DE L'?AIR|FAF/.test(hintText)) return { operator: 'faf', operatorCountry: 'France', reason: 'source_operator', confidence: 'high' };
+  if (/GERMAN AIR FORCE|LUFTWAFFE|GAF/.test(hintText)) return { operator: 'gaf', operatorCountry: 'Germany', reason: 'source_operator', confidence: 'high' };
+  if (/ISRAELI AIR FORCE|IAF/.test(hintText)) return { operator: 'iaf', operatorCountry: 'Israel', reason: 'source_operator', confidence: 'high' };
   if (/NATO/.test(hintText)) return { operator: 'nato', operatorCountry: 'NATO', reason: 'source_operator', confidence: 'high' };
-  if (/QATAR EMIRI AIR FORCE|\bQEAF\b/.test(hintText)) return { operator: 'qeaf', operatorCountry: 'Qatar', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL SAUDI AIR FORCE|\bRSAF\b/.test(hintText)) return { operator: 'rsaf', operatorCountry: 'Saudi Arabia', reason: 'source_operator', confidence: 'high' };
-  if (/TURKISH AIR FORCE|\bTURAF\b|\bTRKAF\b/.test(hintText)) return { operator: 'turaf', operatorCountry: 'Turkey', reason: 'source_operator', confidence: 'high' };
+  if (/QATAR EMIRI AIR FORCE|QEAF/.test(hintText)) return { operator: 'qeaf', operatorCountry: 'Qatar', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL SAUDI AIR FORCE|RSAF/.test(hintText)) return { operator: 'rsaf', operatorCountry: 'Saudi Arabia', reason: 'source_operator', confidence: 'high' };
+  if (/TURKISH AIR FORCE|TURAF|TRKAF/.test(hintText)) return { operator: 'turaf', operatorCountry: 'Turkey', reason: 'source_operator', confidence: 'high' };
   if (/UNITED ARAB EMIRATES AIR FORCE|UAE AIR FORCE|EMIRATI AIR FORCE/.test(hintText)) return { operator: 'uaeaf', operatorCountry: 'UAE', reason: 'source_operator', confidence: 'high' };
   if (/KUWAIT AIR FORCE/.test(hintText)) return { operator: 'kuwaf', operatorCountry: 'Kuwait', reason: 'source_operator', confidence: 'high' };
   if (/EGYPTIAN AIR FORCE/.test(hintText)) return { operator: 'egyaf', operatorCountry: 'Egypt', reason: 'source_operator', confidence: 'high' };
-  if (/PAKISTAN AIR FORCE|\bPAF\b/.test(hintText)) return { operator: 'paf', operatorCountry: 'Pakistan', reason: 'source_operator', confidence: 'high' };
-  if (/\bJASDF\b|JAPAN AIR SELF DEFENSE FORCE/.test(hintText)) return { operator: 'jasdf', operatorCountry: 'Japan', reason: 'source_operator', confidence: 'high' };
-  if (/\bROKAF\b|REPUBLIC OF KOREA AIR FORCE/.test(hintText)) return { operator: 'rokaf', operatorCountry: 'South Korea', reason: 'source_operator', confidence: 'high' };
-  if (/RUSSIAN AEROSPACE FORCES|\bVKS\b/.test(hintText)) return { operator: 'vks', operatorCountry: 'Russia', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL AUSTRALIAN AIR FORCE|\bRAAF\b/.test(hintText)) return { operator: 'raaf', operatorCountry: 'Australia', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL CANADIAN AIR FORCE|\bRCAF\b|CANADIAN ARMED FORCES/.test(hintText)) return { operator: 'rcaf', operatorCountry: 'Canada', reason: 'source_operator', confidence: 'high' };
+  if (/PAKISTAN AIR FORCE|PAF/.test(hintText)) return { operator: 'paf', operatorCountry: 'Pakistan', reason: 'source_operator', confidence: 'high' };
+  if (/JASDF|JAPAN AIR SELF DEFENSE FORCE/.test(hintText)) return { operator: 'jasdf', operatorCountry: 'Japan', reason: 'source_operator', confidence: 'high' };
+  if (/ROKAF|REPUBLIC OF KOREA AIR FORCE/.test(hintText)) return { operator: 'rokaf', operatorCountry: 'South Korea', reason: 'source_operator', confidence: 'high' };
+  if (/RUSSIAN AEROSPACE FORCES|VKS/.test(hintText)) return { operator: 'vks', operatorCountry: 'Russia', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL AUSTRALIAN AIR FORCE|RAAF/.test(hintText)) return { operator: 'raaf', operatorCountry: 'Australia', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL CANADIAN AIR FORCE|RCAF|CANADIAN ARMED FORCES/.test(hintText)) return { operator: 'rcaf', operatorCountry: 'Canada', reason: 'source_operator', confidence: 'high' };
   return null;
 }
 
@@ -492,78 +491,19 @@ function redactProxy(msg) {
   return String(msg || '').replace(/\/\/[^@]+@/g, '//<redacted>@');
 }
 
-function parseProxyAuth() {
-  const atIdx = OPENSKY_PROXY_AUTH.lastIndexOf('@');
-  if (atIdx === -1) return null;
-  const userPass = OPENSKY_PROXY_AUTH.substring(0, atIdx);
-  const hostPort = OPENSKY_PROXY_AUTH.substring(atIdx + 1);
-  const colonIdx = hostPort.lastIndexOf(':');
-  return {
-    userPass,
-    host: hostPort.substring(0, colonIdx),
-    port: parseInt(hostPort.substring(colonIdx + 1), 10),
-  };
-}
-
-function proxyFetchJson(url, { headers = {}, timeout = 15000, method = 'GET', body = null } = {}) {
-  const parsed = new URL(url);
-  const proxy = parseProxyAuth();
-  if (!proxy) return Promise.reject(new Error('No proxy config'));
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { reject(new Error('PROXY TIMEOUT')); }, timeout + 5000);
-    const connectReq = http.request({
-      host: proxy.host,
-      port: proxy.port,
-      method: 'CONNECT',
-      path: `${parsed.hostname}:443`,
-      headers: {
-        'Host': `${parsed.hostname}:443`,
-        'Proxy-Authorization': 'Basic ' + Buffer.from(proxy.userPass).toString('base64'),
-      },
-      timeout,
-    });
-    connectReq.on('connect', (res, socket) => {
-      if (res.statusCode !== 200) {
-        clearTimeout(timer);
-        socket.destroy();
-        return reject(new Error(`CONNECT ${res.statusCode}`));
-      }
-      const tlsSocket = tls.connect({ socket, servername: parsed.hostname }, () => {
-        const requestHeaders = { ...headers, 'Accept': 'application/json', 'User-Agent': CHROME_UA };
-        if (body != null && !Object.keys(requestHeaders).some((k) => k.toLowerCase() === 'content-length')) {
-          requestHeaders['Content-Length'] = Buffer.byteLength(body);
-        }
-        const req = https.request({
-          socket: tlsSocket,
-          hostname: parsed.hostname,
-          path: parsed.pathname + parsed.search,
-          method,
-          headers: requestHeaders,
-          timeout,
-        }, (resp) => {
-          let data = '';
-          resp.on('data', chunk => data += chunk);
-          resp.on('end', () => {
-            clearTimeout(timer);
-            if (resp.statusCode >= 400) {
-              return reject(new Error(`HTTP ${resp.statusCode}: ${data.substring(0, 200)}`));
-            }
-            try { resolve(JSON.parse(data)); }
-            catch (e) { reject(new Error(`JSON parse: ${e.message}`)); }
-          });
-        });
-        req.on('error', (e) => { clearTimeout(timer); reject(e); });
-        req.on('timeout', () => { req.destroy(); clearTimeout(timer); reject(new Error('TIMEOUT')); });
-        if (body != null) req.write(body);
-        req.end();
-      });
-      tlsSocket.on('error', (e) => { clearTimeout(timer); reject(e); });
-    });
-    connectReq.on('error', (e) => { clearTimeout(timer); reject(new Error(redactProxy(e.message))); });
-    connectReq.on('timeout', () => { connectReq.destroy(); clearTimeout(timer); reject(new Error('CONNECT TIMEOUT')); });
-    connectReq.end();
+async function proxyFetchJson(url, { headers = {}, timeout = 15000, method = 'GET', body = null } = {}) {
+  const { proxyFetch, parseProxyConfig } = createRequire(import.meta.url)('./_proxy-utils.cjs');
+  const proxyConfig = parseProxyConfig(OPENSKY_PROXY_AUTH);
+  if (!proxyConfig) throw new Error('No proxy config');
+  // proxyConfig.tls defaults to true from parseProxyConfig (Decodo requires TLS)
+  const result = await proxyFetch(url, proxyConfig, {
+    headers: { 'User-Agent': CHROME_UA, ...headers },
+    method,
+    body,
+    timeoutMs: timeout,
   });
+  if (!result.ok) throw Object.assign(new Error(`HTTP ${result.status}`), { status: result.status });
+  return JSON.parse(result.buffer.toString('utf8'));
 }
 
 // ── Data Sources ───────────────────────────────────────────
@@ -583,7 +523,7 @@ function clearOpenSkyToken() {
 }
 
 function isOpenSkyUnauthorizedError(error) {
-  return /HTTP 401\b/i.test(String(error?.message || error || ''));
+  return /HTTP 401/i.test(String(error?.message || error || ''));
 }
 
 function getOpenSkyAuthStatus() {
@@ -1220,11 +1160,26 @@ function calculateTheaterPostures(flights) {
 
 // ── Redis Write ────────────────────────────────────────────
 async function redisSet(url, token, key, value, ttl) {
-  return sharedRedisSet(url, token, key, value, ttl);
+  const payload = JSON.stringify(value);
+  const cmd = ttl ? ['SET', key, payload, 'EX', ttl] : ['SET', key, payload];
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(cmd),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) throw new Error(`Redis SET ${key} failed: HTTP ${resp.status}`);
 }
 
 async function redisGet(url, token, key) {
-  return sharedRedisGet(url, token, key);
+  const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  if (!data?.result) return null;
+  try { return unwrapEnvelope(JSON.parse(data.result)).data; } catch { return null; }
 }
 
 async function requestForecastRefreshIfEnabled(runId, assessedAt, source) {
@@ -1297,7 +1252,8 @@ async function main() {
     await extendExistingTtl([THEATER_POSTURE_LIVE_KEY, MILITARY_FORECAST_INPUTS_LIVE_KEY, MILITARY_CLASSIFICATION_AUDIT_LIVE_KEY], THEATER_POSTURE_LIVE_TTL);
     await extendExistingTtl([THEATER_POSTURE_BACKUP_KEY], THEATER_POSTURE_BACKUP_TTL);
     await extendExistingTtl([MILITARY_SURGES_LIVE_KEY], MILITARY_SURGES_LIVE_TTL);
-    console.log(`\n=== Failed gracefully (${Math.round(Date.now() - startMs)}ms) ===`);
+    console.log(`
+=== Failed gracefully (${Math.round(Date.now() - startMs)}ms) ===`);
     process.exit(0);
   }
 
@@ -1402,7 +1358,8 @@ async function main() {
 
     const durationMs = Date.now() - startMs;
     logSeedResult('military', flights.length, durationMs);
-    console.log(`\n=== Done (${Math.round(durationMs)}ms) ===`);
+    console.log(`
+=== Done (${Math.round(durationMs)}ms) ===`);
   } finally {
     if (!lockReleased) await releaseLock('military:flights', runId);
   }

@@ -2,15 +2,18 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { getRedisCredentials, redisCommand, redisGet, redisSet, extendExistingTtl } from './_seed-utils.mjs';
+import { dirname, join, resolve } from 'node:path';
+import { unwrapEnvelope } from './_seed-envelope-source.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const REDIS_KEY = 'conflict:ucdp-events:v1';
 const UCDP_PAGE_SIZE = 1000;
 const MAX_PAGES = 6;
-const MAX_EVENTS = 2000; // TODO: review cap after observing real map density & panel usage
+const MAX_EVENTS = 2000; // Redis payload guard; widening needs live UCDP volume + Upstash payload validation.
+// Retained Redis input window. CII v8's classifier accepts a 2-year window, but
+// this writer fetches the newest pages only and keeps at most MAX_EVENTS from a
+// 365-day trailing slice until retention is deliberately widened.
 const TRAILING_WINDOW_MS = 365 * 24 * 60 * 60 * 1000;
 
 const VIOLENCE_TYPE_MAP = {
@@ -27,7 +30,8 @@ function loadEnvFile() {
     envPath = join('/Users/eliehabib/Documents/GitHub/worldmonitor', '.env.local');
   }
   if (!existsSync(envPath)) return;
-  const lines = readFileSync(envPath, 'utf8').split('\n');
+  const lines = readFileSync(envPath, 'utf8').split('
+');
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -65,14 +69,13 @@ async function fetchGedPage(version, page, token) {
   return resp.json();
 }
 
-async function discoverVersion(token) {
-  const candidates = buildVersionCandidates();
+async function discoverVersion(token, fetchPage = fetchGedPage, candidates = buildVersionCandidates()) {
   console.log(`  Probing versions sequentially: ${candidates.join(', ')}`);
   for (const version of candidates) {
     try {
       console.log(`  Trying v${version}...`);
-      const page0 = await fetchGedPage(version, 0, token);
-      if (!Array.isArray(page0?.Result)) continue;
+      const page0 = await fetchPage(version, 0, token);
+      if (!Array.isArray(page0?.Result) || page0.Result.length === 0) continue;
       console.log(`  Found v${version} with ${page0.Result.length} events on page 0`);
       return { version, page0 };
     } catch (err) {
@@ -100,8 +103,14 @@ function getMaxDateMs(events) {
 async function main() {
   loadEnvFile();
 
-  const { url: redisUrl, token: redisToken } = getRedisCredentials();
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
   const ucdpToken = (process.env.UCDP_ACCESS_TOKEN || process.env.UC_DP_KEY || '').trim();
+
+  if (!redisUrl || !redisToken) {
+    console.error('Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN');
+    process.exit(1);
+  }
 
   console.log('=== UCDP Events Seed ===');
   console.log(`  Redis:      ${redisUrl}`);
@@ -179,9 +188,21 @@ async function main() {
   if (capped.length === 0) {
     console.warn(`  0 events after processing — extending existing key TTL (preserving last good data)`);
     try {
-      await extendExistingTtl([REDIS_KEY, 'seed-meta:conflict:ucdp-events'], 86400);
-      await redisCommand(redisUrl, redisToken, ['EXPIRE', 'seed-meta:conflict:ucdp-events', 604800]);
-      console.log(`  Extended TTL on ${REDIS_KEY} and seed-meta`);
+      const r1 = await fetch(redisUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${redisToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(['EXPIRE', REDIS_KEY, 86400]),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!r1.ok) console.warn(`  EXPIRE ${REDIS_KEY} failed: HTTP ${r1.status}`);
+      const r2 = await fetch(redisUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${redisToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(['EXPIRE', 'seed-meta:conflict:ucdp-events', 604800]),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!r2.ok) console.warn(`  EXPIRE seed-meta failed: HTTP ${r2.status}`);
+      if (r1.ok && r2.ok) console.log(`  Extended TTL on ${REDIS_KEY} and seed-meta`);
     } catch (e) { console.warn(`  TTL extension failed: ${e.message}`); }
     process.exit(0);
   }
@@ -200,27 +221,63 @@ async function main() {
   }
   console.log();
 
-  const result = await redisSet(redisUrl, redisToken, REDIS_KEY, payload, 86400);
+  const body = JSON.stringify(['SET', REDIS_KEY, JSON.stringify(payload), 'EX', 86400]);
+  const resp = await fetch(redisUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${redisToken}`,
+      'Content-Type': 'application/json',
+    },
+    body,
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    console.error(`Redis SET failed: HTTP ${resp.status} — ${text.slice(0, 200)}`);
+    process.exit(1);
+  }
+
+  const result = await resp.json();
   console.log('  Redis SET result:', result);
 
   // Write seed-meta for health endpoint freshness tracking
   const metaKey = 'seed-meta:conflict:ucdp-events';
   const meta = { fetchedAt: Date.now(), recordCount: capped.length };
-  await redisSet(redisUrl, redisToken, metaKey, meta, 604800).catch(() => console.error('  seed-meta write failed'));
+  const metaBody = JSON.stringify(['SET', metaKey, JSON.stringify(meta), 'EX', 604800]);
+  await fetch(redisUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${redisToken}`, 'Content-Type': 'application/json' },
+    body: metaBody,
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => console.error('  seed-meta write failed'));
   console.log(`  Wrote seed-meta: ${metaKey}`);
 
-  const parsed = await redisGet(redisUrl, redisToken, REDIS_KEY);
-  if (parsed) {
-    console.log(`\n  Verified: ${parsed.events?.length} events in Redis`);
-    console.log(`  Version: ${parsed.version} | fetchedAt: ${new Date(parsed.fetchedAt).toISOString()}`);
+  const getResp = await fetch(`${redisUrl}/get/${encodeURIComponent(REDIS_KEY)}`, {
+    headers: { Authorization: `Bearer ${redisToken}` },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (getResp.ok) {
+    const getData = await getResp.json();
+    if (getData.result) {
+      const parsed = unwrapEnvelope(JSON.parse(getData.result)).data;
+      console.log(`
+  Verified: ${parsed.events?.length} events in Redis`);
+      console.log(`  Version: ${parsed.version} | fetchedAt: ${new Date(parsed.fetchedAt).toISOString()}`);
+    }
   }
 
-  console.log('\n=== Done ===');
+  console.log('
+=== Done ===');
 }
 
-main().catch(err => {
-  const _cause = err.cause ? ` (cause: ${err.cause.message || err.cause.code || err.cause})` : ''; console.error('FATAL:', (err.message || err) + _cause);
-  // Exit gracefully for cron — crashing restarts the container unnecessarily.
-  // The health endpoint will flag stale data via seed-meta.
-  process.exit(0);
-});
+export { buildVersionCandidates, discoverVersion };
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch(err => {
+    const _cause = err.cause ? ` (cause: ${err.cause.message || err.cause.code || err.cause})` : ''; console.error('FATAL:', (err.message || err) + _cause);
+    // Exit gracefully for cron — crashing restarts the container unnecessarily.
+    // The health endpoint will flag stale data via seed-meta.
+    process.exit(0);
+  });
+}
