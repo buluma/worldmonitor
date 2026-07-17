@@ -1,5 +1,4 @@
 import type { Feed } from '@/types';
-import { SITE_VARIANT } from './variant';
 import { rssProxyUrl } from '@/utils';
 
 const rss = rssProxyUrl;
@@ -1184,16 +1183,35 @@ const COMMODITY_FEEDS: Record<string, Feed[]> = {
   ],
 };
 
-// Variant-aware exports
-export const FEEDS = SITE_VARIANT === 'tech'
-  ? TECH_FEEDS
-  : SITE_VARIANT === 'finance'
-    ? FINANCE_FEEDS
-    : SITE_VARIANT === 'happy'
-      ? HAPPY_FEEDS
-      : SITE_VARIANT === 'commodity'
-        ? COMMODITY_FEEDS
-        : FULL_FEEDS;
+// Merged across all variants (not variant-scoped): every category's feed
+// sources are always available, so any panel works fully once a user
+// toggles it on regardless of which variant they're running. Overlapping
+// categories (e.g. 'finance' tuned differently per variant) get their feed
+// lists unioned rather than one variant's list silently winning.
+function mergeFeedSources(...sources: Record<string, Feed[]>[]): Record<string, Feed[]> {
+  const merged: Record<string, Feed[]> = {};
+  for (const source of sources) {
+    for (const [key, feeds] of Object.entries(source)) {
+      const existing = merged[key];
+      if (!existing) {
+        merged[key] = feeds;
+        continue;
+      }
+      const seen = new Set(existing.map((f) => `${f.name}::${JSON.stringify(f.url)}`));
+      const additions = feeds.filter((f) => !seen.has(`${f.name}::${JSON.stringify(f.url)}`));
+      merged[key] = [...existing, ...additions];
+    }
+  }
+  return merged;
+}
+
+export const FEEDS = mergeFeedSources(
+  FULL_FEEDS,
+  TECH_FEEDS,
+  FINANCE_FEEDS,
+  HAPPY_FEEDS,
+  COMMODITY_FEEDS,
+);
 
 export const SOURCE_REGION_MAP: Record<string, { labelKey: string; feedKeys: string[] }> = {
   // Full (geopolitical) variant regions
