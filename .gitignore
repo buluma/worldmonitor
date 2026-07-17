@@ -60,5 +60,6 @@ api/data/city-coords.js
 api-cache.json
 verbose-mode.json
 skills-lock.json
+.worldmonitor-cache.json
 tmp/
 /.gemini-tasks
