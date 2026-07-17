@@ -5,7 +5,7 @@
  * Writes band conditions, solar flux, K-index for the HF Propagation panel.
  */
 
-import { loadEnvFile, getRedisCredentials, redisSet } from './_seed-utils.mjs';
+import { loadEnvFile, getRedisCredentials, redisSet, writeSeedMeta } from './_seed-utils.mjs';
 
 loadEnvFile(import.meta.url);
 
@@ -84,6 +84,7 @@ async function run() {
 
   const { url, token } = getRedisCredentials();
   await redisSet(url, token, KEY, data, TTL);
+  await writeSeedMeta(KEY, Object.keys(data.bands).length);
   console.log(`[propagation] Written to ${KEY} (TTL ${TTL}s)`);
 }
 
