@@ -67,6 +67,6 @@ EXPOSE 8080
 
 # Healthcheck via nginx
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:8080/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/api/health || exit 1
 
 CMD ["/app/entrypoint.sh"]
