@@ -288,6 +288,8 @@ export function scoreImportance(cluster) {
   const demoteN = countMatches(titleLower, DEMOTE_KEYWORDS);
   if (demoteN > 0 && !cluster.entityCorroboration && !hasStrongNonKeywordSignal(cluster)) score *= 0.35;
 
+  if (cluster.isAlert) score += 50;
+
   return score;
 }
 
