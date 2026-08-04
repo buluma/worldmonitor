@@ -16,7 +16,7 @@ const SEED_CACHE_KEY = 'economic:eurostat-country-data:v1';
 function buildFallbackResult(): GetEurostatCountryDataResponse {
   return {
     countries: {},
-    seededAt: '0',
+    seededAt: 0,
     unavailable: true,
   };
 }
@@ -32,7 +32,7 @@ export async function getEurostatCountryData(
     }
     return {
       countries: raw.countries as GetEurostatCountryDataResponse['countries'],
-      seededAt: String(raw.seededAt ?? '0'),
+      seededAt: Number(raw.seededAt ?? 0),
       unavailable: false,
     };
   } catch {

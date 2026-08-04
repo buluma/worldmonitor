@@ -10,7 +10,7 @@ import { getCachedJson } from '../../../_shared/redis';
 const SEED_CACHE_KEY = 'economic:ecb-fx-rates:v1';
 
 function buildFallback(): GetEcbFxRatesResponse {
-  return { rates: [], updatedAt: '', seededAt: '0', unavailable: true };
+  return { rates: [], updatedAt: '', seededAt: 0, unavailable: true };
 }
 
 export async function getEcbFxRates(
@@ -38,7 +38,7 @@ export async function getEcbFxRates(
     return {
       rates,
       updatedAt: cached.updatedAt ?? '',
-      seededAt: String(cached.seededAt ?? 0),
+      seededAt: cached.seededAt ?? 0,
       unavailable: false,
     };
   } catch {

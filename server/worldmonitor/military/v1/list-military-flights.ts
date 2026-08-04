@@ -164,9 +164,10 @@ export async function listMilitaryFlights(
 
     if (!fullResult) {
       // Fall back to seeded military flights (seed-military-flights.mjs writes these via cron)
-      let seeded: { flights?: Array<{ id: string; callsign: string; hexCode: string; lat: number; lon: number; altitude: number; heading: number; speed: number; verticalRate: number; onGround: boolean; squawk: string; operator: string; operatorCountry: string; aircraftType: string; confidence: string }> } | null = null;
+      type SeededFlights = { flights?: Array<{ id: string; callsign: string; hexCode: string; lat: number; lon: number; altitude: number; heading: number; speed: number; verticalRate: number; onGround: boolean; squawk: string; operator: string; operatorCountry: string; aircraftType: string; confidence: string }> } | null;
+      let seeded: SeededFlights = null;
       for (const key of SEEDED_FLIGHT_KEYS) {
-        seeded = await getCachedJson(key, true) as typeof seeded;
+        seeded = await getCachedJson(key, true) as SeededFlights;
         if (seeded?.flights?.length) break;
       }
       if (seeded?.flights?.length) {

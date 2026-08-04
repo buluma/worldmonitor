@@ -59,7 +59,7 @@ export async function getHyperliquidFlow(
       // No error — seeder hasn't run yet, or empty snapshot. Distinguish from
       // parse/Redis failures below (those hit the catch and log).
       return {
-        ts: '0',
+        ts: 0,
         fetchedAt: '',
         warmup: true,
         assetCount: 0,
@@ -87,12 +87,12 @@ export async function getHyperliquidFlow(
       sparkScore: arr(a.sparkScore),
       warmup: Boolean(a.warmup),
       stale: Boolean(a.stale),
-      staleSince: String(a.staleSince ?? 0),
+      staleSince: Number(a.staleSince ?? 0),
       missingPolls: Number(a.missingPolls ?? 0),
       alerts: Array.isArray(a.alerts) ? a.alerts.map((x) => String(x)) : [],
     }));
     return {
-      ts: String(raw.ts ?? 0),
+      ts: Number(raw.ts ?? 0),
       fetchedAt: String(raw.fetchedAt ?? ''),
       warmup: Boolean(raw.warmup),
       assetCount: assets.length,
@@ -102,7 +102,7 @@ export async function getHyperliquidFlow(
   } catch (err) {
     console.error('[getHyperliquidFlow] Redis read or parse failed:', err instanceof Error ? err.message : err);
     return {
-      ts: '0',
+      ts: 0,
       fetchedAt: '',
       warmup: true,
       assetCount: 0,

@@ -5,7 +5,6 @@ import type {
   PipelineEntry,
 } from '../../../../src/generated/server/worldmonitor/supply_chain/v1/service_server';
 import { getCachedJson } from '../../../_shared/redis';
-import { deriveStoragePublicBadge } from '../../../../src/shared/storage-evidence';
 import { derivePipelinePublicBadge } from '../../../../src/shared/pipeline-evidence';
 
 const GAS_KEY = 'energy:pipelines:gas:v1';

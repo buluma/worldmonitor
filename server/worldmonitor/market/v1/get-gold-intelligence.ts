@@ -132,11 +132,11 @@ function emptyResponse(): GetGoldIntelligenceResponse {
 function mapCategory(c: RawCotCategory | undefined): GoldCotCategory | undefined {
   if (!c) return undefined;
   return {
-    longPositions: String(Math.round(c.longPositions ?? 0)),
-    shortPositions: String(Math.round(c.shortPositions ?? 0)),
+    longPositions: Math.round(c.longPositions ?? 0),
+    shortPositions: Math.round(c.shortPositions ?? 0),
     netPct: Number(c.netPct ?? 0),
     oiSharePct: Number(c.oiSharePct ?? 0),
-    wowNetDelta: String(Math.round(c.wowNetDelta ?? 0)),
+    wowNetDelta: Math.round(c.wowNetDelta ?? 0),
   };
 }
 
@@ -175,7 +175,7 @@ function mapCot(raw: RawCotInstrument | undefined): GoldCotPositioning | undefin
   return {
     reportDate: String(raw.reportDate ?? ''),
     nextReleaseDate: String(raw.nextReleaseDate ?? ''),
-    openInterest: String(Math.round(raw.openInterest ?? 0)),
+    openInterest: Math.round(raw.openInterest ?? 0),
     managedMoney,
     producerSwap,
   };

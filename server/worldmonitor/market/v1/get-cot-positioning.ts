@@ -35,12 +35,12 @@ export async function getCotPositioning(
       name: String(item.name ?? ''),
       code: String(item.code ?? ''),
       reportDate: String(item.reportDate ?? ''),
-      assetManagerLong: String(item.assetManagerLong ?? 0),
-      assetManagerShort: String(item.assetManagerShort ?? 0),
-      leveragedFundsLong: String(item.leveragedFundsLong ?? 0),
-      leveragedFundsShort: String(item.leveragedFundsShort ?? 0),
-      dealerLong: String(item.dealerLong ?? 0),
-      dealerShort: String(item.dealerShort ?? 0),
+      assetManagerLong: Number(item.assetManagerLong ?? 0),
+      assetManagerShort: Number(item.assetManagerShort ?? 0),
+      leveragedFundsLong: Number(item.leveragedFundsLong ?? 0),
+      leveragedFundsShort: Number(item.leveragedFundsShort ?? 0),
+      dealerLong: Number(item.dealerLong ?? 0),
+      dealerShort: Number(item.dealerShort ?? 0),
       netPct: Number(item.netPct ?? 0),
     }));
 

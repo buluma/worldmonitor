@@ -370,7 +370,8 @@ async function fetchChokepointData(): Promise<ChokepointFetchResult> {
         disruptionPct: ts.disruptionPct,
         riskSummary: ts.riskSummary,
         riskReportAction: ts.riskReportAction,
-      } : { todayTotal: 0, todayTanker: 0, todayCargo: 0, todayOther: 0, wowChangePct: 0, history: [], riskLevel: '', incidentCount7d: 0, disruptionPct: 0, riskSummary: '', riskReportAction: '' },
+        dataAvailable: true,
+      } : { todayTotal: 0, todayTanker: 0, todayCargo: 0, todayOther: 0, wowChangePct: 0, history: [], riskLevel: '', incidentCount7d: 0, disruptionPct: 0, riskSummary: '', riskReportAction: '', dataAvailable: false },
     };
   });
 
