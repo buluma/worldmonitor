@@ -14,13 +14,13 @@ function readScript(relativePath) {
 describe('warm-ping seed scripts', () => {
   it('sends the app Origin header for infrastructure warm-pings', () => {
     const src = readScript('scripts/seed-infra.mjs');
-    assert.match(src, /Origin:\s*'https:\/\/worldmonitor\.app'/);
+    assert.match(src, /Origin:\s*'https:\/\/wm\.opsio\.space'/);
     assert.match(src, /method:\s*'POST'/);
   });
 
   it('sends the app Origin header for military/maritime warm-pings', () => {
     const src = readScript('scripts/seed-military-maritime-news.mjs');
-    assert.match(src, /Origin:\s*'https:\/\/worldmonitor\.app'/);
+    assert.match(src, /Origin:\s*'https:\/\/wm\.opsio\.space'/);
     assert.match(src, /method:\s*'POST'/);
   });
 });

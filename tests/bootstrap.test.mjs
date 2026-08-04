@@ -23,7 +23,7 @@ describe('Bootstrap cache key registry', () => {
     const extractKeys = (src) => {
       const block = src.match(/BOOTSTRAP_CACHE_KEYS[^=]*=\s*\{([^}]+)\}/);
       if (!block) return {};
-      const re = /(\w+):\s+'([a-z_-]+(?::[a-z_-]+)+:v\d+)'/g;
+      const re = /(\w+):\s+["']([a-z_-]+(?::[a-z_-]+)+:v\d+)["']/g;
       const keys = {};
       let m;
       while ((m = re.exec(block[1])) !== null) keys[m[1]] = m[2];
@@ -112,9 +112,15 @@ describe('Bootstrap cache key registry', () => {
     const allSearchable = allProducerCode + '\n' + seedFiles + '\n' + healthSrc;
 
     for (const key of keys) {
+      // Some keys are built via template literal (e.g. `namespace:sub:${market}` or
+      // `namespace:sub:${market}:${range}`) rather than appearing as a literal string —
+      // fall back to matching the static prefix immediately followed by "${".
+      const segments = key.split(':');
+      const staticPrefix = `${segments[0]}:${segments[1]}:`;
+      const found = allSearchable.includes(key) || allSearchable.includes(`${staticPrefix}\${`);
       assert.ok(
-        allSearchable.includes(key),
-        `Cache key "${key}" not found in any handler or seed producer file`,
+        found,
+        `Cache key "${key}" not found in any handler or seed producer file (checked literal and "${staticPrefix}\${...}" template form)`,
       );
     }
   });
@@ -125,7 +131,7 @@ describe('Bootstrap endpoint (api/bootstrap.js)', () => {
   const src = readFileSync(bootstrapPath, 'utf-8');
 
   it('exports edge runtime config', () => {
-    assert.ok(src.includes("runtime: 'edge'"), 'Missing edge runtime config');
+    assert.match(src, /runtime:\s*["']edge["']/, 'Missing edge runtime config');
   });
 
   it('defines BOOTSTRAP_CACHE_KEYS inline', () => {
@@ -144,7 +150,7 @@ describe('Bootstrap endpoint (api/bootstrap.js)', () => {
   });
 
   it('supports optional ?keys= query param for subset filtering', () => {
-    assert.ok(src.includes("'keys'"), 'Missing keys query param handling');
+    assert.match(src, /["']keys["']/, 'Missing keys query param handling');
   });
 
   it('returns JSON with data and missing keys', () => {
@@ -165,12 +171,12 @@ describe('Bootstrap endpoint (api/bootstrap.js)', () => {
   });
 
   it('handles CORS preflight', () => {
-    assert.ok(src.includes("'OPTIONS'"), 'Missing OPTIONS method handling');
+    assert.match(src, /["']OPTIONS["']/, 'Missing OPTIONS method handling');
     assert.ok(src.includes('getCorsHeaders'), 'Missing CORS headers');
   });
 
   it('supports ?tier= query param for tiered fetching', () => {
-    assert.ok(src.includes("'tier'"), 'Missing tier query param handling');
+    assert.match(src, /["']tier["']/, 'Missing tier query param handling');
     assert.ok(src.includes('SLOW_KEYS'), 'Missing SLOW_KEYS set');
     assert.ok(src.includes('FAST_KEYS'), 'Missing FAST_KEYS set');
     assert.ok(src.includes('TIER_CACHE'), 'Missing TIER_CACHE map');
@@ -189,8 +195,12 @@ describe('Frontend hydration (src/services/bootstrap.ts)', () => {
     assert.ok(src.includes('export async function fetchBootstrapData'), 'Missing fetchBootstrapData export');
   });
 
-  it('uses consume-once pattern (deletes after read)', () => {
-    assert.ok(src.includes('.delete('), 'Missing delete in getHydratedData — consume-once pattern not implemented');
+  it('clears hydration cache once consumers have had a chance to read it', () => {
+    // Per-key delete-on-read doesn't work once many independent panels read the same
+    // key across re-renders; the cache is bulk-cleared from a single call site instead
+    // (see src/App.ts) once initial hydration has been consumed.
+    assert.ok(src.includes('hydrationCache.clear()'), 'Missing hydrationCache.clear() — hydration cache is never released');
+    assert.ok(src.includes('export function clearHydrationCache'), 'Missing exported clearHydrationCache for callers to release the cache');
   });
 
   it('has a fast timeout cap to avoid regressing startup', () => {
@@ -282,16 +292,16 @@ describe('Bootstrap tier definitions', () => {
   const cacheKeysSrc = readFileSync(join(root, 'server', '_shared', 'cache-keys.ts'), 'utf-8');
 
   function extractSetKeys(src, varName) {
-    const re = new RegExp(`${varName}\\s*=\\s*new Set\\(\\[([^\\]]+)\\]`, 's');
+    const re = new RegExp(`${varName}\\s*=\\s*(?:/\\*[^*]*\\*/\\s*)?new Set\\(\\[([^\\]]+)\\]`, 's');
     const m = src.match(re);
     if (!m) return new Set();
-    return new Set([...m[1].matchAll(/'(\w+)'/g)].map(x => x[1]));
+    return new Set([...m[1].matchAll(/["'](\w+)["']/g)].map(x => x[1]));
   }
 
   function extractBootstrapKeys(src) {
     const block = src.match(/BOOTSTRAP_CACHE_KEYS\s*=\s*\{([^}]+)\}/);
     if (!block) return new Set();
-    return new Set([...block[1].matchAll(/(\w+):\s+'/g)].map(x => x[1]));
+    return new Set([...block[1].matchAll(/(\w+):\s+["']/g)].map(x => x[1]));
   }
 
   function extractTierKeys(src) {

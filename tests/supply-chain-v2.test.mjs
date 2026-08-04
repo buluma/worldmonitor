@@ -157,15 +157,15 @@ describe('Cache keys bumped to v2', () => {
   const mineralsSrc = readSrc('server/worldmonitor/supply-chain/v1/get-critical-minerals.ts');
 
   it('bootstrap.js chokepoints key is v4', () => {
-    assert.match(bootstrapSrc, /chokepoints:\s*'supply_chain:chokepoints:v4'/);
+    assert.match(bootstrapSrc, /chokepoints:\s*["']supply_chain:chokepoints:v4["']/);
   });
 
   it('bootstrap.js minerals key is v2', () => {
-    assert.match(bootstrapSrc, /minerals:\s*'supply_chain:minerals:v2'/);
+    assert.match(bootstrapSrc, /minerals:\s*["']supply_chain:minerals:v2["']/);
   });
 
   it('bootstrap.js has chokepointTransits key', () => {
-    assert.match(bootstrapSrc, /chokepointTransits:\s*'supply_chain:chokepoint_transits:v1'/);
+    assert.match(bootstrapSrc, /chokepointTransits:\s*["']supply_chain:chokepoint_transits:v1["']/);
   });
 
   it('cache-keys.ts chokepoints key is v4', () => {

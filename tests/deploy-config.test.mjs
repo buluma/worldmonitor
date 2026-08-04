@@ -15,9 +15,11 @@ const getCacheHeaderValue = (sourcePath) => {
 };
 
 describe('deploy/cache configuration guardrails', () => {
-  it('disables caching for HTML entry routes on Vercel', () => {
+  it('disables shared/CDN caching for HTML entry routes on Vercel while keeping bfcache usable', () => {
+    // 'private, no-cache' (not 'no-store') so the browser back-forward-cache still works —
+    // no-store disables bfcache entirely. See commit 0202c9bd.
     const spaNoCache = getCacheHeaderValue('/((?!api|assets|blog|docs|favico|map-styles|data|textures|pro|sw\\.js|workbox-[a-f0-9]+\\.js|manifest\\.webmanifest|offline\\.html|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|\\.well-known).*)');
-    assert.equal(spaNoCache, 'no-cache, no-store, must-revalidate');
+    assert.equal(spaNoCache, 'private, no-cache, must-revalidate');
   });
 
   it('keeps immutable caching for hashed static assets', () => {

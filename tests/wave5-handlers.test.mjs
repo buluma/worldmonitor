@@ -334,12 +334,8 @@ describe('bootstrap.js diseaseOutbreaks', () => {
     assert.match(src, /diseaseOutbreaks\s*:\s*['"]health:disease-outbreaks:v1['"]/);
   });
 
-  it('BOOTSTRAP_TIERS has diseaseOutbreaks: slow', () => {
-    assert.match(src, /diseaseOutbreaks\s*:\s*['"]slow['"]/);
-  });
-
-  it('SLOW_KEYS set includes diseaseOutbreaks', () => {
-    const slow = src.match(/const SLOW_KEYS[\s\S]*?\}\);/)?.[0] ?? '';
+  it('SLOW_KEYS set includes diseaseOutbreaks (bootstrap.js encodes tiers as SLOW_KEYS/FAST_KEYS sets, not a per-key tier map)', () => {
+    const slow = src.match(/(?:const|var)\s+SLOW_KEYS[\s\S]*?\]\);/)?.[0] ?? '';
     assert.match(slow, /['"]diseaseOutbreaks['"]/);
   });
 });

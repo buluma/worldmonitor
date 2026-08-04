@@ -1281,9 +1281,14 @@ describe('forecast narrative fallbacks', () => {
     const baseCase = buildFallbackBaseCase(pred);
     const summary = buildFeedSummary(pred);
 
-    assert.match(baseCase, /broader|cluster/i);
-    assert.match(scenario, /broader|cluster/i);
-    assert.match(summary, /broader|cluster/i);
+    // buildSituationReference prefers the situation's specific label ("iran conflict
+    // pressure") over the generic "broader regional situation" fallback when one is
+    // set, so check for either the specific label or the shared "related forecasts"
+    // phrasing rather than requiring the generic wording literally.
+    const situationRef = /iran conflict pressure|broader|cluster/i;
+    assert.match(baseCase, situationRef);
+    assert.match(scenario, situationRef);
+    assert.match(summary, situationRef);
   });
 
   it('buildFeedSummary stays compact and distinct from the deeper case output', () => {

@@ -10,7 +10,7 @@ const healthSrc = readFileSync(resolve(__dirname, '../api/health.js'), 'utf-8');
 // Extract key names from an object-literal block in source text.
 // Handles multi-line values including template literals.
 function extractKeyNames(src, varName) {
-  const pattern = new RegExp(`const ${varName} = \\{`, 'g');
+  const pattern = new RegExp(`(?:const|var) ${varName} = \\{`, 'g');
   const startMatch = pattern.exec(src);
   assert.ok(startMatch, `${varName} must exist in health.js`);
   let depth = 1;
@@ -47,9 +47,9 @@ describe('health.js status classification rules', () => {
   });
 
   it('ON_DEMAND_KEYS only references names in BOOTSTRAP_KEYS or STANDALONE_KEYS', () => {
-    const onDemandMatch = healthSrc.match(/const ON_DEMAND_KEYS = new Set\(\[([\s\S]*?)\]\)/);
+    const onDemandMatch = healthSrc.match(/(?:const|var) ON_DEMAND_KEYS = (?:\/\*[^*]*\*\/\s*)?new Set\(\[([\s\S]*?)\]\)/);
     assert.ok(onDemandMatch, 'ON_DEMAND_KEYS must exist');
-    const onDemandNames = [...onDemandMatch[1].matchAll(/'(\w+)'/g)].map(m => m[1]);
+    const onDemandNames = [...onDemandMatch[1].matchAll(/["'](\w+)["']/g)].map(m => m[1]);
     const orphans = onDemandNames.filter(n => !allDataNames.has(n));
     assert.equal(orphans.length, 0,
       `ON_DEMAND_KEYS references unknown keys: ${orphans.join(', ')}`);
@@ -57,18 +57,18 @@ describe('health.js status classification rules', () => {
 
   it('CASCADE_GROUPS only references names in STANDALONE_KEYS', () => {
     const cascadeBlock = extractKeyNames(healthSrc, 'CASCADE_GROUPS');
-    const cascadeMatch = healthSrc.match(/const CASCADE_GROUPS = \{([\s\S]*?)\n\};/);
+    const cascadeMatch = healthSrc.match(/(?:const|var) CASCADE_GROUPS = \{([\s\S]*?)\n\};/);
     assert.ok(cascadeMatch, 'CASCADE_GROUPS must exist');
-    const allCascadeRefs = [...new Set([...cascadeMatch[1].matchAll(/'(\w+)'/g)].map(m => m[1]))];
+    const allCascadeRefs = [...new Set([...cascadeMatch[1].matchAll(/["'](\w+)["']/g)].map(m => m[1]))];
     const orphans = allCascadeRefs.filter(n => !standaloneNames.has(n));
     assert.equal(orphans.length, 0,
       `CASCADE_GROUPS references keys not in STANDALONE_KEYS: ${orphans.join(', ')}`);
   });
 
   it('EMPTY_DATA_OK_KEYS only references names in BOOTSTRAP_KEYS or STANDALONE_KEYS', () => {
-    const emptyOkMatch = healthSrc.match(/const EMPTY_DATA_OK_KEYS = new Set\(\[([\s\S]*?)\]\)/);
+    const emptyOkMatch = healthSrc.match(/(?:const|var) EMPTY_DATA_OK_KEYS = (?:\/\*[^*]*\*\/\s*)?new Set\(\[([\s\S]*?)\]\)/);
     assert.ok(emptyOkMatch, 'EMPTY_DATA_OK_KEYS must exist');
-    const emptyOkNames = [...emptyOkMatch[1].matchAll(/'(\w+)'/g)].map(m => m[1]);
+    const emptyOkNames = [...emptyOkMatch[1].matchAll(/["'](\w+)["']/g)].map(m => m[1]);
     const orphans = emptyOkNames.filter(n => !allDataNames.has(n));
     assert.equal(orphans.length, 0,
       `EMPTY_DATA_OK_KEYS references unknown keys: ${orphans.join(', ')}`);
@@ -79,27 +79,27 @@ describe('health.js status derivation logic (source verification)', () => {
   it('bootstrap keys: null/sentinel → EMPTY', () => {
     assert.ok(healthSrc.includes("if (!parsed || raw === NEG_SENTINEL)"),
       'must check for null/sentinel');
-    assert.ok(healthSrc.includes("status = 'EMPTY'"),
+    assert.ok(healthSrc.includes("status = \"EMPTY\""),
       'null data must yield EMPTY status');
   });
 
   it('bootstrap keys: parsed but size 0 → EMPTY_DATA', () => {
-    assert.ok(healthSrc.includes("status = 'EMPTY_DATA'"),
+    assert.ok(healthSrc.includes("status = \"EMPTY_DATA\""),
       'zero-size data must yield EMPTY_DATA status');
   });
 
   it('bootstrap keys: stale seed → STALE_SEED', () => {
-    assert.ok(healthSrc.includes("status = 'STALE_SEED'"),
+    assert.ok(healthSrc.includes("status = \"STALE_SEED\""),
       'stale seed-meta must yield STALE_SEED');
   });
 
   it('standalone keys: cascade covered → OK_CASCADE', () => {
-    assert.ok(healthSrc.includes("status = 'OK_CASCADE'"),
+    assert.ok(healthSrc.includes("status = \"OK_CASCADE\""),
       'cascade-covered empty keys must yield OK_CASCADE');
   });
 
   it('standalone keys: on-demand empty → EMPTY_ON_DEMAND (not EMPTY)', () => {
-    assert.ok(healthSrc.includes("status = 'EMPTY_ON_DEMAND'"),
+    assert.ok(healthSrc.includes("status = \"EMPTY_ON_DEMAND\""),
       'on-demand keys must get EMPTY_ON_DEMAND, not critical EMPTY');
   });
 });
