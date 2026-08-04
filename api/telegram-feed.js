@@ -2064,6 +2064,7 @@ var require_dist2 = __commonJS({
 // api/_cors.js
 var ALLOWED_ORIGIN_PATTERNS = [
   /^https:\/\/(.*\.)?worldmonitor\.app$/,
+  /^https:\/\/(.*\.)?wm\.opsio\.space$/,
   /^https:\/\/worldmonitor-[a-z0-9-]+-elie-[a-z0-9]+\.vercel\.app$/,
   /^https?:\/\/localhost(:\d+)?$/,
   /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
@@ -2095,6 +2096,7 @@ function isDisallowedOrigin(req) {
 // api/_api-key.js
 var BROWSER_ORIGIN_PATTERNS = [
   /^https:\/\/(.*\.)?worldmonitor\.app$/,
+  /^https:\/\/(.*\.)?wm\.opsio\.space$/,
   /^https:\/\/worldmonitor-[a-z0-9-]+-elie-[a-z0-9]+\.vercel\.app$/,
   ...process.env.NODE_ENV === "production" ? [] : [
     /^https?:\/\/localhost(:\d+)?$/,
