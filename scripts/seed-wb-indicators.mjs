@@ -29,10 +29,10 @@ const NORMALIZE_MAX = { internet: 100, mobile: 150, broadband: 50, rdSpend: 5 };
 
 // WB indicators + date ranges matching the RPC handler
 const INDICATORS = [
-  { key: 'internet',  id: 'IT.NET.USER.ZS', dateRange: '2019:2024' },
-  { key: 'mobile',    id: 'IT.CEL.SETS.P2', dateRange: '2019:2024' },
-  { key: 'broadband', id: 'IT.NET.BBND.P2', dateRange: '2019:2024' },
-  { key: 'rdSpend',   id: 'GB.XPD.RSDV.GD.ZS', dateRange: '2018:2024' },
+  { key: 'internet',  id: 'IT.NET.USER.ZS', lookbackYears: 7 },
+  { key: 'mobile',    id: 'IT.CEL.SETS.P2', lookbackYears: 7 },
+  { key: 'broadband', id: 'IT.NET.BBND.P2', lookbackYears: 7 },
+  { key: 'rdSpend',   id: 'GB.XPD.RSDV.GD.ZS', lookbackYears: 8 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -409,7 +409,10 @@ async function main() {
   // ── 1. Tech Readiness rankings ──
   console.log('── Tech Readiness ──');
   const indicatorData = {};
-  for (const { key, id, dateRange } of INDICATORS) {
+  const currentYear = new Date().getFullYear();
+  for (const { key, id, lookbackYears } of INDICATORS) {
+    const startYear = currentYear - lookbackYears;
+    const dateRange = `${startYear}:${currentYear}`;
     console.log(`Fetching indicator: ${id} (${dateRange})`);
     indicatorData[key] = await fetchWbIndicator(id, dateRange);
     const count = Object.keys(indicatorData[key]).length;
