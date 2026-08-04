@@ -5,6 +5,11 @@ on:
     paths:
       - '**/*.md'
       - '.markdownlint-cli2.jsonc'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
