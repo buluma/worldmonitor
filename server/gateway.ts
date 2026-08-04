@@ -168,6 +168,21 @@ const RPC_CACHE_TIER: Record<string, CacheTier> = {
   '/api/intelligence/v1/get-company-enrichment': 'slow',
   '/api/intelligence/v1/list-company-signals': 'slow',
   '/api/news/v1/summarize-article-cache': 'slow',
+
+  '/api/climate/v1/list-climate-news': 'slow',
+  '/api/health/v1/list-air-quality-alerts': 'slow',
+  '/api/health/v1/list-disease-outbreaks': 'daily',
+  '/api/infrastructure/v1/list-internet-ddos-attacks': 'slow',
+  '/api/infrastructure/v1/list-internet-traffic-anomalies': 'slow',
+  '/api/intelligence/v1/get-social-velocity': 'slow',
+  '/api/intelligence/v1/list-cross-source-signals': 'slow',
+  '/api/market/v1/get-cot-positioning': 'daily',
+  '/api/market/v1/get-fear-greed-index': 'medium',
+  '/api/market/v1/get-gold-intelligence': 'slow',
+  '/api/market/v1/get-hyperliquid-flow': 'medium',
+  '/api/market/v1/get-market-breadth-history': 'daily',
+  '/api/market/v1/list-earnings-calendar': 'static',
+  '/api/military/v1/list-defense-patents': 'static',
 };
 
 /**
