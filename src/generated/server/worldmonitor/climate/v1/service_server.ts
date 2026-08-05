@@ -163,18 +163,26 @@ export function createClimateServiceRoutes(
       handler: async (req: Request): Promise<Response> => {
         try {
           const pathParams: Record<string, string> = {};
-          const body: ListClimateNewsRequest = {};
+          const body = {} as ListClimateNewsRequest;
+
           const ctx: ServerContext = {
             request: req,
             pathParams,
             headers: Object.fromEntries(req.headers.entries()),
           };
+
           const result = await handler.listClimateNews(ctx, body);
           return new Response(JSON.stringify(result as ListClimateNewsResponse), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
         } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           if (options?.onError) {
             return options.onError(err, req);
           }

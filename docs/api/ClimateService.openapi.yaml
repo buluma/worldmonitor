@@ -49,6 +49,32 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Error'
+    /api/climate/v1/list-climate-news:
+        get:
+            tags:
+                - ClimateService
+            summary: ListClimateNews
+            description: ListClimateNews retrieves cached climate-related news items.
+            operationId: ListClimateNews
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListClimateNewsResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
 components:
     schemas:
         Error:
@@ -189,3 +215,41 @@ components:
                     format: int32
                     description: Total count of items matching the query, if known. Zero if the total is unknown.
             description: PaginationResponse contains pagination metadata returned alongside list results.
+        ListClimateNewsRequest:
+            type: object
+            description: ListClimateNewsRequest has no filters -- returns the full cached news set.
+        ListClimateNewsResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ClimateNewsItem'
+                fetchedAt:
+                    type: integer
+                    format: int64
+                    description: 'Cache fetch time as Unix epoch milliseconds.. Warning: Values > 2^53 may lose precision in JavaScript'
+            description: ListClimateNewsResponse contains cached climate news items.
+        ClimateNewsItem:
+            type: object
+            properties:
+                id:
+                    type: string
+                    description: Unique item identifier (hash of URL).
+                title:
+                    type: string
+                    description: Article title.
+                url:
+                    type: string
+                    description: Article URL.
+                sourceName:
+                    type: string
+                    description: Name of the news source.
+                publishedAt:
+                    type: integer
+                    format: int64
+                    description: 'Publication time as Unix epoch milliseconds.. Warning: Values > 2^53 may lose precision in JavaScript'
+                summary:
+                    type: string
+                    description: Short text summary of the article.
+            description: ClimateNewsItem represents a single climate-related news article.
