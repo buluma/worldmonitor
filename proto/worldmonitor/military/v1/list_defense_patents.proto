@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package worldmonitor.military.v1;
+
+import "sebuf/http/annotations.proto";
+import "worldmonitor/military/v1/defense_patent_filing.proto";
+
+// ListDefensePatentsRequest specifies filters for retrieving defense patent filings.
+message ListDefensePatentsRequest {
+  // Optional CPC classification code prefix filter.
+  string cpc_code = 1 [(sebuf.http.query) = { name: "cpc_code" }];
+  // Optional assignee substring filter (case-insensitive).
+  string assignee = 2 [(sebuf.http.query) = { name: "assignee" }];
+  // Maximum number of results to return.
+  int32 limit = 3 [(sebuf.http.query) = { name: "limit" }];
+}
+
+// ListDefensePatentsResponse contains matching defense patent filings.
+message ListDefensePatentsResponse {
+  // Defense patent filings matching the filters.
+  repeated DefensePatentFiling patents = 1;
+  // Total number of filings before the limit was applied.
+  int32 total = 2;
+  // Cache fetch timestamp as reported by the seed source.
+  string fetched_at = 3;
+}

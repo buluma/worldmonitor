@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package worldmonitor.intelligence.v1;
+
+import "sebuf/http/annotations.proto";
+
+// CrossSourceSignalType categorizes what kind of composite escalation triggered a signal.
+enum CrossSourceSignalType {
+  CROSS_SOURCE_SIGNAL_TYPE_UNSPECIFIED = 0;
+  CROSS_SOURCE_SIGNAL_TYPE_COMPOSITE_ESCALATION = 1;
+  CROSS_SOURCE_SIGNAL_TYPE_THERMAL_SPIKE = 2;
+  CROSS_SOURCE_SIGNAL_TYPE_GPS_JAMMING = 3;
+  CROSS_SOURCE_SIGNAL_TYPE_MILITARY_FLIGHT_SURGE = 4;
+  CROSS_SOURCE_SIGNAL_TYPE_UNREST_SURGE = 5;
+  CROSS_SOURCE_SIGNAL_TYPE_OREF_ALERT_CLUSTER = 6;
+  CROSS_SOURCE_SIGNAL_TYPE_VIX_SPIKE = 7;
+  CROSS_SOURCE_SIGNAL_TYPE_COMMODITY_SHOCK = 8;
+  CROSS_SOURCE_SIGNAL_TYPE_CYBER_ESCALATION = 9;
+  CROSS_SOURCE_SIGNAL_TYPE_SHIPPING_DISRUPTION = 10;
+  CROSS_SOURCE_SIGNAL_TYPE_SANCTIONS_SURGE = 11;
+  CROSS_SOURCE_SIGNAL_TYPE_EARTHQUAKE_SIGNIFICANT = 12;
+  CROSS_SOURCE_SIGNAL_TYPE_RADIATION_ANOMALY = 13;
+  CROSS_SOURCE_SIGNAL_TYPE_INFRASTRUCTURE_OUTAGE = 14;
+  CROSS_SOURCE_SIGNAL_TYPE_WILDFIRE_ESCALATION = 15;
+  CROSS_SOURCE_SIGNAL_TYPE_DISPLACEMENT_SURGE = 16;
+  CROSS_SOURCE_SIGNAL_TYPE_FORECAST_DETERIORATION = 17;
+  CROSS_SOURCE_SIGNAL_TYPE_MARKET_STRESS = 18;
+  CROSS_SOURCE_SIGNAL_TYPE_WEATHER_EXTREME = 19;
+  CROSS_SOURCE_SIGNAL_TYPE_MEDIA_TONE_DETERIORATION = 20;
+  CROSS_SOURCE_SIGNAL_TYPE_RISK_SCORE_SPIKE = 21;
+}
+
+// CrossSourceSignalSeverity ranks how urgent a cross-source signal is.
+enum CrossSourceSignalSeverity {
+  CROSS_SOURCE_SIGNAL_SEVERITY_UNSPECIFIED = 0;
+  CROSS_SOURCE_SIGNAL_SEVERITY_LOW = 1;
+  CROSS_SOURCE_SIGNAL_SEVERITY_MEDIUM = 2;
+  CROSS_SOURCE_SIGNAL_SEVERITY_HIGH = 3;
+  CROSS_SOURCE_SIGNAL_SEVERITY_CRITICAL = 4;
+}
+
+// CrossSourceSignal represents a single composite escalation signal derived
+// from correlated activity across multiple independent data sources.
+message CrossSourceSignal {
+  // Unique signal identifier.
+  string id = 1;
+  // Signal category.
+  CrossSourceSignalType type = 2;
+  // Geographic or thematic theater the signal applies to.
+  string theater = 3;
+  // Human-readable summary of the correlated activity.
+  string summary = 4;
+  // Signal severity.
+  CrossSourceSignalSeverity severity = 5;
+  // Numeric severity score.
+  double severity_score = 6;
+  // Detection time as Unix epoch milliseconds.
+  int64 detected_at = 7 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  // Data source types that contributed to this signal.
+  repeated string contributing_types = 8;
+  // Number of contributing signals.
+  int32 signal_count = 9;
+}

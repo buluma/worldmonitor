@@ -360,6 +360,24 @@ export interface GetCountryFactsResponse {
   countryName: string;
 }
 
+export interface ListSecurityAdvisoriesRequest {
+}
+
+export interface ListSecurityAdvisoriesResponse {
+  advisories: SecurityAdvisoryItem[];
+  byCountry: Record<string, string>;
+}
+
+export interface SecurityAdvisoryItem {
+  title: string;
+  link: string;
+  pubDate: string;
+  source: string;
+  sourceCountry: string;
+  level: string;
+  country: string;
+}
+
 export interface ListCrossSourceSignalsRequest {
 }
 
@@ -401,31 +419,13 @@ export interface SocialVelocityPost {
   createdAt: number;
 }
 
-export type CrossSourceSignalSeverity = "CROSS_SOURCE_SIGNAL_SEVERITY_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_SEVERITY_LOW" | "CROSS_SOURCE_SIGNAL_SEVERITY_MEDIUM" | "CROSS_SOURCE_SIGNAL_SEVERITY_HIGH" | "CROSS_SOURCE_SIGNAL_SEVERITY_CRITICAL";
-
-export type CrossSourceSignalType = "CROSS_SOURCE_SIGNAL_TYPE_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_TYPE_COMPOSITE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_THERMAL_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_GPS_JAMMING" | "CROSS_SOURCE_SIGNAL_TYPE_MILITARY_FLIGHT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_UNREST_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_OREF_ALERT_CLUSTER" | "CROSS_SOURCE_SIGNAL_TYPE_VIX_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_COMMODITY_SHOCK" | "CROSS_SOURCE_SIGNAL_TYPE_CYBER_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_SHIPPING_DISRUPTION" | "CROSS_SOURCE_SIGNAL_TYPE_SANCTIONS_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_EARTHQUAKE_SIGNIFICANT" | "CROSS_SOURCE_SIGNAL_TYPE_RADIATION_ANOMALY" | "CROSS_SOURCE_SIGNAL_TYPE_INFRASTRUCTURE_OUTAGE" | "CROSS_SOURCE_SIGNAL_TYPE_WILDFIRE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_DISPLACEMENT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_FORECAST_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_MARKET_STRESS" | "CROSS_SOURCE_SIGNAL_TYPE_WEATHER_EXTREME" | "CROSS_SOURCE_SIGNAL_TYPE_MEDIA_TONE_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_RISK_SCORE_SPIKE";
-
-export interface ListSecurityAdvisoriesRequest {
-}
-
-export interface ListSecurityAdvisoriesResponse {
-  advisories: SecurityAdvisoryItem[];
-  byCountry: Record<string, string>;
-}
-
-export interface SecurityAdvisoryItem {
-  title: string;
-  link: string;
-  pubDate: string;
-  source: string;
-  sourceCountry: string;
-  level: string;
-  country: string;
-}
-
 export type SeverityLevel = "SEVERITY_LEVEL_UNSPECIFIED" | "SEVERITY_LEVEL_LOW" | "SEVERITY_LEVEL_MEDIUM" | "SEVERITY_LEVEL_HIGH";
 
 export type TrendDirection = "TREND_DIRECTION_UNSPECIFIED" | "TREND_DIRECTION_RISING" | "TREND_DIRECTION_STABLE" | "TREND_DIRECTION_FALLING";
+
+export type CrossSourceSignalSeverity = "CROSS_SOURCE_SIGNAL_SEVERITY_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_SEVERITY_LOW" | "CROSS_SOURCE_SIGNAL_SEVERITY_MEDIUM" | "CROSS_SOURCE_SIGNAL_SEVERITY_HIGH" | "CROSS_SOURCE_SIGNAL_SEVERITY_CRITICAL";
+
+export type CrossSourceSignalType = "CROSS_SOURCE_SIGNAL_TYPE_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_TYPE_COMPOSITE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_THERMAL_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_GPS_JAMMING" | "CROSS_SOURCE_SIGNAL_TYPE_MILITARY_FLIGHT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_UNREST_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_OREF_ALERT_CLUSTER" | "CROSS_SOURCE_SIGNAL_TYPE_VIX_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_COMMODITY_SHOCK" | "CROSS_SOURCE_SIGNAL_TYPE_CYBER_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_SHIPPING_DISRUPTION" | "CROSS_SOURCE_SIGNAL_TYPE_SANCTIONS_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_EARTHQUAKE_SIGNIFICANT" | "CROSS_SOURCE_SIGNAL_TYPE_RADIATION_ANOMALY" | "CROSS_SOURCE_SIGNAL_TYPE_INFRASTRUCTURE_OUTAGE" | "CROSS_SOURCE_SIGNAL_TYPE_WILDFIRE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_DISPLACEMENT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_FORECAST_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_MARKET_STRESS" | "CROSS_SOURCE_SIGNAL_TYPE_WEATHER_EXTREME" | "CROSS_SOURCE_SIGNAL_TYPE_MEDIA_TONE_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_RISK_SCORE_SPIKE";
 
 export type DataFreshness = "DATA_FRESHNESS_UNSPECIFIED" | "DATA_FRESHNESS_FRESH" | "DATA_FRESHNESS_STALE";
 
@@ -816,52 +816,6 @@ export class IntelligenceServiceClient {
     return await resp.json() as GetCountryFactsResponse;
   }
 
-  async listCrossSourceSignals(_req: ListCrossSourceSignalsRequest, options?: IntelligenceServiceCallOptions): Promise<ListCrossSourceSignalsResponse> {
-    const path = "/api/intelligence/v1/list-cross-source-signals";
-    const url = this.baseURL + path;
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...this.defaultHeaders,
-      ...options?.headers,
-    };
-
-    const resp = await this.fetchFn(url, {
-      method: "GET",
-      headers,
-      signal: options?.signal,
-    });
-
-    if (!resp.ok) {
-      return this.handleError(resp);
-    }
-
-    return await resp.json() as ListCrossSourceSignalsResponse;
-  }
-
-  async getSocialVelocity(_req: GetSocialVelocityRequest, options?: IntelligenceServiceCallOptions): Promise<GetSocialVelocityResponse> {
-    const path = "/api/intelligence/v1/get-social-velocity";
-    const url = this.baseURL + path;
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...this.defaultHeaders,
-      ...options?.headers,
-    };
-
-    const resp = await this.fetchFn(url, {
-      method: "GET",
-      headers,
-      signal: options?.signal,
-    });
-
-    if (!resp.ok) {
-      return this.handleError(resp);
-    }
-
-    return await resp.json() as GetSocialVelocityResponse;
-  }
-
   async listSecurityAdvisories(req: ListSecurityAdvisoriesRequest, options?: IntelligenceServiceCallOptions): Promise<ListSecurityAdvisoriesResponse> {
     let path = "/api/intelligence/v1/list-security-advisories";
     const url = this.baseURL + path;
@@ -883,6 +837,52 @@ export class IntelligenceServiceClient {
     }
 
     return await resp.json() as ListSecurityAdvisoriesResponse;
+  }
+
+  async listCrossSourceSignals(req: ListCrossSourceSignalsRequest, options?: IntelligenceServiceCallOptions): Promise<ListCrossSourceSignalsResponse> {
+    let path = "/api/intelligence/v1/list-cross-source-signals";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
+    return await resp.json() as ListCrossSourceSignalsResponse;
+  }
+
+  async getSocialVelocity(req: GetSocialVelocityRequest, options?: IntelligenceServiceCallOptions): Promise<GetSocialVelocityResponse> {
+    let path = "/api/intelligence/v1/get-social-velocity";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
+    return await resp.json() as GetSocialVelocityResponse;
   }
 
   private async handleError(resp: Response): Promise<never> {

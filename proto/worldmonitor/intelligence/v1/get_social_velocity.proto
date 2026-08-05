@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package worldmonitor.intelligence.v1;
+
+import "sebuf/http/annotations.proto";
+
+// SocialVelocityPost represents a single Reddit post tracked for engagement velocity.
+message SocialVelocityPost {
+  // Reddit post identifier.
+  string id = 1;
+  // Post title.
+  string title = 2;
+  // Subreddit the post was found in.
+  string subreddit = 3;
+  // Link to the post.
+  string url = 4;
+  // Post score (upvotes minus downvotes).
+  int32 score = 5;
+  // Upvote ratio (0-1).
+  double upvote_ratio = 6;
+  // Number of comments.
+  int32 num_comments = 7;
+  // Computed engagement velocity score.
+  double velocity_score = 8;
+  // Post creation time as Unix epoch milliseconds.
+  int64 created_at = 9 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+}
+
+// GetSocialVelocityRequest has no filters -- returns the latest tracked posts.
+message GetSocialVelocityRequest {
+}
+
+// GetSocialVelocityResponse contains posts ranked by social engagement velocity.
+message GetSocialVelocityResponse {
+  // Posts ranked by velocity.
+  repeated SocialVelocityPost posts = 1;
+  // Cache fetch time as Unix epoch milliseconds.
+  int64 fetched_at = 2 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+}

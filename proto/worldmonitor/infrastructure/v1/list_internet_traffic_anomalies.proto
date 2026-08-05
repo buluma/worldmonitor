@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package worldmonitor.infrastructure.v1;
+
+import "sebuf/http/annotations.proto";
+
+// TrafficAnomaly represents a single Cloudflare Radar internet traffic anomaly.
+message TrafficAnomaly {
+  // Unique anomaly identifier.
+  string uuid = 1;
+  // Anomaly type (e.g. outage, traffic drop).
+  string type = 2;
+  // Anomaly status (e.g. confirmed, resolved).
+  string status = 3;
+  // Anomaly start time as Unix epoch milliseconds.
+  int64 start_date = 4 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  // Anomaly end time as Unix epoch milliseconds.
+  int64 end_date = 5 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  // Autonomous system number affected.
+  string asn = 6;
+  // Autonomous system name.
+  string asn_name = 7;
+  // Location code (country or region).
+  string location_code = 8;
+  // Location name.
+  string location_name = 9;
+  // Location centroid latitude.
+  double latitude = 10;
+  // Location centroid longitude.
+  double longitude = 11;
+}
+
+// ListInternetTrafficAnomaliesRequest specifies filters for traffic anomaly retrieval.
+message ListInternetTrafficAnomaliesRequest {
+  // Optional ISO 3166-1 alpha-2 country code filter.
+  string country = 1 [(sebuf.http.query) = { name: "country" }];
+}
+
+// ListInternetTrafficAnomaliesResponse contains matching internet traffic anomalies.
+message ListInternetTrafficAnomaliesResponse {
+  // Traffic anomalies matching the filter.
+  repeated TrafficAnomaly anomalies = 1;
+  // Total number of matching anomalies.
+  int32 total_count = 2;
+}

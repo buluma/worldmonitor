@@ -378,9 +378,54 @@ export interface SecurityAdvisoryItem {
   country: string;
 }
 
+export interface ListCrossSourceSignalsRequest {
+}
+
+export interface ListCrossSourceSignalsResponse {
+  signals: CrossSourceSignal[];
+  evaluatedAt: number;
+  compositeCount: number;
+}
+
+export interface CrossSourceSignal {
+  id: string;
+  type: CrossSourceSignalType;
+  theater: string;
+  summary: string;
+  severity: CrossSourceSignalSeverity;
+  severityScore: number;
+  detectedAt: number;
+  contributingTypes: string[];
+  signalCount: number;
+}
+
+export interface GetSocialVelocityRequest {
+}
+
+export interface GetSocialVelocityResponse {
+  posts: SocialVelocityPost[];
+  fetchedAt: number;
+}
+
+export interface SocialVelocityPost {
+  id: string;
+  title: string;
+  subreddit: string;
+  url: string;
+  score: number;
+  upvoteRatio: number;
+  numComments: number;
+  velocityScore: number;
+  createdAt: number;
+}
+
 export type SeverityLevel = "SEVERITY_LEVEL_UNSPECIFIED" | "SEVERITY_LEVEL_LOW" | "SEVERITY_LEVEL_MEDIUM" | "SEVERITY_LEVEL_HIGH";
 
 export type TrendDirection = "TREND_DIRECTION_UNSPECIFIED" | "TREND_DIRECTION_RISING" | "TREND_DIRECTION_STABLE" | "TREND_DIRECTION_FALLING";
+
+export type CrossSourceSignalSeverity = "CROSS_SOURCE_SIGNAL_SEVERITY_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_SEVERITY_LOW" | "CROSS_SOURCE_SIGNAL_SEVERITY_MEDIUM" | "CROSS_SOURCE_SIGNAL_SEVERITY_HIGH" | "CROSS_SOURCE_SIGNAL_SEVERITY_CRITICAL";
+
+export type CrossSourceSignalType = "CROSS_SOURCE_SIGNAL_TYPE_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_TYPE_COMPOSITE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_THERMAL_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_GPS_JAMMING" | "CROSS_SOURCE_SIGNAL_TYPE_MILITARY_FLIGHT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_UNREST_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_OREF_ALERT_CLUSTER" | "CROSS_SOURCE_SIGNAL_TYPE_VIX_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_COMMODITY_SHOCK" | "CROSS_SOURCE_SIGNAL_TYPE_CYBER_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_SHIPPING_DISRUPTION" | "CROSS_SOURCE_SIGNAL_TYPE_SANCTIONS_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_EARTHQUAKE_SIGNIFICANT" | "CROSS_SOURCE_SIGNAL_TYPE_RADIATION_ANOMALY" | "CROSS_SOURCE_SIGNAL_TYPE_INFRASTRUCTURE_OUTAGE" | "CROSS_SOURCE_SIGNAL_TYPE_WILDFIRE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_DISPLACEMENT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_FORECAST_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_MARKET_STRESS" | "CROSS_SOURCE_SIGNAL_TYPE_WEATHER_EXTREME" | "CROSS_SOURCE_SIGNAL_TYPE_MEDIA_TONE_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_RISK_SCORE_SPIKE";
 
 export type DataFreshness = "DATA_FRESHNESS_UNSPECIFIED" | "DATA_FRESHNESS_FRESH" | "DATA_FRESHNESS_STALE";
 
@@ -431,51 +476,6 @@ export interface RouteDescriptor {
   path: string;
   handler: (req: Request) => Promise<Response>;
 }
-
-export interface ListCrossSourceSignalsRequest {
-}
-
-export interface ListCrossSourceSignalsResponse {
-  signals: CrossSourceSignal[];
-  evaluatedAt: number;
-  compositeCount: number;
-}
-
-export interface CrossSourceSignal {
-  id: string;
-  type: CrossSourceSignalType;
-  theater: string;
-  summary: string;
-  severity: CrossSourceSignalSeverity;
-  severityScore: number;
-  detectedAt: number;
-  contributingTypes: string[];
-  signalCount: number;
-}
-
-export interface GetSocialVelocityRequest {
-}
-
-export interface GetSocialVelocityResponse {
-  posts: SocialVelocityPost[];
-  fetchedAt: number;
-}
-
-export interface SocialVelocityPost {
-  id: string;
-  title: string;
-  subreddit: string;
-  url: string;
-  score: number;
-  upvoteRatio: number;
-  numComments: number;
-  velocityScore: number;
-  createdAt: number;
-}
-
-export type CrossSourceSignalSeverity = "CROSS_SOURCE_SIGNAL_SEVERITY_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_SEVERITY_LOW" | "CROSS_SOURCE_SIGNAL_SEVERITY_MEDIUM" | "CROSS_SOURCE_SIGNAL_SEVERITY_HIGH" | "CROSS_SOURCE_SIGNAL_SEVERITY_CRITICAL";
-
-export type CrossSourceSignalType = "CROSS_SOURCE_SIGNAL_TYPE_UNSPECIFIED" | "CROSS_SOURCE_SIGNAL_TYPE_COMPOSITE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_THERMAL_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_GPS_JAMMING" | "CROSS_SOURCE_SIGNAL_TYPE_MILITARY_FLIGHT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_UNREST_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_OREF_ALERT_CLUSTER" | "CROSS_SOURCE_SIGNAL_TYPE_VIX_SPIKE" | "CROSS_SOURCE_SIGNAL_TYPE_COMMODITY_SHOCK" | "CROSS_SOURCE_SIGNAL_TYPE_CYBER_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_SHIPPING_DISRUPTION" | "CROSS_SOURCE_SIGNAL_TYPE_SANCTIONS_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_EARTHQUAKE_SIGNIFICANT" | "CROSS_SOURCE_SIGNAL_TYPE_RADIATION_ANOMALY" | "CROSS_SOURCE_SIGNAL_TYPE_INFRASTRUCTURE_OUTAGE" | "CROSS_SOURCE_SIGNAL_TYPE_WILDFIRE_ESCALATION" | "CROSS_SOURCE_SIGNAL_TYPE_DISPLACEMENT_SURGE" | "CROSS_SOURCE_SIGNAL_TYPE_FORECAST_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_MARKET_STRESS" | "CROSS_SOURCE_SIGNAL_TYPE_WEATHER_EXTREME" | "CROSS_SOURCE_SIGNAL_TYPE_MEDIA_TONE_DETERIORATION" | "CROSS_SOURCE_SIGNAL_TYPE_RISK_SCORE_SPIKE";
 
 export interface IntelligenceServiceHandler {
   getRiskScores(ctx: ServerContext, req: GetRiskScoresRequest): Promise<GetRiskScoresResponse>;
@@ -1162,18 +1162,26 @@ export function createIntelligenceServiceRoutes(
       handler: async (req: Request): Promise<Response> => {
         try {
           const pathParams: Record<string, string> = {};
-          const body: ListCrossSourceSignalsRequest = {};
+          const body = {} as ListCrossSourceSignalsRequest;
+
           const ctx: ServerContext = {
             request: req,
             pathParams,
             headers: Object.fromEntries(req.headers.entries()),
           };
+
           const result = await handler.listCrossSourceSignals(ctx, body);
           return new Response(JSON.stringify(result as ListCrossSourceSignalsResponse), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
         } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           if (options?.onError) {
             return options.onError(err, req);
           }
@@ -1191,18 +1199,26 @@ export function createIntelligenceServiceRoutes(
       handler: async (req: Request): Promise<Response> => {
         try {
           const pathParams: Record<string, string> = {};
-          const body: GetSocialVelocityRequest = {};
+          const body = {} as GetSocialVelocityRequest;
+
           const ctx: ServerContext = {
             request: req,
             pathParams,
             headers: Object.fromEntries(req.headers.entries()),
           };
+
           const result = await handler.getSocialVelocity(ctx, body);
           return new Response(JSON.stringify(result as GetSocialVelocityResponse), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
         } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
           if (options?.onError) {
             return options.onError(err, req);
           }

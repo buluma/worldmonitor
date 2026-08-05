@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package worldmonitor.military.v1;
+
+// DefensePatentFiling represents a single defense-related patent filing.
+message DefensePatentFiling {
+  // USPTO patent identifier.
+  string patent_id = 1;
+  // Patent title.
+  string title = 2;
+  // Filing or publication date.
+  string date = 3;
+  // Assignee organization.
+  string assignee = 4;
+  // CPC classification code.
+  string cpc_code = 5;
+  // Human-readable CPC classification description.
+  string cpc_desc = 6;
+  // Patent abstract text.
+  string abstract = 7;
+  // Link to the patent record.
+  string url = 8;
+}

@@ -562,7 +562,7 @@ export class MilitaryServiceClient {
   }
 
   async listDefensePatents(req: ListDefensePatentsRequest, options?: MilitaryServiceCallOptions): Promise<ListDefensePatentsResponse> {
-    const path = "/api/military/v1/list-defense-patents";
+    let path = "/api/military/v1/list-defense-patents";
     const params = new URLSearchParams();
     if (req.cpcCode != null && req.cpcCode !== "") params.set("cpc_code", String(req.cpcCode));
     if (req.assignee != null && req.assignee !== "") params.set("assignee", String(req.assignee));

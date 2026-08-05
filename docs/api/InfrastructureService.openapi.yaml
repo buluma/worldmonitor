@@ -329,6 +329,65 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Error'
+    /api/infrastructure/v1/list-internet-ddos-attacks:
+        get:
+            tags:
+                - InfrastructureService
+            summary: ListInternetDdosAttacks
+            description: ListInternetDdosAttacks retrieves Cloudflare Radar's global DDoS attack summary.
+            operationId: ListInternetDdosAttacks
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListInternetDdosAttacksResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/infrastructure/v1/list-internet-traffic-anomalies:
+        get:
+            tags:
+                - InfrastructureService
+            summary: ListInternetTrafficAnomalies
+            description: ListInternetTrafficAnomalies retrieves Cloudflare Radar internet traffic anomalies, optionally filtered by country.
+            operationId: ListInternetTrafficAnomalies
+            parameters:
+                - name: country
+                  in: query
+                  description: Optional ISO 3166-1 alpha-2 country code filter.
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListInternetTrafficAnomaliesResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
 components:
     schemas:
         Error:
@@ -815,3 +874,121 @@ components:
                     format: double
                 message:
                     type: string
+        ListInternetDdosAttacksRequest:
+            type: object
+            description: ListInternetDdosAttacksRequest has no filters -- returns the latest global DDoS summary.
+        ListInternetDdosAttacksResponse:
+            type: object
+            properties:
+                protocol:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/DdosAttackSummaryEntry'
+                vector:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/DdosAttackSummaryEntry'
+                dateRangeStart:
+                    type: string
+                    description: Reporting window start date.
+                dateRangeEnd:
+                    type: string
+                    description: Reporting window end date.
+                topTargetLocations:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/DdosLocationHit'
+            description: ListInternetDdosAttacksResponse contains Cloudflare Radar's global DDoS attack summary.
+        DdosAttackSummaryEntry:
+            type: object
+            properties:
+                label:
+                    type: string
+                    description: Category label (e.g. protocol or vector name).
+                percentage:
+                    type: number
+                    format: double
+                    description: Share of attack traffic as a percentage.
+            description: DdosAttackSummaryEntry represents a labeled share of DDoS attack traffic.
+        DdosLocationHit:
+            type: object
+            properties:
+                countryCode:
+                    type: string
+                    description: ISO 3166-1 alpha-2 country code.
+                countryName:
+                    type: string
+                    description: Country name.
+                percentage:
+                    type: number
+                    format: double
+                    description: Share of attack traffic targeting this country, as a percentage.
+                latitude:
+                    type: number
+                    format: double
+                    description: Country centroid latitude.
+                longitude:
+                    type: number
+                    format: double
+                    description: Country centroid longitude.
+            description: DdosLocationHit represents a country's share of DDoS attack targeting.
+        ListInternetTrafficAnomaliesRequest:
+            type: object
+            properties:
+                country:
+                    type: string
+                    description: Optional ISO 3166-1 alpha-2 country code filter.
+            description: ListInternetTrafficAnomaliesRequest specifies filters for traffic anomaly retrieval.
+        ListInternetTrafficAnomaliesResponse:
+            type: object
+            properties:
+                anomalies:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/TrafficAnomaly'
+                totalCount:
+                    type: integer
+                    format: int32
+                    description: Total number of matching anomalies.
+            description: ListInternetTrafficAnomaliesResponse contains matching internet traffic anomalies.
+        TrafficAnomaly:
+            type: object
+            properties:
+                uuid:
+                    type: string
+                    description: Unique anomaly identifier.
+                type:
+                    type: string
+                    description: Anomaly type (e.g. outage, traffic drop).
+                status:
+                    type: string
+                    description: Anomaly status (e.g. confirmed, resolved).
+                startDate:
+                    type: integer
+                    format: int64
+                    description: 'Anomaly start time as Unix epoch milliseconds.. Warning: Values > 2^53 may lose precision in JavaScript'
+                endDate:
+                    type: integer
+                    format: int64
+                    description: 'Anomaly end time as Unix epoch milliseconds.. Warning: Values > 2^53 may lose precision in JavaScript'
+                asn:
+                    type: string
+                    description: Autonomous system number affected.
+                asnName:
+                    type: string
+                    description: Autonomous system name.
+                locationCode:
+                    type: string
+                    description: Location code (country or region).
+                locationName:
+                    type: string
+                    description: Location name.
+                latitude:
+                    type: number
+                    format: double
+                    description: Location centroid latitude.
+                longitude:
+                    type: number
+                    format: double
+                    description: Location centroid longitude.
+            description: TrafficAnomaly represents a single Cloudflare Radar internet traffic anomaly.

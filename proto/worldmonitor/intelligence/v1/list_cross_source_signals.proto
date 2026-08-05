@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package worldmonitor.intelligence.v1;
+
+import "sebuf/http/annotations.proto";
+import "worldmonitor/intelligence/v1/cross_source_signal.proto";
+
+// ListCrossSourceSignalsRequest has no filters -- returns the latest computed signal set.
+message ListCrossSourceSignalsRequest {
+}
+
+// ListCrossSourceSignalsResponse contains cross-source composite escalation signals.
+message ListCrossSourceSignalsResponse {
+  // Detected cross-source signals.
+  repeated CrossSourceSignal signals = 1;
+  // Time the signals were last evaluated, as Unix epoch milliseconds.
+  int64 evaluated_at = 2 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  // Number of composite (multi-source) signals in the set.
+  int32 composite_count = 3;
+}

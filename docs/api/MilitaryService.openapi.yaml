@@ -345,6 +345,52 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Error'
+    /api/military/v1/list-defense-patents:
+        get:
+            tags:
+                - MilitaryService
+            summary: ListDefensePatents
+            description: ListDefensePatents retrieves defense-related patent filings, optionally filtered by CPC code or assignee.
+            operationId: ListDefensePatents
+            parameters:
+                - name: cpc_code
+                  in: query
+                  description: Optional CPC classification code prefix filter.
+                  required: false
+                  schema:
+                    type: string
+                - name: assignee
+                  in: query
+                  description: Optional assignee substring filter (case-insensitive).
+                  required: false
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  description: Maximum number of results to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListDefensePatentsResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
 components:
     schemas:
         Error:
@@ -1186,3 +1232,60 @@ components:
                     type: string
                     description: Photographer credit name.
             description: WingbitsLiveFlight contains real-time flight position data from the Wingbits ECS network.
+        ListDefensePatentsRequest:
+            type: object
+            properties:
+                cpcCode:
+                    type: string
+                    description: Optional CPC classification code prefix filter.
+                assignee:
+                    type: string
+                    description: Optional assignee substring filter (case-insensitive).
+                limit:
+                    type: integer
+                    format: int32
+                    description: Maximum number of results to return.
+            description: ListDefensePatentsRequest specifies filters for retrieving defense patent filings.
+        ListDefensePatentsResponse:
+            type: object
+            properties:
+                patents:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/DefensePatentFiling'
+                total:
+                    type: integer
+                    format: int32
+                    description: Total number of filings before the limit was applied.
+                fetchedAt:
+                    type: string
+                    description: Cache fetch timestamp as reported by the seed source.
+            description: ListDefensePatentsResponse contains matching defense patent filings.
+        DefensePatentFiling:
+            type: object
+            properties:
+                patentId:
+                    type: string
+                    description: USPTO patent identifier.
+                title:
+                    type: string
+                    description: Patent title.
+                date:
+                    type: string
+                    description: Filing or publication date.
+                assignee:
+                    type: string
+                    description: Assignee organization.
+                cpcCode:
+                    type: string
+                    description: CPC classification code.
+                cpcDesc:
+                    type: string
+                    description: Human-readable CPC classification description.
+                abstract:
+                    type: string
+                    description: Patent abstract text.
+                url:
+                    type: string
+                    description: Link to the patent record.
+            description: DefensePatentFiling represents a single defense-related patent filing.

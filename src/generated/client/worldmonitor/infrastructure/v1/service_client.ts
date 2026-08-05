@@ -275,54 +275,6 @@ export class InfrastructureServiceClient {
     this.defaultHeaders = { ...options?.defaultHeaders };
   }
 
-  async listInternetDdosAttacks(_req: ListInternetDdosAttacksRequest, options?: InfrastructureServiceCallOptions): Promise<ListInternetDdosAttacksResponse> {
-    const path = "/api/infrastructure/v1/list-internet-ddos-attacks";
-    const url = this.baseURL + path;
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...this.defaultHeaders,
-      ...options?.headers,
-    };
-
-    const resp = await this.fetchFn(url, {
-      method: "GET",
-      headers,
-      signal: options?.signal,
-    });
-
-    if (!resp.ok) {
-      return this.handleError(resp);
-    }
-
-    return await resp.json() as ListInternetDdosAttacksResponse;
-  }
-
-  async listInternetTrafficAnomalies(req: ListInternetTrafficAnomaliesRequest, options?: InfrastructureServiceCallOptions): Promise<ListInternetTrafficAnomaliesResponse> {
-    const path = "/api/infrastructure/v1/list-internet-traffic-anomalies";
-    const params = new URLSearchParams();
-    if (req.country != null && req.country !== "") params.set("country", String(req.country));
-    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...this.defaultHeaders,
-      ...options?.headers,
-    };
-
-    const resp = await this.fetchFn(url, {
-      method: "GET",
-      headers,
-      signal: options?.signal,
-    });
-
-    if (!resp.ok) {
-      return this.handleError(resp);
-    }
-
-    return await resp.json() as ListInternetTrafficAnomaliesResponse;
-  }
-
   async listInternetOutages(req: ListInternetOutagesRequest, options?: InfrastructureServiceCallOptions): Promise<ListInternetOutagesResponse> {
     let path = "/api/infrastructure/v1/list-internet-outages";
     const params = new URLSearchParams();
@@ -547,6 +499,54 @@ export class InfrastructureServiceClient {
     }
 
     return await resp.json() as ListTemporalAnomaliesResponse;
+  }
+
+  async listInternetDdosAttacks(req: ListInternetDdosAttacksRequest, options?: InfrastructureServiceCallOptions): Promise<ListInternetDdosAttacksResponse> {
+    let path = "/api/infrastructure/v1/list-internet-ddos-attacks";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
+    return await resp.json() as ListInternetDdosAttacksResponse;
+  }
+
+  async listInternetTrafficAnomalies(req: ListInternetTrafficAnomaliesRequest, options?: InfrastructureServiceCallOptions): Promise<ListInternetTrafficAnomaliesResponse> {
+    let path = "/api/infrastructure/v1/list-internet-traffic-anomalies";
+    const params = new URLSearchParams();
+    if (req.country != null && req.country !== "") params.set("country", String(req.country));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
+    return await resp.json() as ListInternetTrafficAnomaliesResponse;
   }
 
   private async handleError(resp: Response): Promise<never> {
