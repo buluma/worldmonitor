@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package worldmonitor.economic.v1;
 
+import "sebuf/http/annotations.proto";
+
 // EurostatMetric holds a single economic metric value for a country.
 message EurostatMetric {
   // Numeric value (e.g. 2.3 for 2.3%).
@@ -34,7 +36,7 @@ message GetEurostatCountryDataResponse {
   // Map of ISO2 country code to economic metrics (e.g. "DE", "FR", "IT").
   map<string, EurostatCountryEntry> countries = 1;
   // UTC ms timestamp when seed data was written.
-  int64 seeded_at = 2;
+  int64 seeded_at = 2 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
   // True when upstream data is unavailable (fallback result).
   bool unavailable = 3;
 }

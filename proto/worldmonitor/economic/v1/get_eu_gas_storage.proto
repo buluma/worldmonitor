@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package worldmonitor.economic.v1;
 
+import "sebuf/http/annotations.proto";
+
 // EuGasStorageHistoryEntry represents one day of EU aggregate gas storage data.
 message EuGasStorageHistoryEntry {
   // Calendar date (YYYY-MM-DD).
@@ -28,7 +30,7 @@ message GetEuGasStorageResponse {
   // Recent daily history (up to 5 entries, most recent first).
   repeated EuGasStorageHistoryEntry history = 5;
   // UTC ms timestamp when seed data was written.
-  int64 seeded_at = 6;
+  int64 seeded_at = 6 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
   // Calendar date of the most recent data point (YYYY-MM-DD).
   string updated_at = 7;
   // True when upstream data is unavailable (fallback result).

@@ -27,7 +27,7 @@ message GetEcbFxRatesResponse {
   // ISO 8601 timestamp of the ECB publication.
   string updated_at = 2;
   // Unix ms when the data was last seeded.
-  int64 seeded_at = 3;
+  int64 seeded_at = 3 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
   // True when Redis key is missing or data is unavailable.
   bool unavailable = 4;
 }
