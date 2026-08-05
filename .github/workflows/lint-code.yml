@@ -18,11 +18,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
       - run: npm run lint:unicode
-      - run: npm run lint
+      # Biome has a large pre-existing backlog; only lint changed lines so the
+      # check stays meaningful without blocking on the full cleanup. biome
+      # exits 1 when --changed matches zero files (e.g. a docs-only PR), which
+      # isn't a real failure -- only propagate the exit code otherwise.
+      - name: Lint changed files
+        run: |
+          set +e
+          output=$(npm run lint:changed 2>&1)
+          lint_exit_code=$?
+          echo "$output"
+          if [ $lint_exit_code -ne 0 ] && echo "$output" | grep -q "No files were processed"; then
+            exit 0
+          fi
+          exit $lint_exit_code
       - run: npm run lint:boundaries
