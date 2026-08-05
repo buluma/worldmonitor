@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package worldmonitor.market.v1;
+
+import "sebuf/http/annotations.proto";
+
+// ListEarningsCalendarRequest specifies the date range for earnings calendar retrieval.
+message ListEarningsCalendarRequest {
+  // Start date (inclusive), YYYY-MM-DD.
+  string from_date = 1 [(sebuf.http.query) = { name: "from_date" }];
+  // End date (inclusive), YYYY-MM-DD.
+  string to_date = 2 [(sebuf.http.query) = { name: "to_date" }];
+}
+
+// EarningsEntry represents a single company's earnings report event. Estimate/actual
+// fields are optional so a missing consensus estimate can be distinguished from zero.
+message EarningsEntry {
+  string symbol = 1;
+  string company = 2;
+  string date = 3;
+  // Reporting time of day (e.g. "bmo", "amc").
+  string hour = 4;
+  optional double eps_estimate = 5;
+  optional double revenue_estimate = 6;
+  optional double eps_actual = 7;
+  optional double revenue_actual = 8;
+  bool has_actuals = 9;
+  // Direction of the earnings surprise (e.g. "beat", "miss", "inline").
+  string surprise_direction = 10;
+}
+
+// ListEarningsCalendarResponse contains earnings events within the requested date range.
+message ListEarningsCalendarResponse {
+  repeated EarningsEntry earnings = 1;
+  string from_date = 2;
+  string to_date = 3;
+  int32 total = 4;
+  bool unavailable = 5;
+}

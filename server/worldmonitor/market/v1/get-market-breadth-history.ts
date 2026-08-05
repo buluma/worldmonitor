@@ -27,17 +27,14 @@ interface SeedPayload {
 
 function emptyUnavailable(): GetMarketBreadthHistoryResponse {
   return {
-    currentPctAbove20d: null,
-    currentPctAbove50d: null,
-    currentPctAbove200d: null,
     updatedAt: '',
     history: [],
     unavailable: true,
   };
 }
 
-function normalize(v: number | null | undefined): number | null {
-  return v == null ? null : v;
+function normalize(v: number | null | undefined): number | undefined {
+  return v == null ? undefined : v;
 }
 
 export async function getMarketBreadthHistory(
@@ -50,9 +47,9 @@ export async function getMarketBreadthHistory(
       return emptyUnavailable();
     }
 
-    // Preserve missing readings as null so a partial seed failure can be
+    // Preserve missing readings as undefined so a partial seed failure can be
     // distinguished from a real 0% breadth reading in the UI. Panel treats
-    // null as "missing".
+    // undefined (and null) as "missing".
     const history: BreadthSnapshot[] = raw.history.map((e) => ({
       date: e.date,
       pctAbove20d: normalize(e.pctAbove20d),

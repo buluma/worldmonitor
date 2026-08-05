@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package worldmonitor.market.v1;
+
+// CotInstrument represents CFTC Commitment of Traders positioning for a single instrument.
+message CotInstrument {
+  // Instrument name.
+  string name = 1;
+  // CFTC contract code.
+  string code = 2;
+  // CFTC report date.
+  string report_date = 3;
+  // Asset manager/institutional long positions.
+  double asset_manager_long = 4;
+  // Asset manager/institutional short positions.
+  double asset_manager_short = 5;
+  // Leveraged funds long positions.
+  double leveraged_funds_long = 6;
+  // Leveraged funds short positions.
+  double leveraged_funds_short = 7;
+  // Dealer/intermediary long positions.
+  double dealer_long = 8;
+  // Dealer/intermediary short positions.
+  double dealer_short = 9;
+  // Net positioning as a percentage.
+  double net_pct = 10;
+}
+
+// GetCotPositioningRequest has no filters -- returns the latest COT report.
+message GetCotPositioningRequest {
+}
+
+// GetCotPositioningResponse contains the latest CFTC Commitment of Traders report.
+message GetCotPositioningResponse {
+  // Instruments covered by the report.
+  repeated CotInstrument instruments = 1;
+  // CFTC report date.
+  string report_date = 2;
+  // True if the report could not be retrieved.
+  bool unavailable = 3;
+}

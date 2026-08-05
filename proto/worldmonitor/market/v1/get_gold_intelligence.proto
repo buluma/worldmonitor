@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package worldmonitor.market.v1;
+
+import "worldmonitor/market/v1/gold_data.proto";
+
+// GetGoldIntelligenceRequest has no filters -- returns the latest gold intelligence snapshot.
+message GetGoldIntelligenceRequest {
+}
+
+// GetGoldIntelligenceResponse contains a comprehensive gold market intelligence snapshot.
+message GetGoldIntelligenceResponse {
+  double gold_price = 1;
+  double gold_change_pct = 2;
+  repeated double gold_sparkline = 3;
+  double silver_price = 4;
+  double platinum_price = 5;
+  double palladium_price = 6;
+  optional double gold_silver_ratio = 7;
+  optional double gold_platinum_premium_pct = 8;
+  repeated GoldCrossCurrencyPrice cross_currency_prices = 9;
+  GoldCotPositioning cot = 10;
+  string updated_at = 11;
+  bool unavailable = 12;
+  GoldSessionRange session = 13;
+  GoldReturns returns = 14;
+  GoldRange52w range52w = 15;
+  repeated GoldDriver drivers = 16;
+  GoldEtfFlows etf_flows = 17;
+  GoldCbReserves cb_reserves = 18;
+}

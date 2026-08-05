@@ -328,20 +328,7 @@ export interface ListOtherTokensResponse {
   tokens: CryptoQuote[];
 }
 
-export interface GetFearGreedIndexRequest {}
-
-export interface FearGreedCategory {
-  score: number;
-  weight: number;
-  contribution: number;
-  degraded: boolean;
-  inputsJson: string;
-}
-
-export interface FearGreedSectorPerformance {
-  symbol: string;
-  name: string;
-  change1d: number;
+export interface GetFearGreedIndexRequest {
 }
 
 export interface GetFearGreedIndexResponse {
@@ -377,25 +364,47 @@ export interface GetFearGreedIndexResponse {
   sectorPerformance: FearGreedSectorPerformance[];
 }
 
-export interface GetMarketBreadthHistoryRequest {}
+export interface FearGreedCategory {
+  score: number;
+  weight: number;
+  contribution: number;
+  degraded: boolean;
+  inputsJson: string;
+}
 
-export interface BreadthSnapshot {
-  date: string;
-  pctAbove20d: number | null;
-  pctAbove50d: number | null;
-  pctAbove200d: number | null;
+export interface FearGreedSectorPerformance {
+  symbol: string;
+  name: string;
+  change1d: number;
+}
+
+export interface GetMarketBreadthHistoryRequest {
 }
 
 export interface GetMarketBreadthHistoryResponse {
-  currentPctAbove20d: number | null;
-  currentPctAbove50d: number | null;
-  currentPctAbove200d: number | null;
+  currentPctAbove20d?: number;
+  currentPctAbove50d?: number;
+  currentPctAbove200d?: number;
   updatedAt: string;
   history: BreadthSnapshot[];
   unavailable: boolean;
 }
 
-export interface GetCotPositioningRequest {}
+export interface BreadthSnapshot {
+  date: string;
+  pctAbove20d?: number;
+  pctAbove50d?: number;
+  pctAbove200d?: number;
+}
+
+export interface GetCotPositioningRequest {
+}
+
+export interface GetCotPositioningResponse {
+  instruments: CotInstrument[];
+  reportDate: string;
+  unavailable: boolean;
+}
 
 export interface CotInstrument {
   name: string;
@@ -410,96 +419,7 @@ export interface CotInstrument {
   netPct: number;
 }
 
-export interface GetCotPositioningResponse {
-  instruments: CotInstrument[];
-  reportDate: string;
-  unavailable: boolean;
-}
-
-export interface GetGoldIntelligenceRequest {}
-
-export interface GoldCrossCurrencyPrice {
-  currency: string;
-  flag: string;
-  price: number;
-}
-
-export interface GoldSessionRange {
-  dayHigh: number;
-  dayLow: number;
-  prevClose: number;
-}
-
-export interface GoldReturns {
-  w1: number;
-  m1: number;
-  ytd: number;
-  y1: number;
-}
-
-export interface GoldRange52w {
-  hi: number;
-  lo: number;
-  positionPct: number;
-}
-
-export interface GoldCotCategory {
-  longPositions: number;
-  shortPositions: number;
-  netPct: number;
-  oiSharePct: number;
-  wowNetDelta: number;
-}
-
-export interface GoldCotPositioning {
-  reportDate: string;
-  nextReleaseDate: string;
-  openInterest: number;
-  managedMoney?: GoldCotCategory;
-  producerSwap?: GoldCotCategory;
-}
-
-export interface GoldDriver {
-  symbol: string;
-  label: string;
-  value: number;
-  changePct: number;
-  correlation30d: number;
-}
-
-export interface GoldCbHolder {
-  iso3: string;
-  name: string;
-  tonnes: number;
-  pctOfReserves: number;
-}
-
-export interface GoldCbMover {
-  iso3: string;
-  name: string;
-  deltaTonnes12m: number;
-}
-
-export interface GoldCbReserves {
-  asOfMonth: string;
-  totalTonnes: number;
-  topHolders: GoldCbHolder[];
-  topBuyers12m: GoldCbMover[];
-  topSellers12m: GoldCbMover[];
-}
-
-export interface GoldEtfFlows {
-  asOfDate: string;
-  tonnes: number;
-  aumUsd: number;
-  nav: number;
-  changeW1Tonnes: number;
-  changeM1Tonnes: number;
-  changeY1Tonnes: number;
-  changeW1Pct: number;
-  changeM1Pct: number;
-  changeY1Pct: number;
-  sparkline90d: number[];
+export interface GetGoldIntelligenceRequest {
 }
 
 export interface GetGoldIntelligenceResponse {
@@ -523,7 +443,101 @@ export interface GetGoldIntelligenceResponse {
   cbReserves?: GoldCbReserves;
 }
 
-export interface GetHyperliquidFlowRequest {}
+export interface GoldCrossCurrencyPrice {
+  currency: string;
+  flag: string;
+  price: number;
+}
+
+export interface GoldCotPositioning {
+  reportDate: string;
+  nextReleaseDate: string;
+  openInterest: number;
+  managedMoney?: GoldCotCategory;
+  producerSwap?: GoldCotCategory;
+}
+
+export interface GoldCotCategory {
+  longPositions: number;
+  shortPositions: number;
+  netPct: number;
+  oiSharePct: number;
+  wowNetDelta: number;
+}
+
+export interface GoldSessionRange {
+  dayHigh: number;
+  dayLow: number;
+  prevClose: number;
+}
+
+export interface GoldReturns {
+  w1: number;
+  m1: number;
+  ytd: number;
+  y1: number;
+}
+
+export interface GoldRange52w {
+  hi: number;
+  lo: number;
+  positionPct: number;
+}
+
+export interface GoldDriver {
+  symbol: string;
+  label: string;
+  value: number;
+  changePct: number;
+  correlation30d: number;
+}
+
+export interface GoldEtfFlows {
+  asOfDate: string;
+  tonnes: number;
+  aumUsd: number;
+  nav: number;
+  changeW1Tonnes: number;
+  changeM1Tonnes: number;
+  changeY1Tonnes: number;
+  changeW1Pct: number;
+  changeM1Pct: number;
+  changeY1Pct: number;
+  sparkline90d: number[];
+}
+
+export interface GoldCbReserves {
+  asOfMonth: string;
+  totalTonnes: number;
+  topHolders: GoldCbHolder[];
+  topBuyers12m: GoldCbMover[];
+  topSellers12m: GoldCbMover[];
+}
+
+export interface GoldCbHolder {
+  iso3: string;
+  name: string;
+  tonnes: number;
+  pctOfReserves: number;
+}
+
+export interface GoldCbMover {
+  iso3: string;
+  name: string;
+  deltaTonnes12m: number;
+}
+
+export interface GetHyperliquidFlowRequest {
+}
+
+export interface GetHyperliquidFlowResponse {
+  ts: number;
+  fetchedAt: string;
+  warmup: boolean;
+  assetCount: number;
+  assets: HyperliquidAssetFlow[];
+  unavailable: boolean;
+}
 
 export interface HyperliquidAssetFlow {
   symbol: string;
@@ -550,31 +564,9 @@ export interface HyperliquidAssetFlow {
   alerts: string[];
 }
 
-export interface GetHyperliquidFlowResponse {
-  ts: number;
-  fetchedAt: string;
-  warmup: boolean;
-  assetCount: number;
-  assets: HyperliquidAssetFlow[];
-  unavailable: boolean;
-}
-
 export interface ListEarningsCalendarRequest {
   fromDate: string;
   toDate: string;
-}
-
-export interface EarningsEntry {
-  symbol: string;
-  company: string;
-  date: string;
-  hour: string;
-  epsEstimate: number | null;
-  revenueEstimate: number | null;
-  epsActual: number | null;
-  revenueActual: number | null;
-  hasActuals: boolean;
-  surpriseDirection: string;
 }
 
 export interface ListEarningsCalendarResponse {
@@ -583,6 +575,19 @@ export interface ListEarningsCalendarResponse {
   toDate: string;
   total: number;
   unavailable: boolean;
+}
+
+export interface EarningsEntry {
+  symbol: string;
+  company: string;
+  date: string;
+  hour: string;
+  epsEstimate?: number;
+  revenueEstimate?: number;
+  epsActual?: number;
+  revenueActual?: number;
+  hasActuals: boolean;
+  surpriseDirection: string;
 }
 
 export interface FieldViolation {
@@ -1028,54 +1033,144 @@ export class MarketServiceClient {
     return await resp.json() as ListOtherTokensResponse;
   }
 
-  async getFearGreedIndex(_req: GetFearGreedIndexRequest, options?: MarketServiceCallOptions): Promise<GetFearGreedIndexResponse> {
-    const url = this.baseURL + "/api/market/v1/get-fear-greed-index";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+  async getFearGreedIndex(req: GetFearGreedIndexRequest, options?: MarketServiceCallOptions): Promise<GetFearGreedIndexResponse> {
+    let path = "/api/market/v1/get-fear-greed-index";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetFearGreedIndexResponse;
   }
 
-  async getMarketBreadthHistory(_req: GetMarketBreadthHistoryRequest, options?: MarketServiceCallOptions): Promise<GetMarketBreadthHistoryResponse> {
-    const url = this.baseURL + "/api/market/v1/get-market-breadth-history";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+  async getMarketBreadthHistory(req: GetMarketBreadthHistoryRequest, options?: MarketServiceCallOptions): Promise<GetMarketBreadthHistoryResponse> {
+    let path = "/api/market/v1/get-market-breadth-history";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetMarketBreadthHistoryResponse;
   }
 
-  async getCotPositioning(_req: GetCotPositioningRequest, options?: MarketServiceCallOptions): Promise<GetCotPositioningResponse> {
-    const url = this.baseURL + "/api/market/v1/get-cot-positioning";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+  async getCotPositioning(req: GetCotPositioningRequest, options?: MarketServiceCallOptions): Promise<GetCotPositioningResponse> {
+    let path = "/api/market/v1/get-cot-positioning";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetCotPositioningResponse;
   }
 
-  async getGoldIntelligence(_req: GetGoldIntelligenceRequest, options?: MarketServiceCallOptions): Promise<GetGoldIntelligenceResponse> {
-    const url = this.baseURL + "/api/market/v1/get-gold-intelligence";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+  async getGoldIntelligence(req: GetGoldIntelligenceRequest, options?: MarketServiceCallOptions): Promise<GetGoldIntelligenceResponse> {
+    let path = "/api/market/v1/get-gold-intelligence";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetGoldIntelligenceResponse;
   }
 
-  async getHyperliquidFlow(_req: GetHyperliquidFlowRequest, options?: MarketServiceCallOptions): Promise<GetHyperliquidFlowResponse> {
-    const url = this.baseURL + "/api/market/v1/get-hyperliquid-flow";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+  async getHyperliquidFlow(req: GetHyperliquidFlowRequest, options?: MarketServiceCallOptions): Promise<GetHyperliquidFlowResponse> {
+    let path = "/api/market/v1/get-hyperliquid-flow";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetHyperliquidFlowResponse;
   }
 
   async listEarningsCalendar(req: ListEarningsCalendarRequest, options?: MarketServiceCallOptions): Promise<ListEarningsCalendarResponse> {
+    let path = "/api/market/v1/list-earnings-calendar";
     const params = new URLSearchParams();
-    if (req.fromDate != null && req.fromDate !== "") params.set("fromDate", req.fromDate);
-    if (req.toDate != null && req.toDate !== "") params.set("toDate", req.toDate);
-    const url = this.baseURL + "/api/market/v1/list-earnings-calendar" + (params.toString() ? "?" + params.toString() : "");
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "GET", headers, signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    if (req.fromDate != null && req.fromDate !== "") params.set("from_date", String(req.fromDate));
+    if (req.toDate != null && req.toDate !== "") params.set("to_date", String(req.toDate));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as ListEarningsCalendarResponse;
   }
 

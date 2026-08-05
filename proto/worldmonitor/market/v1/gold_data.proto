@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package worldmonitor.market.v1;
+
+// GoldCrossCurrencyPrice represents the gold price denominated in a non-USD currency.
+message GoldCrossCurrencyPrice {
+  // Currency code label.
+  string currency = 1;
+  // Currency flag emoji.
+  string flag = 2;
+  // Gold price in this currency.
+  double price = 3;
+}
+
+// GoldSessionRange represents the current trading session's price range.
+message GoldSessionRange {
+  double day_high = 1;
+  double day_low = 2;
+  double prev_close = 3;
+}
+
+// GoldReturns represents gold price returns over standard lookback windows.
+message GoldReturns {
+  double w1 = 1;
+  double m1 = 2;
+  double ytd = 3;
+  double y1 = 4;
+}
+
+// GoldRange52w represents the 52-week trading range and current position within it.
+message GoldRange52w {
+  double hi = 1;
+  double lo = 2;
+  double position_pct = 3;
+}
+
+// GoldCotCategory represents CFTC positioning for a single trader category, specific
+// to the gold intelligence panel's v2 category breakdown.
+message GoldCotCategory {
+  double long_positions = 1;
+  double short_positions = 2;
+  double net_pct = 3;
+  double oi_share_pct = 4;
+  double wow_net_delta = 5;
+}
+
+// GoldCotPositioning represents CFTC Commitment of Traders positioning for gold futures.
+message GoldCotPositioning {
+  string report_date = 1;
+  string next_release_date = 2;
+  double open_interest = 3;
+  GoldCotCategory managed_money = 4;
+  GoldCotCategory producer_swap = 5;
+}
+
+// GoldDriver represents a related instrument whose movement helps explain gold price action.
+message GoldDriver {
+  string symbol = 1;
+  string label = 2;
+  double value = 3;
+  double change_pct = 4;
+  double correlation30d = 5;
+}
+
+// GoldCbHolder represents a central bank's gold reserve holding.
+message GoldCbHolder {
+  string iso3 = 1;
+  string name = 2;
+  double tonnes = 3;
+  double pct_of_reserves = 4;
+}
+
+// GoldCbMover represents a central bank's recent change in gold reserves.
+message GoldCbMover {
+  string iso3 = 1;
+  string name = 2;
+  double delta_tonnes12m = 3;
+}
+
+// GoldCbReserves represents aggregate central bank gold reserve data.
+message GoldCbReserves {
+  string as_of_month = 1;
+  double total_tonnes = 2;
+  repeated GoldCbHolder top_holders = 3;
+  repeated GoldCbMover top_buyers12m = 4;
+  repeated GoldCbMover top_sellers12m = 5;
+}
+
+// GoldEtfFlows represents gold ETF holdings and flow data.
+message GoldEtfFlows {
+  string as_of_date = 1;
+  double tonnes = 2;
+  double aum_usd = 3;
+  double nav = 4;
+  double change_w1_tonnes = 5;
+  double change_m1_tonnes = 6;
+  double change_y1_tonnes = 7;
+  double change_w1_pct = 8;
+  double change_m1_pct = 9;
+  double change_y1_pct = 10;
+  repeated double sparkline90d = 11;
+}

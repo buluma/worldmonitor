@@ -523,6 +523,175 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Error'
+    /api/market/v1/get-fear-greed-index:
+        get:
+            tags:
+                - MarketService
+            summary: GetFearGreedIndex
+            description: GetFearGreedIndex retrieves the composite market fear/greed index and its components.
+            operationId: GetFearGreedIndex
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetFearGreedIndexResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/market/v1/get-market-breadth-history:
+        get:
+            tags:
+                - MarketService
+            summary: GetMarketBreadthHistory
+            description: GetMarketBreadthHistory retrieves current and historical market breadth readings.
+            operationId: GetMarketBreadthHistory
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetMarketBreadthHistoryResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/market/v1/get-cot-positioning:
+        get:
+            tags:
+                - MarketService
+            summary: GetCotPositioning
+            description: GetCotPositioning retrieves the latest CFTC Commitment of Traders report.
+            operationId: GetCotPositioning
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetCotPositioningResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/market/v1/get-gold-intelligence:
+        get:
+            tags:
+                - MarketService
+            summary: GetGoldIntelligence
+            description: GetGoldIntelligence retrieves a comprehensive gold market intelligence snapshot.
+            operationId: GetGoldIntelligence
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetGoldIntelligenceResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/market/v1/get-hyperliquid-flow:
+        get:
+            tags:
+                - MarketService
+            summary: GetHyperliquidFlow
+            description: GetHyperliquidFlow retrieves the latest Hyperliquid perpetual futures flow snapshot.
+            operationId: GetHyperliquidFlow
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetHyperliquidFlowResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/market/v1/list-earnings-calendar:
+        get:
+            tags:
+                - MarketService
+            summary: ListEarningsCalendar
+            description: ListEarningsCalendar retrieves earnings report events within a date range.
+            operationId: ListEarningsCalendar
+            parameters:
+                - name: from_date
+                  in: query
+                  description: Start date (inclusive), YYYY-MM-DD.
+                  required: false
+                  schema:
+                    type: string
+                - name: to_date
+                  in: query
+                  description: End date (inclusive), YYYY-MM-DD.
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListEarningsCalendarResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
 components:
     schemas:
         Error:
@@ -1354,3 +1523,653 @@ components:
                     items:
                         $ref: '#/components/schemas/CryptoQuote'
             description: ListOtherTokensResponse contains other token price data.
+        GetFearGreedIndexRequest:
+            type: object
+            description: GetFearGreedIndexRequest has no filters -- returns the latest composite index.
+        GetFearGreedIndexResponse:
+            type: object
+            properties:
+                compositeScore:
+                    type: number
+                    format: double
+                    description: Composite score (0-100).
+                compositeLabel:
+                    type: string
+                    description: Composite label (e.g. "Extreme Fear", "Neutral", "Extreme Greed").
+                previousScore:
+                    type: number
+                    format: double
+                    description: Previous composite score.
+                seededAt:
+                    type: string
+                    description: Seed timestamp as reported by the seed source.
+                sentiment:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                volatility:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                positioning:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                trend:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                breadth:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                momentum:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                liquidity:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                credit:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                macro:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                crossAsset:
+                    $ref: '#/components/schemas/FearGreedCategory'
+                vix:
+                    type: number
+                    format: double
+                    description: CBOE VIX level.
+                hySpread:
+                    type: number
+                    format: double
+                    description: High-yield credit spread.
+                yield10y:
+                    type: number
+                    format: double
+                    description: 10-year Treasury yield.
+                putCallRatio:
+                    type: number
+                    format: double
+                    description: Put/call ratio.
+                pctAbove200d:
+                    type: number
+                    format: double
+                    description: Percentage of S&P 500 constituents above their 200-day moving average.
+                cnnFearGreed:
+                    type: number
+                    format: double
+                    description: CNN Fear & Greed index value.
+                cnnLabel:
+                    type: string
+                    description: CNN Fear & Greed label.
+                aaiiBull:
+                    type: number
+                    format: double
+                    description: AAII bullish sentiment percentage.
+                aaiiBear:
+                    type: number
+                    format: double
+                    description: AAII bearish sentiment percentage.
+                fedRate:
+                    type: string
+                    description: Federal funds rate.
+                unavailable:
+                    type: boolean
+                    description: True if the composite could not be computed.
+                fsiValue:
+                    type: number
+                    format: double
+                    description: OFR Financial Stress Index value.
+                fsiLabel:
+                    type: string
+                    description: OFR Financial Stress Index label.
+                hygPrice:
+                    type: number
+                    format: double
+                    description: HYG (high-yield bond ETF) price.
+                tltPrice:
+                    type: number
+                    format: double
+                    description: TLT (20+ year Treasury ETF) price.
+                sectorPerformance:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/FearGreedSectorPerformance'
+            description: GetFearGreedIndexResponse contains the composite fear/greed index and its components.
+        FearGreedCategory:
+            type: object
+            properties:
+                score:
+                    type: number
+                    format: double
+                    description: Category score (0-100).
+                weight:
+                    type: number
+                    format: double
+                    description: Weight of this category in the composite score.
+                contribution:
+                    type: number
+                    format: double
+                    description: Contribution of this category to the composite score.
+                degraded:
+                    type: boolean
+                    description: True if this category's inputs were degraded/incomplete.
+                inputsJson:
+                    type: string
+                    description: JSON-encoded diagnostic inputs.
+            description: FearGreedCategory represents a single weighted component of the composite fear/greed score.
+        FearGreedSectorPerformance:
+            type: object
+            properties:
+                symbol:
+                    type: string
+                    description: Sector ETF ticker symbol.
+                name:
+                    type: string
+                    description: Sector name.
+                change1d:
+                    type: number
+                    format: double
+                    description: One-day price change percentage.
+            description: FearGreedSectorPerformance represents a single sector's daily performance.
+        GetMarketBreadthHistoryRequest:
+            type: object
+            description: GetMarketBreadthHistoryRequest has no filters -- returns the full cached breadth history.
+        GetMarketBreadthHistoryResponse:
+            type: object
+            properties:
+                currentPctAbove20d:
+                    type: number
+                    format: double
+                    description: Current percentage above 20-day moving average.
+                currentPctAbove50d:
+                    type: number
+                    format: double
+                    description: Current percentage above 50-day moving average.
+                currentPctAbove200d:
+                    type: number
+                    format: double
+                    description: Current percentage above 200-day moving average.
+                updatedAt:
+                    type: string
+                    description: Last update time.
+                history:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/BreadthSnapshot'
+                unavailable:
+                    type: boolean
+                    description: True if breadth data could not be computed.
+            description: GetMarketBreadthHistoryResponse contains current and historical market breadth readings.
+        BreadthSnapshot:
+            type: object
+            properties:
+                date:
+                    type: string
+                    description: Snapshot date.
+                pctAbove20d:
+                    type: number
+                    format: double
+                    description: Percentage of constituents above their 20-day moving average.
+                pctAbove50d:
+                    type: number
+                    format: double
+                    description: Percentage of constituents above their 50-day moving average.
+                pctAbove200d:
+                    type: number
+                    format: double
+                    description: Percentage of constituents above their 200-day moving average.
+            description: |-
+                BreadthSnapshot represents a single day's market breadth reading. Readings are
+                 optional so a partial seed failure can be distinguished from a real 0% reading.
+        GetCotPositioningRequest:
+            type: object
+            description: GetCotPositioningRequest has no filters -- returns the latest COT report.
+        GetCotPositioningResponse:
+            type: object
+            properties:
+                instruments:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CotInstrument'
+                reportDate:
+                    type: string
+                    description: CFTC report date.
+                unavailable:
+                    type: boolean
+                    description: True if the report could not be retrieved.
+            description: GetCotPositioningResponse contains the latest CFTC Commitment of Traders report.
+        CotInstrument:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: Instrument name.
+                code:
+                    type: string
+                    description: CFTC contract code.
+                reportDate:
+                    type: string
+                    description: CFTC report date.
+                assetManagerLong:
+                    type: number
+                    format: double
+                    description: Asset manager/institutional long positions.
+                assetManagerShort:
+                    type: number
+                    format: double
+                    description: Asset manager/institutional short positions.
+                leveragedFundsLong:
+                    type: number
+                    format: double
+                    description: Leveraged funds long positions.
+                leveragedFundsShort:
+                    type: number
+                    format: double
+                    description: Leveraged funds short positions.
+                dealerLong:
+                    type: number
+                    format: double
+                    description: Dealer/intermediary long positions.
+                dealerShort:
+                    type: number
+                    format: double
+                    description: Dealer/intermediary short positions.
+                netPct:
+                    type: number
+                    format: double
+                    description: Net positioning as a percentage.
+            description: CotInstrument represents CFTC Commitment of Traders positioning for a single instrument.
+        GetGoldIntelligenceRequest:
+            type: object
+            description: GetGoldIntelligenceRequest has no filters -- returns the latest gold intelligence snapshot.
+        GetGoldIntelligenceResponse:
+            type: object
+            properties:
+                goldPrice:
+                    type: number
+                    format: double
+                goldChangePct:
+                    type: number
+                    format: double
+                goldSparkline:
+                    type: array
+                    items:
+                        type: number
+                        format: double
+                silverPrice:
+                    type: number
+                    format: double
+                platinumPrice:
+                    type: number
+                    format: double
+                palladiumPrice:
+                    type: number
+                    format: double
+                goldSilverRatio:
+                    type: number
+                    format: double
+                goldPlatinumPremiumPct:
+                    type: number
+                    format: double
+                crossCurrencyPrices:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GoldCrossCurrencyPrice'
+                cot:
+                    $ref: '#/components/schemas/GoldCotPositioning'
+                updatedAt:
+                    type: string
+                unavailable:
+                    type: boolean
+                session:
+                    $ref: '#/components/schemas/GoldSessionRange'
+                returns:
+                    $ref: '#/components/schemas/GoldReturns'
+                range52w:
+                    $ref: '#/components/schemas/GoldRange52w'
+                drivers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GoldDriver'
+                etfFlows:
+                    $ref: '#/components/schemas/GoldEtfFlows'
+                cbReserves:
+                    $ref: '#/components/schemas/GoldCbReserves'
+            description: GetGoldIntelligenceResponse contains a comprehensive gold market intelligence snapshot.
+        GoldCrossCurrencyPrice:
+            type: object
+            properties:
+                currency:
+                    type: string
+                    description: Currency code label.
+                flag:
+                    type: string
+                    description: Currency flag emoji.
+                price:
+                    type: number
+                    format: double
+                    description: Gold price in this currency.
+            description: GoldCrossCurrencyPrice represents the gold price denominated in a non-USD currency.
+        GoldCotPositioning:
+            type: object
+            properties:
+                reportDate:
+                    type: string
+                nextReleaseDate:
+                    type: string
+                openInterest:
+                    type: number
+                    format: double
+                managedMoney:
+                    $ref: '#/components/schemas/GoldCotCategory'
+                producerSwap:
+                    $ref: '#/components/schemas/GoldCotCategory'
+            description: GoldCotPositioning represents CFTC Commitment of Traders positioning for gold futures.
+        GoldCotCategory:
+            type: object
+            properties:
+                longPositions:
+                    type: number
+                    format: double
+                shortPositions:
+                    type: number
+                    format: double
+                netPct:
+                    type: number
+                    format: double
+                oiSharePct:
+                    type: number
+                    format: double
+                wowNetDelta:
+                    type: number
+                    format: double
+            description: |-
+                GoldCotCategory represents CFTC positioning for a single trader category, specific
+                 to the gold intelligence panel's v2 category breakdown.
+        GoldSessionRange:
+            type: object
+            properties:
+                dayHigh:
+                    type: number
+                    format: double
+                dayLow:
+                    type: number
+                    format: double
+                prevClose:
+                    type: number
+                    format: double
+            description: GoldSessionRange represents the current trading session's price range.
+        GoldReturns:
+            type: object
+            properties:
+                w1:
+                    type: number
+                    format: double
+                m1:
+                    type: number
+                    format: double
+                ytd:
+                    type: number
+                    format: double
+                y1:
+                    type: number
+                    format: double
+            description: GoldReturns represents gold price returns over standard lookback windows.
+        GoldRange52w:
+            type: object
+            properties:
+                hi:
+                    type: number
+                    format: double
+                lo:
+                    type: number
+                    format: double
+                positionPct:
+                    type: number
+                    format: double
+            description: GoldRange52w represents the 52-week trading range and current position within it.
+        GoldDriver:
+            type: object
+            properties:
+                symbol:
+                    type: string
+                label:
+                    type: string
+                value:
+                    type: number
+                    format: double
+                changePct:
+                    type: number
+                    format: double
+                correlation30d:
+                    type: number
+                    format: double
+            description: GoldDriver represents a related instrument whose movement helps explain gold price action.
+        GoldEtfFlows:
+            type: object
+            properties:
+                asOfDate:
+                    type: string
+                tonnes:
+                    type: number
+                    format: double
+                aumUsd:
+                    type: number
+                    format: double
+                nav:
+                    type: number
+                    format: double
+                changeW1Tonnes:
+                    type: number
+                    format: double
+                changeM1Tonnes:
+                    type: number
+                    format: double
+                changeY1Tonnes:
+                    type: number
+                    format: double
+                changeW1Pct:
+                    type: number
+                    format: double
+                changeM1Pct:
+                    type: number
+                    format: double
+                changeY1Pct:
+                    type: number
+                    format: double
+                sparkline90d:
+                    type: array
+                    items:
+                        type: number
+                        format: double
+            description: GoldEtfFlows represents gold ETF holdings and flow data.
+        GoldCbReserves:
+            type: object
+            properties:
+                asOfMonth:
+                    type: string
+                totalTonnes:
+                    type: number
+                    format: double
+                topHolders:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GoldCbHolder'
+                topBuyers12m:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GoldCbMover'
+                topSellers12m:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GoldCbMover'
+            description: GoldCbReserves represents aggregate central bank gold reserve data.
+        GoldCbHolder:
+            type: object
+            properties:
+                iso3:
+                    type: string
+                name:
+                    type: string
+                tonnes:
+                    type: number
+                    format: double
+                pctOfReserves:
+                    type: number
+                    format: double
+            description: GoldCbHolder represents a central bank's gold reserve holding.
+        GoldCbMover:
+            type: object
+            properties:
+                iso3:
+                    type: string
+                name:
+                    type: string
+                deltaTonnes12m:
+                    type: number
+                    format: double
+            description: GoldCbMover represents a central bank's recent change in gold reserves.
+        GetHyperliquidFlowRequest:
+            type: object
+            description: GetHyperliquidFlowRequest has no filters -- returns the latest flow snapshot.
+        GetHyperliquidFlowResponse:
+            type: object
+            properties:
+                ts:
+                    type: integer
+                    format: int64
+                    description: 'Snapshot time as Unix epoch milliseconds.. Warning: Values > 2^53 may lose precision in JavaScript'
+                fetchedAt:
+                    type: string
+                warmup:
+                    type: boolean
+                assetCount:
+                    type: integer
+                    format: int32
+                assets:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/HyperliquidAssetFlow'
+                unavailable:
+                    type: boolean
+            description: GetHyperliquidFlowResponse contains the latest Hyperliquid perpetual futures flow snapshot.
+        HyperliquidAssetFlow:
+            type: object
+            properties:
+                symbol:
+                    type: string
+                display:
+                    type: string
+                assetClass:
+                    type: string
+                group:
+                    type: string
+                funding:
+                    type: string
+                    description: Funding rate, formatted as a string (source precision).
+                openInterest:
+                    type: string
+                    description: Open interest, formatted as a string (source precision).
+                markPx:
+                    type: string
+                    description: Mark price, formatted as a string (source precision).
+                oraclePx:
+                    type: string
+                    description: Oracle price, formatted as a string (source precision).
+                dayNotional:
+                    type: string
+                    description: Day notional volume, formatted as a string (source precision).
+                fundingScore:
+                    type: number
+                    format: double
+                volumeScore:
+                    type: number
+                    format: double
+                oiScore:
+                    type: number
+                    format: double
+                basisScore:
+                    type: number
+                    format: double
+                composite:
+                    type: number
+                    format: double
+                sparkFunding:
+                    type: array
+                    items:
+                        type: number
+                        format: double
+                sparkOi:
+                    type: array
+                    items:
+                        type: number
+                        format: double
+                sparkScore:
+                    type: array
+                    items:
+                        type: number
+                        format: double
+                warmup:
+                    type: boolean
+                stale:
+                    type: boolean
+                staleSince:
+                    type: integer
+                    format: int64
+                    description: 'Time this asset''s data went stale, as Unix epoch milliseconds.. Warning: Values > 2^53 may lose precision in JavaScript'
+                missingPolls:
+                    type: integer
+                    format: int32
+                alerts:
+                    type: array
+                    items:
+                        type: string
+            description: HyperliquidAssetFlow represents Hyperliquid perpetual futures flow data for one asset.
+        ListEarningsCalendarRequest:
+            type: object
+            properties:
+                fromDate:
+                    type: string
+                    description: Start date (inclusive), YYYY-MM-DD.
+                toDate:
+                    type: string
+                    description: End date (inclusive), YYYY-MM-DD.
+            description: ListEarningsCalendarRequest specifies the date range for earnings calendar retrieval.
+        ListEarningsCalendarResponse:
+            type: object
+            properties:
+                earnings:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EarningsEntry'
+                fromDate:
+                    type: string
+                toDate:
+                    type: string
+                total:
+                    type: integer
+                    format: int32
+                unavailable:
+                    type: boolean
+            description: ListEarningsCalendarResponse contains earnings events within the requested date range.
+        EarningsEntry:
+            type: object
+            properties:
+                symbol:
+                    type: string
+                company:
+                    type: string
+                date:
+                    type: string
+                hour:
+                    type: string
+                    description: Reporting time of day (e.g. "bmo", "amc").
+                epsEstimate:
+                    type: number
+                    format: double
+                revenueEstimate:
+                    type: number
+                    format: double
+                epsActual:
+                    type: number
+                    format: double
+                revenueActual:
+                    type: number
+                    format: double
+                hasActuals:
+                    type: boolean
+                surpriseDirection:
+                    type: string
+                    description: Direction of the earnings surprise (e.g. "beat", "miss", "inline").
+            description: |-
+                EarningsEntry represents a single company's earnings report event. Estimate/actual
+                 fields are optional so a missing consensus estimate can be distinguished from zero.

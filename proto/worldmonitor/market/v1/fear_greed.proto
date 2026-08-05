@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package worldmonitor.market.v1;
+
+// FearGreedCategory represents a single weighted component of the composite fear/greed score.
+message FearGreedCategory {
+  // Category score (0-100).
+  double score = 1;
+  // Weight of this category in the composite score.
+  double weight = 2;
+  // Contribution of this category to the composite score.
+  double contribution = 3;
+  // True if this category's inputs were degraded/incomplete.
+  bool degraded = 4;
+  // JSON-encoded diagnostic inputs.
+  string inputs_json = 5;
+}
+
+// FearGreedSectorPerformance represents a single sector's daily performance.
+message FearGreedSectorPerformance {
+  // Sector ETF ticker symbol.
+  string symbol = 1;
+  // Sector name.
+  string name = 2;
+  // One-day price change percentage.
+  double change1d = 3;
+}

@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package worldmonitor.market.v1;
+
+// GetMarketBreadthHistoryRequest has no filters -- returns the full cached breadth history.
+message GetMarketBreadthHistoryRequest {
+}
+
+// BreadthSnapshot represents a single day's market breadth reading. Readings are
+// optional so a partial seed failure can be distinguished from a real 0% reading.
+message BreadthSnapshot {
+  // Snapshot date.
+  string date = 1;
+  // Percentage of constituents above their 20-day moving average.
+  optional double pct_above20d = 2;
+  // Percentage of constituents above their 50-day moving average.
+  optional double pct_above50d = 3;
+  // Percentage of constituents above their 200-day moving average.
+  optional double pct_above200d = 4;
+}
+
+// GetMarketBreadthHistoryResponse contains current and historical market breadth readings.
+message GetMarketBreadthHistoryResponse {
+  // Current percentage above 20-day moving average.
+  optional double current_pct_above20d = 1;
+  // Current percentage above 50-day moving average.
+  optional double current_pct_above50d = 2;
+  // Current percentage above 200-day moving average.
+  optional double current_pct_above200d = 3;
+  // Last update time.
+  string updated_at = 4;
+  // Historical daily breadth snapshots.
+  repeated BreadthSnapshot history = 5;
+  // True if breadth data could not be computed.
+  bool unavailable = 6;
+}
