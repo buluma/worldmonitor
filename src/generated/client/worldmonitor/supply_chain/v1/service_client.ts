@@ -52,7 +52,6 @@ export interface ChokepointInfo {
   directionalDwt: DirectionalDwt[];
   transitSummary?: TransitSummary;
   flowEstimate?: FlowEstimate;
-  warRiskTier?: WarRiskTier;
 }
 
 export interface DirectionalDwt {
@@ -82,15 +81,6 @@ export interface TransitDayCount {
   cargo: number;
   other: number;
   total: number;
-  container: number;
-  dryBulk: number;
-  generalCargo: number;
-  roro: number;
-  capContainer: number;
-  capDryBulk: number;
-  capGeneralCargo: number;
-  capRoro: number;
-  capTanker: number;
 }
 
 export interface FlowEstimate {
@@ -103,7 +93,122 @@ export interface FlowEstimate {
   hazardAlertName: string;
 }
 
-export type WarRiskTier = "WAR_RISK_TIER_UNSPECIFIED" | "WAR_RISK_TIER_NORMAL" | "WAR_RISK_TIER_ELEVATED" | "WAR_RISK_TIER_HIGH" | "WAR_RISK_TIER_CRITICAL" | "WAR_RISK_TIER_WAR_ZONE";
+export interface GetCriticalMineralsRequest {
+}
+
+export interface GetCriticalMineralsResponse {
+  minerals: CriticalMineral[];
+  fetchedAt: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface CriticalMineral {
+  mineral: string;
+  topProducers: MineralProducer[];
+  hhi: number;
+  riskRating: string;
+  globalProduction: number;
+  unit: string;
+}
+
+export interface MineralProducer {
+  country: string;
+  countryCode: string;
+  productionTonnes: number;
+  sharePct: number;
+}
+
+export interface ListEnergyDisruptionsRequest {
+  assetId: string;
+  assetType: string;
+  ongoingOnly: boolean;
+}
+
+export interface ListEnergyDisruptionsResponse {
+  events: EnergyDisruptionEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface EnergyDisruptionEntry {
+  id: string;
+  assetId: string;
+  assetType: string;
+  eventType: string;
+  startAt: string;
+  endAt: string;
+  capacityOfflineBcmYr: number;
+  capacityOfflineMbd: number;
+  causeChain: string[];
+  shortDescription: string;
+  sources: EnergyDisruptionSource[];
+  classifierVersion: string;
+  classifierConfidence: number;
+  lastEvidenceUpdate: string;
+  countries: string[];
+}
+
+export interface EnergyDisruptionSource {
+  authority: string;
+  title: string;
+  url: string;
+  date: string;
+  sourceType: string;
+}
+
+export interface ListFuelShortagesRequest {
+  country: string;
+  product: string;
+  severity: string;
+}
+
+export interface ListFuelShortagesResponse {
+  shortages: FuelShortageEntry[];
+  fetchedAt: string;
+  classifierVersion: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface FuelShortageEntry {
+  id: string;
+  country: string;
+  product: string;
+  severity: string;
+  firstSeen: string;
+  lastConfirmed: string;
+  resolvedAt: string;
+  impactTypes: string[];
+  causeChain: string[];
+  shortDescription: string;
+  evidence?: FuelShortageEvidence;
+}
+
+export interface FuelShortageEvidence {
+  evidenceSources: FuelShortageEvidenceSource[];
+  firstRegulatorConfirmation: string;
+  classifierVersion: string;
+  classifierConfidence: number;
+  lastEvidenceUpdate: string;
+}
+
+export interface FuelShortageEvidenceSource {
+  authority: string;
+  title: string;
+  url: string;
+  date: string;
+  sourceType: string;
+}
+
+export interface GetFuelShortageDetailRequest {
+  shortageId: string;
+}
+
+export interface GetFuelShortageDetailResponse {
+  shortage?: FuelShortageEntry;
+  fetchedAt: string;
+  unavailable: boolean;
+}
 
 export interface ListPipelinesRequest {
   commodityType: string;
@@ -128,14 +233,14 @@ export interface PipelineEntry {
   capacityMbd: number;
   lengthKm: number;
   inService: number;
-  startPoint?: LatLon;
-  endPoint?: LatLon;
-  waypoints: LatLon[];
+  startPoint?: GeoPoint;
+  endPoint?: GeoPoint;
+  waypoints: GeoPoint[];
   evidence?: PipelineEvidence;
   publicBadge: string;
 }
 
-export interface LatLon {
+export interface GeoPoint {
   lat: number;
   lon: number;
 }
@@ -202,7 +307,7 @@ export interface StorageFacilityEntry {
   operator: string;
   facilityType: string;
   country: string;
-  location?: StorageLatLon;
+  location?: GeoPoint;
   capacityTwh: number;
   capacityMb: number;
   capacityMtpa: number;
@@ -212,35 +317,17 @@ export interface StorageFacilityEntry {
   publicBadge: string;
 }
 
-export interface StorageLatLon {
-  lat: number;
-  lon: number;
-}
-
 export interface StorageEvidence {
   physicalState: string;
   physicalStateSource: string;
-  operatorStatement?: StorageOperatorStatement;
+  operatorStatement?: OperatorStatement;
   commercialState: string;
-  sanctionRefs: StorageSanctionRef[];
+  sanctionRefs: SanctionRef[];
   fillDisclosed: boolean;
   fillSource: string;
   lastEvidenceUpdate: string;
   classifierVersion: string;
   classifierConfidence: number;
-}
-
-export interface StorageOperatorStatement {
-  text: string;
-  url: string;
-  date: string;
-}
-
-export interface StorageSanctionRef {
-  authority: string;
-  listId: string;
-  date: string;
-  url: string;
 }
 
 export interface GetStorageFacilityDetailRequest {
@@ -262,123 +349,6 @@ export interface StorageFacilityRevisionEntry {
   trigger: string;
   sourcesUsed: string[];
   classifierVersion: string;
-}
-
-export interface ListFuelShortagesRequest {
-  country: string;
-  product: string;
-  severity: string;
-}
-
-export interface ListFuelShortagesResponse {
-  shortages: FuelShortageEntry[];
-  fetchedAt: string;
-  classifierVersion: string;
-  upstreamUnavailable: boolean;
-}
-
-export interface FuelShortageEntry {
-  id: string;
-  country: string;
-  product: string;
-  severity: string;
-  firstSeen: string;
-  lastConfirmed: string;
-  resolvedAt: string;
-  impactTypes: string[];
-  causeChain: string[];
-  shortDescription: string;
-  evidence?: FuelShortageEvidence;
-}
-
-export interface FuelShortageEvidence {
-  evidenceSources: FuelShortageEvidenceSource[];
-  firstRegulatorConfirmation: string;
-  classifierVersion: string;
-  classifierConfidence: number;
-  lastEvidenceUpdate: string;
-}
-
-export interface FuelShortageEvidenceSource {
-  authority: string;
-  title: string;
-  url: string;
-  date: string;
-  sourceType: string;
-}
-
-export interface GetFuelShortageDetailRequest {
-  shortageId: string;
-}
-
-export interface GetFuelShortageDetailResponse {
-  shortage?: FuelShortageEntry;
-  fetchedAt: string;
-  unavailable: boolean;
-}
-
-export interface ListEnergyDisruptionsRequest {
-  assetId: string;
-  assetType: string;
-  ongoingOnly: boolean;
-}
-
-export interface ListEnergyDisruptionsResponse {
-  events: EnergyDisruptionEntry[];
-  fetchedAt: string;
-  classifierVersion: string;
-  upstreamUnavailable: boolean;
-}
-
-export interface EnergyDisruptionEntry {
-  id: string;
-  assetId: string;
-  assetType: string;
-  eventType: string;
-  startAt: string;
-  endAt: string;
-  capacityOfflineBcmYr: number;
-  capacityOfflineMbd: number;
-  causeChain: string[];
-  shortDescription: string;
-  sources: EnergyDisruptionSource[];
-  classifierVersion: string;
-  classifierConfidence: number;
-  lastEvidenceUpdate: string;
-  countries: string[];
-}
-
-export interface EnergyDisruptionSource {
-  authority: string;
-  title: string;
-  url: string;
-  date: string;
-  sourceType: string;
-}
-
-export interface GetCriticalMineralsRequest {
-}
-
-export interface GetCriticalMineralsResponse {
-  minerals: CriticalMineral[];
-  fetchedAt: string;
-  upstreamUnavailable: boolean;
-}
-
-export interface CriticalMineral {
-  mineral: string;
-  topProducers: MineralProducer[];
-  hhi: number;
-  riskRating: string;
-  globalProduction: number;
-  unit: string;
-}
-
-export interface MineralProducer {
-  country: string;
-  countryCode: string;
-  productionTonnes: number;
-  sharePct: number;
 }
 
 export interface FieldViolation {
@@ -499,58 +469,181 @@ export class SupplyChainServiceClient {
   }
 
   async listEnergyDisruptions(req: ListEnergyDisruptionsRequest, options?: SupplyChainServiceCallOptions): Promise<ListEnergyDisruptionsResponse> {
-    const url = this.baseURL + "/api/supply-chain/v1/list-energy-disruptions";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    let path = "/api/supply-chain/v1/list-energy-disruptions";
+    const params = new URLSearchParams();
+    if (req.assetId != null && req.assetId !== "") params.set("asset_id", String(req.assetId));
+    if (req.assetType != null && req.assetType !== "") params.set("asset_type", String(req.assetType));
+    if (req.ongoingOnly) params.set("ongoing_only", String(req.ongoingOnly));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as ListEnergyDisruptionsResponse;
   }
 
   async listFuelShortages(req: ListFuelShortagesRequest, options?: SupplyChainServiceCallOptions): Promise<ListFuelShortagesResponse> {
-    const url = this.baseURL + "/api/supply-chain/v1/list-fuel-shortages";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    let path = "/api/supply-chain/v1/list-fuel-shortages";
+    const params = new URLSearchParams();
+    if (req.country != null && req.country !== "") params.set("country", String(req.country));
+    if (req.product != null && req.product !== "") params.set("product", String(req.product));
+    if (req.severity != null && req.severity !== "") params.set("severity", String(req.severity));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as ListFuelShortagesResponse;
   }
 
   async getFuelShortageDetail(req: GetFuelShortageDetailRequest, options?: SupplyChainServiceCallOptions): Promise<GetFuelShortageDetailResponse> {
-    const url = this.baseURL + "/api/supply-chain/v1/get-fuel-shortage-detail";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    let path = "/api/supply-chain/v1/get-fuel-shortage-detail";
+    const params = new URLSearchParams();
+    if (req.shortageId != null && req.shortageId !== "") params.set("shortage_id", String(req.shortageId));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetFuelShortageDetailResponse;
   }
 
   async listPipelines(req: ListPipelinesRequest, options?: SupplyChainServiceCallOptions): Promise<ListPipelinesResponse> {
-    const url = this.baseURL + "/api/supply-chain/v1/list-pipelines";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    let path = "/api/supply-chain/v1/list-pipelines";
+    const params = new URLSearchParams();
+    if (req.commodityType != null && req.commodityType !== "") params.set("commodity_type", String(req.commodityType));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as ListPipelinesResponse;
   }
 
   async getPipelineDetail(req: GetPipelineDetailRequest, options?: SupplyChainServiceCallOptions): Promise<GetPipelineDetailResponse> {
-    const url = this.baseURL + "/api/supply-chain/v1/get-pipeline-detail";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    let path = "/api/supply-chain/v1/get-pipeline-detail";
+    const params = new URLSearchParams();
+    if (req.pipelineId != null && req.pipelineId !== "") params.set("pipeline_id", String(req.pipelineId));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetPipelineDetailResponse;
   }
 
   async listStorageFacilities(req: ListStorageFacilitiesRequest, options?: SupplyChainServiceCallOptions): Promise<ListStorageFacilitiesResponse> {
-    const url = this.baseURL + "/api/supply-chain/v1/list-storage-facilities";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    let path = "/api/supply-chain/v1/list-storage-facilities";
+    const params = new URLSearchParams();
+    if (req.facilityType != null && req.facilityType !== "") params.set("facility_type", String(req.facilityType));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as ListStorageFacilitiesResponse;
   }
 
   async getStorageFacilityDetail(req: GetStorageFacilityDetailRequest, options?: SupplyChainServiceCallOptions): Promise<GetStorageFacilityDetailResponse> {
-    const url = this.baseURL + "/api/supply-chain/v1/get-storage-facility-detail";
-    const headers: Record<string, string> = { "Content-Type": "application/json", ...this.defaultHeaders, ...options?.headers };
-    const resp = await this.fetchFn(url, { method: "POST", headers, body: JSON.stringify(req), signal: options?.signal });
-    if (!resp.ok) return this.handleError(resp);
+    let path = "/api/supply-chain/v1/get-storage-facility-detail";
+    const params = new URLSearchParams();
+    if (req.facilityId != null && req.facilityId !== "") params.set("facility_id", String(req.facilityId));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
     return await resp.json() as GetStorageFacilityDetailResponse;
   }
 

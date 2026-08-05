@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+// OperatorStatement represents a public statement from a pipeline or facility operator.
+message OperatorStatement {
+  string text = 1;
+  string url = 2;
+  string date = 3;
+}
+
+// SanctionRef references a sanctions list entry relevant to physical/commercial state.
+message SanctionRef {
+  string authority = 1;
+  string list_id = 2;
+  string date = 3;
+  string url = 4;
+}

@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+import "worldmonitor/supply_chain/v1/geo_point.proto";
+import "worldmonitor/supply_chain/v1/evidence_common.proto";
+
+// StorageEvidence aggregates classifier metadata for a storage facility's operational state.
+message StorageEvidence {
+  string physical_state = 1;
+  string physical_state_source = 2;
+  OperatorStatement operator_statement = 3;
+  string commercial_state = 4;
+  repeated SanctionRef sanction_refs = 5;
+  bool fill_disclosed = 6;
+  string fill_source = 7;
+  string last_evidence_update = 8;
+  string classifier_version = 9;
+  double classifier_confidence = 10;
+}
+
+// StorageFacilityEntry represents a single energy storage facility (LNG, oil, gas).
+message StorageFacilityEntry {
+  string id = 1;
+  string name = 2;
+  string operator = 3;
+  string facility_type = 4;
+  string country = 5;
+  GeoPoint location = 6;
+  double capacity_twh = 7;
+  double capacity_mb = 8;
+  double capacity_mtpa = 9;
+  string working_capacity_unit = 10;
+  // Year the facility entered service.
+  int32 in_service = 11;
+  StorageEvidence evidence = 12;
+  // Derived public status badge (flowing/reduced/offline/disputed).
+  string public_badge = 13;
+}
+
+// StorageFacilityRevisionEntry represents a single tracked change to a facility's evidence record.
+message StorageFacilityRevisionEntry {
+  string date = 1;
+  string field_changed = 2;
+  string previous_value = 3;
+  string new_value = 4;
+  string trigger = 5;
+  repeated string sources_used = 6;
+  string classifier_version = 7;
+}

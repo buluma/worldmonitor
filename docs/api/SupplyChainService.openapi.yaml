@@ -78,6 +78,251 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Error'
+    /api/supply-chain/v1/list-energy-disruptions:
+        get:
+            tags:
+                - SupplyChainService
+            summary: ListEnergyDisruptions
+            operationId: ListEnergyDisruptions
+            parameters:
+                - name: asset_id
+                  in: query
+                  description: Optional asset identifier filter.
+                  required: false
+                  schema:
+                    type: string
+                - name: asset_type
+                  in: query
+                  description: Optional asset type filter (e.g. "pipeline", "storage").
+                  required: false
+                  schema:
+                    type: string
+                - name: ongoing_only
+                  in: query
+                  description: If true, only return events that are still ongoing.
+                  required: false
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListEnergyDisruptionsResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/supply-chain/v1/list-fuel-shortages:
+        get:
+            tags:
+                - SupplyChainService
+            summary: ListFuelShortages
+            operationId: ListFuelShortages
+            parameters:
+                - name: country
+                  in: query
+                  description: Optional ISO 3166-1 alpha-2 country filter.
+                  required: false
+                  schema:
+                    type: string
+                - name: product
+                  in: query
+                  description: Optional fuel product filter (e.g. "gasoline", "diesel").
+                  required: false
+                  schema:
+                    type: string
+                - name: severity
+                  in: query
+                  description: Optional severity filter.
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListFuelShortagesResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/supply-chain/v1/get-fuel-shortage-detail:
+        get:
+            tags:
+                - SupplyChainService
+            summary: GetFuelShortageDetail
+            operationId: GetFuelShortageDetail
+            parameters:
+                - name: shortage_id
+                  in: query
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetFuelShortageDetailResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/supply-chain/v1/list-pipelines:
+        get:
+            tags:
+                - SupplyChainService
+            summary: ListPipelines
+            operationId: ListPipelines
+            parameters:
+                - name: commodity_type
+                  in: query
+                  description: Optional commodity type filter (e.g. "gas", "oil").
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListPipelinesResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/supply-chain/v1/get-pipeline-detail:
+        get:
+            tags:
+                - SupplyChainService
+            summary: GetPipelineDetail
+            operationId: GetPipelineDetail
+            parameters:
+                - name: pipeline_id
+                  in: query
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetPipelineDetailResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/supply-chain/v1/list-storage-facilities:
+        get:
+            tags:
+                - SupplyChainService
+            summary: ListStorageFacilities
+            operationId: ListStorageFacilities
+            parameters:
+                - name: facility_type
+                  in: query
+                  description: Optional facility type filter (e.g. "lng", "oil", "gas").
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListStorageFacilitiesResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+    /api/supply-chain/v1/get-storage-facility-detail:
+        get:
+            tags:
+                - SupplyChainService
+            summary: GetStorageFacilityDetail
+            operationId: GetStorageFacilityDetail
+            parameters:
+                - name: facility_id
+                  in: query
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Successful response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetStorageFacilityDetailResponse'
+                "400":
+                    description: Validation error
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ValidationError'
+                default:
+                    description: Error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
 components:
     schemas:
         Error:
@@ -211,6 +456,8 @@ components:
                         $ref: '#/components/schemas/DirectionalDwt'
                 transitSummary:
                     $ref: '#/components/schemas/TransitSummary'
+                flowEstimate:
+                    $ref: '#/components/schemas/FlowEstimate'
         DirectionalDwt:
             type: object
             properties:
@@ -256,6 +503,11 @@ components:
                     type: string
                 riskReportAction:
                     type: string
+                dataAvailable:
+                    type: boolean
+                    description: |-
+                        True when this summary was built from a real pre-built transit-summaries
+                         seed rather than the zeroed fallback.
         TransitDayCount:
             type: object
             properties:
@@ -273,6 +525,27 @@ components:
                 total:
                     type: integer
                     format: int32
+        FlowEstimate:
+            type: object
+            properties:
+                currentMbd:
+                    type: number
+                    format: double
+                baselineMbd:
+                    type: number
+                    format: double
+                flowRatio:
+                    type: number
+                    format: double
+                disrupted:
+                    type: boolean
+                source:
+                    type: string
+                hazardAlertLevel:
+                    type: string
+                hazardAlertName:
+                    type: string
+            description: FlowEstimate represents an estimated oil/gas flow rate through a chokepoint.
         GetCriticalMineralsRequest:
             type: object
         GetCriticalMineralsResponse:
@@ -318,3 +591,479 @@ components:
                 sharePct:
                     type: number
                     format: double
+        ListEnergyDisruptionsRequest:
+            type: object
+            properties:
+                assetId:
+                    type: string
+                    description: Optional asset identifier filter.
+                assetType:
+                    type: string
+                    description: Optional asset type filter (e.g. "pipeline", "storage").
+                ongoingOnly:
+                    type: boolean
+                    description: If true, only return events that are still ongoing.
+            description: ListEnergyDisruptionsRequest specifies filters for energy disruption event retrieval.
+        ListEnergyDisruptionsResponse:
+            type: object
+            properties:
+                events:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnergyDisruptionEntry'
+                fetchedAt:
+                    type: string
+                classifierVersion:
+                    type: string
+                upstreamUnavailable:
+                    type: boolean
+            description: ListEnergyDisruptionsResponse contains classified energy disruption events.
+        EnergyDisruptionEntry:
+            type: object
+            properties:
+                id:
+                    type: string
+                assetId:
+                    type: string
+                assetType:
+                    type: string
+                eventType:
+                    type: string
+                startAt:
+                    type: string
+                endAt:
+                    type: string
+                capacityOfflineBcmYr:
+                    type: number
+                    format: double
+                capacityOfflineMbd:
+                    type: number
+                    format: double
+                causeChain:
+                    type: array
+                    items:
+                        type: string
+                shortDescription:
+                    type: string
+                sources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/EnergyDisruptionSource'
+                classifierVersion:
+                    type: string
+                classifierConfidence:
+                    type: number
+                    format: double
+                lastEvidenceUpdate:
+                    type: string
+                countries:
+                    type: array
+                    items:
+                        type: string
+            description: EnergyDisruptionEntry represents a single classified energy supply disruption event.
+        EnergyDisruptionSource:
+            type: object
+            properties:
+                authority:
+                    type: string
+                title:
+                    type: string
+                url:
+                    type: string
+                date:
+                    type: string
+                sourceType:
+                    type: string
+            description: EnergyDisruptionSource cites a source backing a classified energy disruption event.
+        ListFuelShortagesRequest:
+            type: object
+            properties:
+                country:
+                    type: string
+                    description: Optional ISO 3166-1 alpha-2 country filter.
+                product:
+                    type: string
+                    description: Optional fuel product filter (e.g. "gasoline", "diesel").
+                severity:
+                    type: string
+                    description: Optional severity filter.
+            description: ListFuelShortagesRequest specifies filters for fuel shortage event retrieval.
+        ListFuelShortagesResponse:
+            type: object
+            properties:
+                shortages:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/FuelShortageEntry'
+                fetchedAt:
+                    type: string
+                classifierVersion:
+                    type: string
+                upstreamUnavailable:
+                    type: boolean
+            description: ListFuelShortagesResponse contains classified fuel shortage events.
+        FuelShortageEntry:
+            type: object
+            properties:
+                id:
+                    type: string
+                country:
+                    type: string
+                product:
+                    type: string
+                severity:
+                    type: string
+                firstSeen:
+                    type: string
+                lastConfirmed:
+                    type: string
+                resolvedAt:
+                    type: string
+                impactTypes:
+                    type: array
+                    items:
+                        type: string
+                causeChain:
+                    type: array
+                    items:
+                        type: string
+                shortDescription:
+                    type: string
+                evidence:
+                    $ref: '#/components/schemas/FuelShortageEvidence'
+            description: FuelShortageEntry represents a single classified fuel shortage event.
+        FuelShortageEvidence:
+            type: object
+            properties:
+                evidenceSources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/FuelShortageEvidenceSource'
+                firstRegulatorConfirmation:
+                    type: string
+                classifierVersion:
+                    type: string
+                classifierConfidence:
+                    type: number
+                    format: double
+                lastEvidenceUpdate:
+                    type: string
+            description: FuelShortageEvidence aggregates classifier metadata for a fuel shortage event.
+        FuelShortageEvidenceSource:
+            type: object
+            properties:
+                authority:
+                    type: string
+                title:
+                    type: string
+                url:
+                    type: string
+                date:
+                    type: string
+                sourceType:
+                    type: string
+            description: FuelShortageEvidenceSource cites a source backing a classified fuel shortage event.
+        GetFuelShortageDetailRequest:
+            type: object
+            properties:
+                shortageId:
+                    type: string
+            description: GetFuelShortageDetailRequest identifies a single fuel shortage event.
+        GetFuelShortageDetailResponse:
+            type: object
+            properties:
+                shortage:
+                    $ref: '#/components/schemas/FuelShortageEntry'
+                fetchedAt:
+                    type: string
+                unavailable:
+                    type: boolean
+            description: GetFuelShortageDetailResponse contains a single fuel shortage event.
+        ListPipelinesRequest:
+            type: object
+            properties:
+                commodityType:
+                    type: string
+                    description: Optional commodity type filter (e.g. "gas", "oil").
+            description: ListPipelinesRequest specifies filters for pipeline retrieval.
+        ListPipelinesResponse:
+            type: object
+            properties:
+                pipelines:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PipelineEntry'
+                fetchedAt:
+                    type: string
+                classifierVersion:
+                    type: string
+                upstreamUnavailable:
+                    type: boolean
+            description: ListPipelinesResponse contains oil and gas pipelines.
+        PipelineEntry:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                operator:
+                    type: string
+                commodityType:
+                    type: string
+                fromCountry:
+                    type: string
+                toCountry:
+                    type: string
+                transitCountries:
+                    type: array
+                    items:
+                        type: string
+                capacityBcmYr:
+                    type: number
+                    format: double
+                capacityMbd:
+                    type: number
+                    format: double
+                lengthKm:
+                    type: number
+                    format: double
+                inService:
+                    type: integer
+                    format: int32
+                    description: Year the pipeline entered service.
+                startPoint:
+                    $ref: '#/components/schemas/GeoPoint'
+                endPoint:
+                    $ref: '#/components/schemas/GeoPoint'
+                waypoints:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GeoPoint'
+                evidence:
+                    $ref: '#/components/schemas/PipelineEvidence'
+                publicBadge:
+                    type: string
+                    description: Derived public status badge (flowing/reduced/offline/disputed).
+            description: PipelineEntry represents a single oil or gas pipeline.
+        GeoPoint:
+            type: object
+            properties:
+                lat:
+                    type: number
+                    format: double
+                lon:
+                    type: number
+                    format: double
+            description: |-
+                GeoPoint is a compact latitude/longitude pair used for pipeline routes and
+                 storage facility locations.
+        PipelineEvidence:
+            type: object
+            properties:
+                physicalState:
+                    type: string
+                physicalStateSource:
+                    type: string
+                operatorStatement:
+                    $ref: '#/components/schemas/OperatorStatement'
+                commercialState:
+                    type: string
+                sanctionRefs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SanctionRef'
+                lastEvidenceUpdate:
+                    type: string
+                classifierVersion:
+                    type: string
+                classifierConfidence:
+                    type: number
+                    format: double
+            description: PipelineEvidence aggregates classifier metadata for a pipeline's operational state.
+        OperatorStatement:
+            type: object
+            properties:
+                text:
+                    type: string
+                url:
+                    type: string
+                date:
+                    type: string
+            description: OperatorStatement represents a public statement from a pipeline or facility operator.
+        SanctionRef:
+            type: object
+            properties:
+                authority:
+                    type: string
+                listId:
+                    type: string
+                date:
+                    type: string
+                url:
+                    type: string
+            description: SanctionRef references a sanctions list entry relevant to physical/commercial state.
+        GetPipelineDetailRequest:
+            type: object
+            properties:
+                pipelineId:
+                    type: string
+            description: GetPipelineDetailRequest identifies a single pipeline.
+        GetPipelineDetailResponse:
+            type: object
+            properties:
+                pipeline:
+                    $ref: '#/components/schemas/PipelineEntry'
+                revisions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PipelineRevisionEntry'
+                fetchedAt:
+                    type: string
+                unavailable:
+                    type: boolean
+            description: GetPipelineDetailResponse contains a single pipeline and its evidence revision history.
+        PipelineRevisionEntry:
+            type: object
+            properties:
+                date:
+                    type: string
+                fieldChanged:
+                    type: string
+                previousValue:
+                    type: string
+                newValue:
+                    type: string
+                trigger:
+                    type: string
+                sourcesUsed:
+                    type: array
+                    items:
+                        type: string
+                classifierVersion:
+                    type: string
+            description: PipelineRevisionEntry represents a single tracked change to a pipeline's evidence record.
+        ListStorageFacilitiesRequest:
+            type: object
+            properties:
+                facilityType:
+                    type: string
+                    description: Optional facility type filter (e.g. "lng", "oil", "gas").
+            description: ListStorageFacilitiesRequest specifies filters for storage facility retrieval.
+        ListStorageFacilitiesResponse:
+            type: object
+            properties:
+                facilities:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/StorageFacilityEntry'
+                fetchedAt:
+                    type: string
+                classifierVersion:
+                    type: string
+                upstreamUnavailable:
+                    type: boolean
+            description: ListStorageFacilitiesResponse contains energy storage facilities.
+        StorageFacilityEntry:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                operator:
+                    type: string
+                facilityType:
+                    type: string
+                country:
+                    type: string
+                location:
+                    $ref: '#/components/schemas/GeoPoint'
+                capacityTwh:
+                    type: number
+                    format: double
+                capacityMb:
+                    type: number
+                    format: double
+                capacityMtpa:
+                    type: number
+                    format: double
+                workingCapacityUnit:
+                    type: string
+                inService:
+                    type: integer
+                    format: int32
+                    description: Year the facility entered service.
+                evidence:
+                    $ref: '#/components/schemas/StorageEvidence'
+                publicBadge:
+                    type: string
+                    description: Derived public status badge (flowing/reduced/offline/disputed).
+            description: StorageFacilityEntry represents a single energy storage facility (LNG, oil, gas).
+        StorageEvidence:
+            type: object
+            properties:
+                physicalState:
+                    type: string
+                physicalStateSource:
+                    type: string
+                operatorStatement:
+                    $ref: '#/components/schemas/OperatorStatement'
+                commercialState:
+                    type: string
+                sanctionRefs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SanctionRef'
+                fillDisclosed:
+                    type: boolean
+                fillSource:
+                    type: string
+                lastEvidenceUpdate:
+                    type: string
+                classifierVersion:
+                    type: string
+                classifierConfidence:
+                    type: number
+                    format: double
+            description: StorageEvidence aggregates classifier metadata for a storage facility's operational state.
+        GetStorageFacilityDetailRequest:
+            type: object
+            properties:
+                facilityId:
+                    type: string
+            description: GetStorageFacilityDetailRequest identifies a single storage facility.
+        GetStorageFacilityDetailResponse:
+            type: object
+            properties:
+                facility:
+                    $ref: '#/components/schemas/StorageFacilityEntry'
+                revisions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/StorageFacilityRevisionEntry'
+                fetchedAt:
+                    type: string
+                unavailable:
+                    type: boolean
+            description: GetStorageFacilityDetailResponse contains a single storage facility and its evidence revision history.
+        StorageFacilityRevisionEntry:
+            type: object
+            properties:
+                date:
+                    type: string
+                fieldChanged:
+                    type: string
+                previousValue:
+                    type: string
+                newValue:
+                    type: string
+                trigger:
+                    type: string
+                sourcesUsed:
+                    type: array
+                    items:
+                        type: string
+                classifierVersion:
+                    type: string
+            description: StorageFacilityRevisionEntry represents a single tracked change to a facility's evidence record.

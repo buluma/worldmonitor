@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+// EnergyDisruptionSource cites a source backing a classified energy disruption event.
+message EnergyDisruptionSource {
+  string authority = 1;
+  string title = 2;
+  string url = 3;
+  string date = 4;
+  string source_type = 5;
+}
+
+// EnergyDisruptionEntry represents a single classified energy supply disruption event.
+message EnergyDisruptionEntry {
+  string id = 1;
+  string asset_id = 2;
+  string asset_type = 3;
+  string event_type = 4;
+  string start_at = 5;
+  string end_at = 6;
+  double capacity_offline_bcm_yr = 7;
+  double capacity_offline_mbd = 8;
+  repeated string cause_chain = 9;
+  string short_description = 10;
+  repeated EnergyDisruptionSource sources = 11;
+  string classifier_version = 12;
+  double classifier_confidence = 13;
+  string last_evidence_update = 14;
+  repeated string countries = 15;
+}

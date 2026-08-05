@@ -6,6 +6,10 @@ import "sebuf/http/annotations.proto";
 import "worldmonitor/supply_chain/v1/get_shipping_rates.proto";
 import "worldmonitor/supply_chain/v1/get_chokepoint_status.proto";
 import "worldmonitor/supply_chain/v1/get_critical_minerals.proto";
+import "worldmonitor/supply_chain/v1/list_energy_disruptions.proto";
+import "worldmonitor/supply_chain/v1/list_fuel_shortages.proto";
+import "worldmonitor/supply_chain/v1/list_pipelines.proto";
+import "worldmonitor/supply_chain/v1/list_storage_facilities.proto";
 
 service SupplyChainService {
   option (sebuf.http.service_config) = {base_path: "/api/supply-chain/v1"};
@@ -20,5 +24,33 @@ service SupplyChainService {
 
   rpc GetCriticalMinerals(GetCriticalMineralsRequest) returns (GetCriticalMineralsResponse) {
     option (sebuf.http.config) = {path: "/get-critical-minerals", method: HTTP_METHOD_GET};
+  }
+
+  rpc ListEnergyDisruptions(ListEnergyDisruptionsRequest) returns (ListEnergyDisruptionsResponse) {
+    option (sebuf.http.config) = {path: "/list-energy-disruptions", method: HTTP_METHOD_GET};
+  }
+
+  rpc ListFuelShortages(ListFuelShortagesRequest) returns (ListFuelShortagesResponse) {
+    option (sebuf.http.config) = {path: "/list-fuel-shortages", method: HTTP_METHOD_GET};
+  }
+
+  rpc GetFuelShortageDetail(GetFuelShortageDetailRequest) returns (GetFuelShortageDetailResponse) {
+    option (sebuf.http.config) = {path: "/get-fuel-shortage-detail", method: HTTP_METHOD_GET};
+  }
+
+  rpc ListPipelines(ListPipelinesRequest) returns (ListPipelinesResponse) {
+    option (sebuf.http.config) = {path: "/list-pipelines", method: HTTP_METHOD_GET};
+  }
+
+  rpc GetPipelineDetail(GetPipelineDetailRequest) returns (GetPipelineDetailResponse) {
+    option (sebuf.http.config) = {path: "/get-pipeline-detail", method: HTTP_METHOD_GET};
+  }
+
+  rpc ListStorageFacilities(ListStorageFacilitiesRequest) returns (ListStorageFacilitiesResponse) {
+    option (sebuf.http.config) = {path: "/list-storage-facilities", method: HTTP_METHOD_GET};
+  }
+
+  rpc GetStorageFacilityDetail(GetStorageFacilityDetailRequest) returns (GetStorageFacilityDetailResponse) {
+    option (sebuf.http.config) = {path: "/get-storage-facility-detail", method: HTTP_METHOD_GET};
   }
 }

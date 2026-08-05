@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+import "sebuf/http/annotations.proto";
+import "worldmonitor/supply_chain/v1/fuel_shortage.proto";
+
+// ListFuelShortagesRequest specifies filters for fuel shortage event retrieval.
+message ListFuelShortagesRequest {
+  // Optional ISO 3166-1 alpha-2 country filter.
+  string country = 1 [(sebuf.http.query) = { name: "country" }];
+  // Optional fuel product filter (e.g. "gasoline", "diesel").
+  string product = 2 [(sebuf.http.query) = { name: "product" }];
+  // Optional severity filter.
+  string severity = 3 [(sebuf.http.query) = { name: "severity" }];
+}
+
+// ListFuelShortagesResponse contains classified fuel shortage events.
+message ListFuelShortagesResponse {
+  repeated FuelShortageEntry shortages = 1;
+  string fetched_at = 2;
+  string classifier_version = 3;
+  bool upstream_unavailable = 4;
+}
+
+// GetFuelShortageDetailRequest identifies a single fuel shortage event.
+message GetFuelShortageDetailRequest {
+  string shortage_id = 1 [(sebuf.http.query) = { name: "shortage_id" }];
+}
+
+// GetFuelShortageDetailResponse contains a single fuel shortage event.
+message GetFuelShortageDetailResponse {
+  FuelShortageEntry shortage = 1;
+  string fetched_at = 2;
+  bool unavailable = 3;
+}

@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+// GeoPoint is a compact latitude/longitude pair used for pipeline routes and
+// storage facility locations.
+message GeoPoint {
+  double lat = 1;
+  double lon = 2;
+}

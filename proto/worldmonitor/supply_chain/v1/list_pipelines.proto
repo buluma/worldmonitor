@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+import "sebuf/http/annotations.proto";
+import "worldmonitor/supply_chain/v1/pipeline.proto";
+
+// ListPipelinesRequest specifies filters for pipeline retrieval.
+message ListPipelinesRequest {
+  // Optional commodity type filter (e.g. "gas", "oil").
+  string commodity_type = 1 [(sebuf.http.query) = { name: "commodity_type" }];
+}
+
+// ListPipelinesResponse contains oil and gas pipelines.
+message ListPipelinesResponse {
+  repeated PipelineEntry pipelines = 1;
+  string fetched_at = 2;
+  string classifier_version = 3;
+  bool upstream_unavailable = 4;
+}
+
+// GetPipelineDetailRequest identifies a single pipeline.
+message GetPipelineDetailRequest {
+  string pipeline_id = 1 [(sebuf.http.query) = { name: "pipeline_id" }];
+}
+
+// GetPipelineDetailResponse contains a single pipeline and its evidence revision history.
+message GetPipelineDetailResponse {
+  PipelineEntry pipeline = 1;
+  repeated PipelineRevisionEntry revisions = 2;
+  string fetched_at = 3;
+  bool unavailable = 4;
+}

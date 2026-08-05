@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+import "sebuf/http/annotations.proto";
+import "worldmonitor/supply_chain/v1/energy_disruption.proto";
+
+// ListEnergyDisruptionsRequest specifies filters for energy disruption event retrieval.
+message ListEnergyDisruptionsRequest {
+  // Optional asset identifier filter.
+  string asset_id = 1 [(sebuf.http.query) = { name: "asset_id" }];
+  // Optional asset type filter (e.g. "pipeline", "storage").
+  string asset_type = 2 [(sebuf.http.query) = { name: "asset_type" }];
+  // If true, only return events that are still ongoing.
+  bool ongoing_only = 3 [(sebuf.http.query) = { name: "ongoing_only" }];
+}
+
+// ListEnergyDisruptionsResponse contains classified energy disruption events.
+message ListEnergyDisruptionsResponse {
+  repeated EnergyDisruptionEntry events = 1;
+  string fetched_at = 2;
+  string classifier_version = 3;
+  bool upstream_unavailable = 4;
+}

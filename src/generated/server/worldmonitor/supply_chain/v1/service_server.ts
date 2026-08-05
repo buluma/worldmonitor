@@ -51,6 +51,7 @@ export interface ChokepointInfo {
   directions: string[];
   directionalDwt: DirectionalDwt[];
   transitSummary?: TransitSummary;
+  flowEstimate?: FlowEstimate;
 }
 
 export interface DirectionalDwt {
@@ -90,6 +91,31 @@ export interface FlowEstimate {
   source: string;
   hazardAlertLevel: string;
   hazardAlertName: string;
+}
+
+export interface GetCriticalMineralsRequest {
+}
+
+export interface GetCriticalMineralsResponse {
+  minerals: CriticalMineral[];
+  fetchedAt: string;
+  upstreamUnavailable: boolean;
+}
+
+export interface CriticalMineral {
+  mineral: string;
+  topProducers: MineralProducer[];
+  hhi: number;
+  riskRating: string;
+  globalProduction: number;
+  unit: string;
+}
+
+export interface MineralProducer {
+  country: string;
+  countryCode: string;
+  productionTonnes: number;
+  sharePct: number;
 }
 
 export interface ListEnergyDisruptionsRequest {
@@ -207,22 +233,40 @@ export interface PipelineEntry {
   capacityMbd: number;
   lengthKm: number;
   inService: number;
-  startPoint?: { lat: number; lon: number };
-  endPoint?: { lat: number; lon: number };
-  waypoints: Array<{ lat: number; lon: number }>;
+  startPoint?: GeoPoint;
+  endPoint?: GeoPoint;
+  waypoints: GeoPoint[];
   evidence?: PipelineEvidence;
   publicBadge: string;
+}
+
+export interface GeoPoint {
+  lat: number;
+  lon: number;
 }
 
 export interface PipelineEvidence {
   physicalState: string;
   physicalStateSource: string;
-  operatorStatement?: { text: string; url: string; date: string };
+  operatorStatement?: OperatorStatement;
   commercialState: string;
-  sanctionRefs: Array<{ authority: string; listId: string; date: string; url: string }>;
+  sanctionRefs: SanctionRef[];
   lastEvidenceUpdate: string;
   classifierVersion: string;
   classifierConfidence: number;
+}
+
+export interface OperatorStatement {
+  text: string;
+  url: string;
+  date: string;
+}
+
+export interface SanctionRef {
+  authority: string;
+  listId: string;
+  date: string;
+  url: string;
 }
 
 export interface GetPipelineDetailRequest {
@@ -263,7 +307,7 @@ export interface StorageFacilityEntry {
   operator: string;
   facilityType: string;
   country: string;
-  location?: { lat: number; lon: number };
+  location?: GeoPoint;
   capacityTwh: number;
   capacityMb: number;
   capacityMtpa: number;
@@ -276,9 +320,9 @@ export interface StorageFacilityEntry {
 export interface StorageEvidence {
   physicalState: string;
   physicalStateSource: string;
-  operatorStatement?: { text: string; url: string; date: string };
+  operatorStatement?: OperatorStatement;
   commercialState: string;
-  sanctionRefs: Array<{ authority: string; listId: string; date: string; url: string }>;
+  sanctionRefs: SanctionRef[];
   fillDisclosed: boolean;
   fillSource: string;
   lastEvidenceUpdate: string;
@@ -305,31 +349,6 @@ export interface StorageFacilityRevisionEntry {
   trigger: string;
   sourcesUsed: string[];
   classifierVersion: string;
-}
-
-export interface GetCriticalMineralsRequest {
-}
-
-export interface GetCriticalMineralsResponse {
-  minerals: CriticalMineral[];
-  fetchedAt: string;
-  upstreamUnavailable: boolean;
-}
-
-export interface CriticalMineral {
-  mineral: string;
-  topProducers: MineralProducer[];
-  hhi: number;
-  riskRating: string;
-  globalProduction: number;
-  unit: string;
-}
-
-export interface MineralProducer {
-  country: string;
-  countryCode: string;
-  productionTonnes: number;
-  sharePct: number;
 }
 
 export interface FieldViolation {
@@ -505,27 +524,339 @@ export function createSupplyChainServiceRoutes(
         }
       },
     },
-    ...(['listEnergyDisruptions', 'listFuelShortages', 'getFuelShortageDetail', 'listPipelines', 'getPipelineDetail', 'listStorageFacilities', 'getStorageFacilityDetail'] as const).map(
-      (methodName) => ({
-        method: "POST",
-        path: `/api/supply-chain/v1/${methodName.replace(/([A-Z])/g, '-$1').toLowerCase()}`,
-        handler: async (req: Request): Promise<Response> => {
-          try {
-            const body = await req.json().catch(() => ({}));
-            const ctx: ServerContext = { request: req, pathParams: {}, headers: Object.fromEntries(req.headers.entries()) };
-            const result = await (handler as any)[methodName](ctx, body);
-            return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
-          } catch (err: unknown) {
-            if (err instanceof ValidationError) {
-              return new Response(JSON.stringify({ violations: err.violations }), { status: 400, headers: { "Content-Type": "application/json" } });
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/list-energy-disruptions",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: ListEnergyDisruptionsRequest = {
+            assetId: params.get("asset_id") ?? "",
+            assetType: params.get("asset_type") ?? "",
+            ongoingOnly: params.get("ongoing_only") === "true",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("listEnergyDisruptions", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
             }
-            if (options?.onError) return options.onError(err, req);
-            const message = err instanceof Error ? err.message : String(err);
-            return new Response(JSON.stringify({ message }), { status: 500, headers: { "Content-Type": "application/json" } });
           }
-        },
-      })
-    ),
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.listEnergyDisruptions(ctx, body);
+          return new Response(JSON.stringify(result as ListEnergyDisruptionsResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/list-fuel-shortages",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: ListFuelShortagesRequest = {
+            country: params.get("country") ?? "",
+            product: params.get("product") ?? "",
+            severity: params.get("severity") ?? "",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("listFuelShortages", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
+            }
+          }
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.listFuelShortages(ctx, body);
+          return new Response(JSON.stringify(result as ListFuelShortagesResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/get-fuel-shortage-detail",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: GetFuelShortageDetailRequest = {
+            shortageId: params.get("shortage_id") ?? "",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("getFuelShortageDetail", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
+            }
+          }
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.getFuelShortageDetail(ctx, body);
+          return new Response(JSON.stringify(result as GetFuelShortageDetailResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/list-pipelines",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: ListPipelinesRequest = {
+            commodityType: params.get("commodity_type") ?? "",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("listPipelines", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
+            }
+          }
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.listPipelines(ctx, body);
+          return new Response(JSON.stringify(result as ListPipelinesResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/get-pipeline-detail",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: GetPipelineDetailRequest = {
+            pipelineId: params.get("pipeline_id") ?? "",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("getPipelineDetail", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
+            }
+          }
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.getPipelineDetail(ctx, body);
+          return new Response(JSON.stringify(result as GetPipelineDetailResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/list-storage-facilities",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: ListStorageFacilitiesRequest = {
+            facilityType: params.get("facility_type") ?? "",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("listStorageFacilities", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
+            }
+          }
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.listStorageFacilities(ctx, body);
+          return new Response(JSON.stringify(result as ListStorageFacilitiesResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/get-storage-facility-detail",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: GetStorageFacilityDetailRequest = {
+            facilityId: params.get("facility_id") ?? "",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("getStorageFacilityDetail", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
+            }
+          }
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.getStorageFacilityDetail(ctx, body);
+          return new Response(JSON.stringify(result as GetStorageFacilityDetailResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
   ];
 }
 

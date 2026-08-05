@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+import "sebuf/http/annotations.proto";
+import "worldmonitor/supply_chain/v1/storage_facility.proto";
+
+// ListStorageFacilitiesRequest specifies filters for storage facility retrieval.
+message ListStorageFacilitiesRequest {
+  // Optional facility type filter (e.g. "lng", "oil", "gas").
+  string facility_type = 1 [(sebuf.http.query) = { name: "facility_type" }];
+}
+
+// ListStorageFacilitiesResponse contains energy storage facilities.
+message ListStorageFacilitiesResponse {
+  repeated StorageFacilityEntry facilities = 1;
+  string fetched_at = 2;
+  string classifier_version = 3;
+  bool upstream_unavailable = 4;
+}
+
+// GetStorageFacilityDetailRequest identifies a single storage facility.
+message GetStorageFacilityDetailRequest {
+  string facility_id = 1 [(sebuf.http.query) = { name: "facility_id" }];
+}
+
+// GetStorageFacilityDetailResponse contains a single storage facility and its evidence revision history.
+message GetStorageFacilityDetailResponse {
+  StorageFacilityEntry facility = 1;
+  repeated StorageFacilityRevisionEntry revisions = 2;
+  string fetched_at = 3;
+  bool unavailable = 4;
+}

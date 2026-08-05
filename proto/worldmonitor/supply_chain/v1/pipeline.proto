@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+import "worldmonitor/supply_chain/v1/geo_point.proto";
+import "worldmonitor/supply_chain/v1/evidence_common.proto";
+
+// PipelineEvidence aggregates classifier metadata for a pipeline's operational state.
+message PipelineEvidence {
+  string physical_state = 1;
+  string physical_state_source = 2;
+  OperatorStatement operator_statement = 3;
+  string commercial_state = 4;
+  repeated SanctionRef sanction_refs = 5;
+  string last_evidence_update = 6;
+  string classifier_version = 7;
+  double classifier_confidence = 8;
+}
+
+// PipelineEntry represents a single oil or gas pipeline.
+message PipelineEntry {
+  string id = 1;
+  string name = 2;
+  string operator = 3;
+  string commodity_type = 4;
+  string from_country = 5;
+  string to_country = 6;
+  repeated string transit_countries = 7;
+  double capacity_bcm_yr = 8;
+  double capacity_mbd = 9;
+  double length_km = 10;
+  // Year the pipeline entered service.
+  int32 in_service = 11;
+  GeoPoint start_point = 12;
+  GeoPoint end_point = 13;
+  repeated GeoPoint waypoints = 14;
+  PipelineEvidence evidence = 15;
+  // Derived public status badge (flowing/reduced/offline/disputed).
+  string public_badge = 16;
+}
+
+// PipelineRevisionEntry represents a single tracked change to a pipeline's evidence record.
+message PipelineRevisionEntry {
+  string date = 1;
+  string field_changed = 2;
+  string previous_value = 3;
+  string new_value = 4;
+  string trigger = 5;
+  repeated string sources_used = 6;
+  string classifier_version = 7;
+}

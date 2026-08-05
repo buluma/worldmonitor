@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package worldmonitor.supply_chain.v1;
+
+// FuelShortageEvidenceSource cites a source backing a classified fuel shortage event.
+message FuelShortageEvidenceSource {
+  string authority = 1;
+  string title = 2;
+  string url = 3;
+  string date = 4;
+  string source_type = 5;
+}
+
+// FuelShortageEvidence aggregates classifier metadata for a fuel shortage event.
+message FuelShortageEvidence {
+  repeated FuelShortageEvidenceSource evidence_sources = 1;
+  string first_regulator_confirmation = 2;
+  string classifier_version = 3;
+  double classifier_confidence = 4;
+  string last_evidence_update = 5;
+}
+
+// FuelShortageEntry represents a single classified fuel shortage event.
+message FuelShortageEntry {
+  string id = 1;
+  string country = 2;
+  string product = 3;
+  string severity = 4;
+  string first_seen = 5;
+  string last_confirmed = 6;
+  string resolved_at = 7;
+  repeated string impact_types = 8;
+  repeated string cause_chain = 9;
+  string short_description = 10;
+  FuelShortageEvidence evidence = 11;
+}
