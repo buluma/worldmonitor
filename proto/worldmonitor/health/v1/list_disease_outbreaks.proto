@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package worldmonitor.health.v1;
+
+import "sebuf/http/annotations.proto";
+import "worldmonitor/health/v1/disease_outbreak_item.proto";
+
+// ListDiseaseOutbreaksRequest has no filters -- returns the full cached outbreak set.
+message ListDiseaseOutbreaksRequest {
+}
+
+// ListDiseaseOutbreaksResponse contains cached disease outbreak events.
+message ListDiseaseOutbreaksResponse {
+  repeated DiseaseOutbreakItem outbreaks = 1;
+  // Cache fetch time as Unix epoch milliseconds.
+  int64 fetched_at = 2 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  // Version identifier for the alert-level classification methodology used.
+  string alert_level_methodology_version = 3;
+}

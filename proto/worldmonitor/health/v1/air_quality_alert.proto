@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package worldmonitor.health.v1;
+
+import "sebuf/http/annotations.proto";
+
+// AirQualityAlert represents a single city-level air quality alert.
+message AirQualityAlert {
+  string city = 1;
+  string country_code = 2;
+  double lat = 3;
+  double lng = 4;
+  // PM2.5 concentration in micrograms per cubic meter.
+  double pm25 = 5;
+  // Air Quality Index value.
+  double aqi = 6;
+  string risk_level = 7;
+  // Dominant pollutant driving the alert.
+  string pollutant = 8;
+  // Measurement time as Unix epoch milliseconds.
+  int64 measured_at = 9 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  string source = 10;
+}

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package worldmonitor.health.v1;
+
+import "sebuf/http/annotations.proto";
+
+// DiseaseOutbreakItem represents a single tracked disease outbreak event.
+message DiseaseOutbreakItem {
+  string id = 1;
+  string disease = 2;
+  string location = 3;
+  string country_code = 4;
+  string alert_level = 5;
+  string summary = 6;
+  string source_url = 7;
+  // Publication time as Unix epoch milliseconds.
+  int64 published_at = 8 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  string source_name = 9;
+  double lat = 10;
+  double lng = 11;
+  int32 cases = 12;
+}
