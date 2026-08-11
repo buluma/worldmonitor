@@ -684,8 +684,8 @@ async function seedNotamClosures() {
     const restrictionCode45 = code45 === 'RE' || code45 === 'RT';
     const isClosureCode = NOTAM_CLOSURE_QCODES.has(code23) && closureCode45;
     const isRestrictionCode = (NOTAM_RESTRICTION_QCODES.has(code23) || NOTAM_CLOSURE_QCODES.has(code23)) && restrictionCode45;
-    const isClosureText = /(AD CLSD|AIRPORT CLOSED|AIRSPACE CLOSED|AD NOT AVBL|CLSD TO ALL)/.test(text);
-    const isRestrictionText = /(RESTRICTED AREA|PROHIBITED AREA|DANGER AREA|TFR|TEMPORARY FLIGHT RESTRICTION)/.test(text);
+    const isClosureText = /\b(AD CLSD|AIRPORT CLOSED|AIRSPACE CLOSED|AD NOT AVBL|CLSD TO ALL)\b/.test(text);
+    const isRestrictionText = /\b(RESTRICTED AREA|PROHIBITED AREA|DANGER AREA|TFR|TEMPORARY FLIGHT RESTRICTION)\b/.test(text);
     // Closure wins over restriction for the same NOTAM (mirrors _shared.ts
     // if/else chain at line 446-452).
     if (isClosureCode || isClosureText) {

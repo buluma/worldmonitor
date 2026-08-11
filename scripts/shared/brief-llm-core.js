@@ -454,7 +454,7 @@ const SENTENCE_START_AMBIGUOUS = new Set([
  *   "end of sentence."               → "end of sentence."    (single dot, no run)
  */
 function normalizeDottedAcronyms(text) {
-  return text.replace(/([A-Z]\.(?:[A-Z]\.?)+)/g, (match) => match.replace(/\./g, ''));
+  return text.replace(/(\b[A-Z]\.(?:[A-Z]\.?)+)/g, (match) => match.replace(/\./g, ''));
 }
 
 export function extractProperNounSequences(text) {
