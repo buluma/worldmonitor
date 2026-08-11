@@ -48,6 +48,39 @@ const QUERY_REGIONS = [
   { name: 'WESTERN', lamin: 13, lamax: 85, lomin: -10, lomax: 57 },
 ];
 
+// ── Keyless ADS-B Endpoints ───────────────────────────────
+const ADSBLOL_MIL_ENDPOINT = 'https://api.adsb.lol/v2/mil';
+const AIRPLANES_LIVE_POINT_ENDPOINT = 'https://api.airplanes.live/v2/point';
+const ADSB_FI_POINT_ENDPOINT = 'https://opendata.adsb.fi/api/v3';
+
+// Both point-query gap-fill providers restrict their public APIs to
+// non-commercial use, so gap-fill stays fail-closed (off) unless an operator
+// explicitly opts in for a deployment they've confirmed is eligible.
+const GAP_FILL_NONCOMMERCIAL_ENABLED = process.env.WM_ENABLE_NONCOMMERCIAL_ADSB_GAP_FILL === '1';
+
+// ── Optional regional gap-fill points ─────────────────────
+// adsb.lol's /v2/mil is global but readsb-derived and can miss aircraft in
+// regions with sparse ADS-B receiver coverage. These point queries backfill
+// those blind spots when the primary source comes back empty.
+const BLIND_SPOT_REGIONS = [
+  { name: 'Yekaterinburg', lat: 56.8, lon: 60.6, radiusNm: 250 },
+  { name: 'Novosibirsk',   lat: 55.0, lon: 82.9, radiusNm: 250 },
+  { name: 'Krasnoyarsk',   lat: 56.0, lon: 92.9, radiusNm: 250 },
+  { name: 'Vladivostok',   lat: 43.1, lon: 131.9, radiusNm: 250 },
+  { name: 'Urumqi',        lat: 43.8, lon: 87.6, radiusNm: 250 },
+  { name: 'Chengdu',       lat: 30.6, lon: 104.1, radiusNm: 250 },
+  { name: 'Lagos-Accra',   lat: 6.5,  lon: 3.4,  radiusNm: 250 },
+  { name: 'Addis Ababa',   lat: 9.0,  lon: 38.7, radiusNm: 250 },
+];
+
+// Both gap-fill providers publish a 1 request/second ceiling. Calls alternate
+// between providers, so a one-second delay between every outbound request is
+// safely below each provider's own limit. The total budget keeps a degraded
+// provider from outliving the seeder lock.
+const GAP_FILL_STAGGER_MS = 1_000;
+const GAP_FILL_REQUEST_TIMEOUT_MS = 5_000;
+const GAP_FILL_TOTAL_BUDGET_MS = 45_000;
+
 // ── Military Hex Ranges (ICAO 24-bit) ─────────────────────
 const HEX_RANGES = [
   { start: 'ADF7C8', end: 'AFFFFF', operator: 'usaf', country: 'USA' },
@@ -380,6 +413,7 @@ function createClassificationStageCounters() {
       militaryHint: 0,
       militaryOperatorHint: 0,
       commercialHint: 0,
+      authoritativeMilitary: 0,
     },
     sourceRawKeyCounts: {},
     rawKeyOnlyCandidates: 0,
@@ -409,6 +443,7 @@ function recordSourceCoverage(stageCounters, sourceMeta = {}, sourceHints = {}, 
   if (sourceHints.militaryHint) stageCounters.sourceHintCounts.militaryHint += 1;
   if (sourceHints.militaryOperatorHint) stageCounters.sourceHintCounts.militaryOperatorHint += 1;
   if (sourceHints.commercialHint) stageCounters.sourceHintCounts.commercialHint += 1;
+  if (sourceHints.authoritativeMilitary) stageCounters.sourceHintCounts.authoritativeMilitary += 1;
   if (sourceOperator) stageCounters.sourceOperatorCandidateHits += 1;
   if (sourceType !== 'unknown') stageCounters.sourceTypeCandidateHits += 1;
   for (const rawKey of sourceMeta.rawKeys || []) {
@@ -427,10 +462,15 @@ function recordSourceCoverage(stageCounters, sourceMeta = {}, sourceHints = {}, 
 
 function deriveSourceHints(sourceMeta = {}) {
   const hintText = getSourceHintText(sourceMeta);
+  // adsb.lol's /v2/mil endpoint is itself an authoritative military
+  // selection (readsb dbFlags bit 0), so a record from it counts as
+  // military evidence even with no callsign/hex match -- see buildAdsbSourceMeta.
+  const authoritativeMilitary = sourceMeta.authoritativeMilitary === true;
   return {
     hintText,
-    militaryHint: /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|MILIT|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|USAF|USN|USMC|RAF|RCAF|RAAF|NATO|PLAAF|PLAN|VKS|RECON|AWACS|TANKER|AIRLIFT|FIGHTER|BOMBER|DRONE)/.test(hintText),
-    militaryOperatorHint: /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|EMIRI AIR FORCE|ROYAL .* AIR FORCE|AEROSPACE FORCES|PLAAF|PLAN|NATO)/.test(hintText),
+    authoritativeMilitary,
+    militaryHint: authoritativeMilitary || /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|MILIT|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|\bUSAF\b|\bUSN\b|\bUSMC\b|\bRAF\b|\bRCAF\b|\bRAAF\b|NATO|\bPLAAF\b|\bPLAN\b|\bVKS\b|RECON|AWACS|TANKER|AIRLIFT|FIGHTER|BOMBER|DRONE)/.test(hintText),
+    militaryOperatorHint: /(AIR FORCE|AIR ?SELF ?DEFEN[CS]E|NAVY|MARINE|ARMY|DEFEN[CS]E|SQUADRON|EMIRI AIR FORCE|ROYAL .* AIR FORCE|AEROSPACE FORCES|\bPLAAF\b|\bPLAN\b|NATO)/.test(hintText),
     commercialHint: /(AIRLINES|AIRWAYS|LOGISTICS|EXPRESS|CARGOLUX|TURKISH AIRLINES|ETHIOPIAN AIRLINES|QATAR AIRWAYS|EMIRATES SKYCARGO|SAUDIA)/.test(hintText),
   };
 }
@@ -451,30 +491,30 @@ function detectAircraftTypeFromSourceMeta(sourceMeta = {}) {
 function deriveOperatorFromSourceMeta(sourceMeta = {}) {
   const hintText = getSourceHintText(sourceMeta);
   if (!hintText) return null;
-  if (/PEOPLE'?S LIBERATION ARMY AIR FORCE|PLAAF|CHINESE AIR FORCE/.test(hintText)) return { operator: 'plaaf', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
-  if (/PEOPLE'?S LIBERATION ARMY NAVY|PLAN/.test(hintText)) return { operator: 'plan', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
-  if (/UNITED STATES AIR FORCE|US AIR FORCE|USAF/.test(hintText)) return { operator: 'usaf', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
-  if (/UNITED STATES NAVY|US NAVY|USN/.test(hintText)) return { operator: 'usn', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
-  if (/UNITED STATES MARINE CORPS|US MARINE|USMC/.test(hintText)) return { operator: 'usmc', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
+  if (/PEOPLE'?S LIBERATION ARMY AIR FORCE|\bPLAAF\b|CHINESE AIR FORCE/.test(hintText)) return { operator: 'plaaf', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
+  if (/PEOPLE'?S LIBERATION ARMY NAVY|\bPLAN\b/.test(hintText)) return { operator: 'plan', operatorCountry: 'China', reason: 'source_operator', confidence: 'high' };
+  if (/UNITED STATES AIR FORCE|US AIR FORCE|\bUSAF\b/.test(hintText)) return { operator: 'usaf', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
+  if (/UNITED STATES NAVY|US NAVY|\bUSN\b/.test(hintText)) return { operator: 'usn', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
+  if (/UNITED STATES MARINE CORPS|US MARINE|\bUSMC\b/.test(hintText)) return { operator: 'usmc', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
   if (/UNITED STATES ARMY|US ARMY/.test(hintText)) return { operator: 'usa', operatorCountry: 'USA', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL AIR FORCE|RAF/.test(hintText)) return { operator: 'raf', operatorCountry: 'UK', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL AIR FORCE|\bRAF\b/.test(hintText)) return { operator: 'raf', operatorCountry: 'UK', reason: 'source_operator', confidence: 'high' };
   if (/ROYAL NAVY/.test(hintText)) return { operator: 'rn', operatorCountry: 'UK', reason: 'source_operator', confidence: 'high' };
-  if (/FRENCH AIR FORCE|ARMEE DE L'?AIR|ARMÉE DE L'?AIR|FAF/.test(hintText)) return { operator: 'faf', operatorCountry: 'France', reason: 'source_operator', confidence: 'high' };
-  if (/GERMAN AIR FORCE|LUFTWAFFE|GAF/.test(hintText)) return { operator: 'gaf', operatorCountry: 'Germany', reason: 'source_operator', confidence: 'high' };
-  if (/ISRAELI AIR FORCE|IAF/.test(hintText)) return { operator: 'iaf', operatorCountry: 'Israel', reason: 'source_operator', confidence: 'high' };
+  if (/FRENCH AIR FORCE|ARMEE DE L'?AIR|ARMÉE DE L'?AIR|\bFAF\b/.test(hintText)) return { operator: 'faf', operatorCountry: 'France', reason: 'source_operator', confidence: 'high' };
+  if (/GERMAN AIR FORCE|LUFTWAFFE|\bGAF\b/.test(hintText)) return { operator: 'gaf', operatorCountry: 'Germany', reason: 'source_operator', confidence: 'high' };
+  if (/ISRAELI AIR FORCE|\bIAF\b/.test(hintText)) return { operator: 'iaf', operatorCountry: 'Israel', reason: 'source_operator', confidence: 'high' };
   if (/NATO/.test(hintText)) return { operator: 'nato', operatorCountry: 'NATO', reason: 'source_operator', confidence: 'high' };
-  if (/QATAR EMIRI AIR FORCE|QEAF/.test(hintText)) return { operator: 'qeaf', operatorCountry: 'Qatar', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL SAUDI AIR FORCE|RSAF/.test(hintText)) return { operator: 'rsaf', operatorCountry: 'Saudi Arabia', reason: 'source_operator', confidence: 'high' };
-  if (/TURKISH AIR FORCE|TURAF|TRKAF/.test(hintText)) return { operator: 'turaf', operatorCountry: 'Turkey', reason: 'source_operator', confidence: 'high' };
+  if (/QATAR EMIRI AIR FORCE|\bQEAF\b/.test(hintText)) return { operator: 'qeaf', operatorCountry: 'Qatar', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL SAUDI AIR FORCE|\bRSAF\b/.test(hintText)) return { operator: 'rsaf', operatorCountry: 'Saudi Arabia', reason: 'source_operator', confidence: 'high' };
+  if (/TURKISH AIR FORCE|\bTURAF\b|\bTRKAF\b/.test(hintText)) return { operator: 'turaf', operatorCountry: 'Turkey', reason: 'source_operator', confidence: 'high' };
   if (/UNITED ARAB EMIRATES AIR FORCE|UAE AIR FORCE|EMIRATI AIR FORCE/.test(hintText)) return { operator: 'uaeaf', operatorCountry: 'UAE', reason: 'source_operator', confidence: 'high' };
   if (/KUWAIT AIR FORCE/.test(hintText)) return { operator: 'kuwaf', operatorCountry: 'Kuwait', reason: 'source_operator', confidence: 'high' };
   if (/EGYPTIAN AIR FORCE/.test(hintText)) return { operator: 'egyaf', operatorCountry: 'Egypt', reason: 'source_operator', confidence: 'high' };
-  if (/PAKISTAN AIR FORCE|PAF/.test(hintText)) return { operator: 'paf', operatorCountry: 'Pakistan', reason: 'source_operator', confidence: 'high' };
-  if (/JASDF|JAPAN AIR SELF DEFENSE FORCE/.test(hintText)) return { operator: 'jasdf', operatorCountry: 'Japan', reason: 'source_operator', confidence: 'high' };
-  if (/ROKAF|REPUBLIC OF KOREA AIR FORCE/.test(hintText)) return { operator: 'rokaf', operatorCountry: 'South Korea', reason: 'source_operator', confidence: 'high' };
-  if (/RUSSIAN AEROSPACE FORCES|VKS/.test(hintText)) return { operator: 'vks', operatorCountry: 'Russia', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL AUSTRALIAN AIR FORCE|RAAF/.test(hintText)) return { operator: 'raaf', operatorCountry: 'Australia', reason: 'source_operator', confidence: 'high' };
-  if (/ROYAL CANADIAN AIR FORCE|RCAF|CANADIAN ARMED FORCES/.test(hintText)) return { operator: 'rcaf', operatorCountry: 'Canada', reason: 'source_operator', confidence: 'high' };
+  if (/PAKISTAN AIR FORCE|\bPAF\b/.test(hintText)) return { operator: 'paf', operatorCountry: 'Pakistan', reason: 'source_operator', confidence: 'high' };
+  if (/\bJASDF\b|JAPAN AIR SELF DEFENSE FORCE/.test(hintText)) return { operator: 'jasdf', operatorCountry: 'Japan', reason: 'source_operator', confidence: 'high' };
+  if (/\bROKAF\b|REPUBLIC OF KOREA AIR FORCE/.test(hintText)) return { operator: 'rokaf', operatorCountry: 'South Korea', reason: 'source_operator', confidence: 'high' };
+  if (/RUSSIAN AEROSPACE FORCES|\bVKS\b/.test(hintText)) return { operator: 'vks', operatorCountry: 'Russia', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL AUSTRALIAN AIR FORCE|\bRAAF\b/.test(hintText)) return { operator: 'raaf', operatorCountry: 'Australia', reason: 'source_operator', confidence: 'high' };
+  if (/ROYAL CANADIAN AIR FORCE|\bRCAF\b|CANADIAN ARMED FORCES/.test(hintText)) return { operator: 'rcaf', operatorCountry: 'Canada', reason: 'source_operator', confidence: 'high' };
   return null;
 }
 
@@ -523,7 +563,7 @@ function clearOpenSkyToken() {
 }
 
 function isOpenSkyUnauthorizedError(error) {
-  return /HTTP 401/i.test(String(error?.message || error || ''));
+  return /HTTP 401\b/i.test(String(error?.message || error || ''));
 }
 
 function getOpenSkyAuthStatus() {
@@ -822,13 +862,230 @@ async function fetchWingbits() {
   return states;
 }
 
-// ── Fetch All States (Wingbits first, OpenSky supplements) ─
+// ── Keyless ADS-B: adsb.lol primary + optional gap-fill ────
+function normalizeResponseNowMs(value, fallbackMs = Date.now()) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallbackMs;
+  return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+}
+
+function parseAircraftResponse(data, sourceName) {
+  if (!data || !Array.isArray(data.ac)) {
+    const keys = data && typeof data === 'object' ? Object.keys(data).join(',') : typeof data;
+    throw new Error(`${sourceName} unexpected response shape (expected ac array; keys: ${keys || 'none'})`);
+  }
+  return {
+    aircraft: data.ac,
+    responseNowMs: normalizeResponseNowMs(data.now),
+  };
+}
+
+function buildAdsbSourceMeta(flight, sourceName) {
+  const dbFlags = Number(flight?.dbFlags);
+  // readsb/ADSBExchange-compatible dbFlags bit 0 marks a military database
+  // record. The adsb.lol /v2/mil endpoint is itself an authoritative military
+  // selection even if a future response omits dbFlags on an individual row.
+  const authoritativeMilitary = sourceName === 'adsb.lol'
+    || (Number.isInteger(dbFlags) && (dbFlags & 1) === 1);
+  const knownHex = flight?.hex ? isKnownHex(String(flight.hex).replace(/~/g, '')) : null;
+  const originCountry = knownHex?.country || '';
+
+  return {
+    source: sourceName,
+    authoritativeMilitary,
+    rawKeys: Object.keys(flight || {}),
+    rawPreview: {
+      hex: flight?.hex || '',
+      flight: flight?.flight || '',
+      type: flight?.type || '',
+      r: flight?.r || '',
+      t: flight?.t || '',
+      desc: flight?.desc || '',
+      category: flight?.category || '',
+      dbFlags: flight?.dbFlags,
+    },
+    operatorName: '',
+    operatorCode: '',
+    ownerName: '',
+    aircraftModel: flight?.desc || flight?.t || '',
+    aircraftTypeLabel: flight?.t || '',
+    aircraftTypeCode: flight?.t || '',
+    aircraftDescription: flight?.desc || '',
+    registration: flight?.r || '',
+    originCountry,
+  };
+}
+
+function convertToStates(aircraft, sourceName, seenIds, allStates, responseNowMs = Date.now()) {
+  let added = 0;
+  const responseNowSeconds = normalizeResponseNowMs(responseNowMs) / 1000;
+  for (const a of aircraft) {
+    const icao24 = (a.hex || '').trim().replace(/~/g, '');
+    if (!icao24 || seenIds.has(icao24)) continue;
+    const lat = a.lat;
+    const lon = a.lon;
+    if (lat == null || lon == null) continue;
+    seenIds.add(icao24);
+
+    const callsign = (a.flight || '').trim();
+    const altBaro = a.alt_baro;
+    const onGround = typeof altBaro === 'string' && altBaro === 'ground';
+    const altMeters = typeof altBaro === 'number' ? altBaro * 0.3048 : null;
+    const velocityMs = a.gs != null ? a.gs * 0.514444 : null;
+    const vertRateMs = a.baro_rate != null ? a.baro_rate * 0.00508 : null;
+    const seenSeconds = Number(a.seen);
+    const seenPositionSeconds = Number(a.seen_pos);
+    const lastContact = Number.isFinite(seenSeconds)
+      ? responseNowSeconds - Math.max(0, seenSeconds)
+      : responseNowSeconds;
+    const timePosition = Number.isFinite(seenPositionSeconds)
+      ? responseNowSeconds - Math.max(0, seenPositionSeconds)
+      : null;
+    const sourceMeta = buildAdsbSourceMeta(a, sourceName);
+
+    allStates.push([
+      icao24,
+      callsign,
+      sourceMeta.originCountry,
+      timePosition,
+      lastContact,
+      lon,
+      lat,
+      altMeters,
+      onGround,
+      velocityMs,
+      a.track || 0,
+      vertRateMs,
+      null,
+      a.alt_geom != null ? a.alt_geom * 0.3048 : null,
+      a.squawk || null,
+      sourceMeta,
+    ]);
+    added++;
+  }
+  return added;
+}
+
+async function fetchAdsbLol() {
+  console.log(`  [adsb.lol] GET ${ADSBLOL_MIL_ENDPOINT}`);
+  const resp = await fetch(ADSBLOL_MIL_ENDPOINT, {
+    headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`adsb.lol HTTP ${resp.status}: ${body.substring(0, 200)}`);
+  }
+  const parsed = parseAircraftResponse(await resp.json(), 'adsb.lol');
+  console.log(`  [adsb.lol] ${parsed.aircraft.length} military aircraft globally`);
+
+  const states = [];
+  convertToStates(parsed.aircraft, 'adsb.lol', new Set(), states, parsed.responseNowMs);
+  return states;
+}
+
+// ── Gap-fill: airplanes.live + adsb.fi point queries ──────
+async function fetchAirplanesLivePoint(lat, lon, radiusNm, timeoutMs = GAP_FILL_REQUEST_TIMEOUT_MS) {
+  const url = `${AIRPLANES_LIVE_POINT_ENDPOINT}/${lat}/${lon}/${radiusNm}`;
+  const resp = await fetch(url, {
+    headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`airplanes.live HTTP ${resp.status}: ${body.substring(0, 200)}`);
+  }
+  return parseAircraftResponse(await resp.json(), 'airplanes.live');
+}
+
+async function fetchAdsbFiPoint(lat, lon, dist, timeoutMs = GAP_FILL_REQUEST_TIMEOUT_MS) {
+  const url = `${ADSB_FI_POINT_ENDPOINT}/lat/${lat}/lon/${lon}/dist/${dist}`;
+  const resp = await fetch(url, {
+    headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`adsb.fi HTTP ${resp.status}: ${body.substring(0, 200)}`);
+  }
+  // adsb.fi v3 is ADSBExchange-compatible and returns `ac`, not `aircraft`.
+  return parseAircraftResponse(await resp.json(), 'adsb.fi');
+}
+
+async function fetchGapFillStates(seenIds, allStates, {
+  now = Date.now,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  requestTimeoutMs = GAP_FILL_REQUEST_TIMEOUT_MS,
+  staggerMs = GAP_FILL_STAGGER_MS,
+  totalBudgetMs = GAP_FILL_TOTAL_BUDGET_MS,
+} = {}) {
+  const startedAt = now();
+  let totalAdded = 0;
+  const remainingMs = () => totalBudgetMs - (now() - startedAt);
+  const pause = async () => {
+    const waitMs = Math.min(staggerMs, Math.max(0, remainingMs()));
+    if (waitMs > 0) await sleep(waitMs);
+  };
+
+  for (const region of BLIND_SPOT_REGIONS) {
+    if (remainingMs() <= 0) {
+      console.warn(`  [Gap-fill] ${totalBudgetMs}ms budget exhausted; remaining regions skipped`);
+      break;
+    }
+    const regionAdded = { airplanes: 0, adsbFi: 0 };
+
+    try {
+      const result = await fetchAirplanesLivePoint(
+        region.lat,
+        region.lon,
+        region.radiusNm,
+        Math.max(1, Math.min(requestTimeoutMs, remainingMs())),
+      );
+      const added = convertToStates(result.aircraft, 'airplanes.live', seenIds, allStates, result.responseNowMs);
+      regionAdded.airplanes = added;
+      totalAdded += added;
+    } catch (e) {
+      console.warn(`  [airplanes.live] ${region.name}: ${e.message}`);
+    }
+
+    await pause();
+    if (remainingMs() <= 0) break;
+
+    try {
+      const result = await fetchAdsbFiPoint(
+        region.lat,
+        region.lon,
+        region.radiusNm,
+        Math.max(1, Math.min(requestTimeoutMs, remainingMs())),
+      );
+      const added = convertToStates(result.aircraft, 'adsb.fi', seenIds, allStates, result.responseNowMs);
+      regionAdded.adsbFi = added;
+      totalAdded += added;
+    } catch (e) {
+      console.warn(`  [adsb.fi] ${region.name}: ${e.message}`);
+    }
+
+    await pause();
+
+    const total = regionAdded.airplanes + regionAdded.adsbFi;
+    if (total > 0) {
+      console.log(`  [Gap-fill] ${region.name}: +${total} (airplanes.live=${regionAdded.airplanes}, adsb.fi=${regionAdded.adsbFi})`);
+    }
+  }
+  return totalAdded;
+}
+
+// ── Fetch All States (adsb.lol primary, Wingbits + OpenSky supplement) ─
 async function fetchAllStates() {
   const seenIds = new Set();
   const allStates = [];
   const source = { value: 'none' };
   const oauthConfigured = Boolean(process.env.OPENSKY_CLIENT_ID && process.env.OPENSKY_CLIENT_SECRET);
   const fetchSources = {
+    adsbLolUsed: false,
+    gapFillEnabled: GAP_FILL_NONCOMMERCIAL_ENABLED,
+    gapFillAttempted: false,
+    gapFillUsed: false,
     wingbitsUsed: false,
     oauthConfigured,
     proxyEnabled: PROXY_ENABLED,
@@ -837,7 +1094,25 @@ async function fetchAllStates() {
     regions: [],
   };
 
-  // Tier 1: Wingbits — no proxy needed, fast, reliable
+  // Tier 1: adsb.lol /v2/mil — one keyless global call, no key/proxy needed.
+  try {
+    const adsbStates = await fetchAdsbLol();
+    for (const state of adsbStates) {
+      const icao24 = state[0];
+      if (seenIds.has(icao24)) continue;
+      seenIds.add(icao24);
+      allStates.push(state);
+    }
+    if (adsbStates.length > 0) {
+      source.value = 'adsb.lol';
+      fetchSources.adsbLolUsed = true;
+      console.log(`  [adsb.lol] ${adsbStates.length} unique aircraft loaded`);
+    }
+  } catch (e) {
+    console.warn(`  [adsb.lol] ${e.message}`);
+  }
+
+  // Tier 2: Wingbits — no proxy needed, fast, reliable
   try {
     const wbStates = await fetchWingbits();
     for (const state of wbStates) {
@@ -847,7 +1122,7 @@ async function fetchAllStates() {
       allStates.push(state);
     }
     if (wbStates.length > 0) {
-      source.value = 'wingbits';
+      if (source.value === 'none') source.value = 'wingbits';
       fetchSources.wingbitsUsed = true;
       console.log(`  [Wingbits] ${wbStates.length} unique aircraft loaded`);
     }
@@ -857,6 +1132,26 @@ async function fetchAllStates() {
 
   for (const region of QUERY_REGIONS) {
     await fetchOpenSkyRegion(region, { source, fetchSources, seenIds, allStates });
+  }
+
+  // Tier 4: optional non-commercial gap-fill for adsb.lol's readsb blind
+  // spots. Only useful when the global primary came back empty, and
+  // fail-closed by default (see GAP_FILL_NONCOMMERCIAL_ENABLED).
+  if (!fetchSources.adsbLolUsed && GAP_FILL_NONCOMMERCIAL_ENABLED) {
+    fetchSources.gapFillAttempted = true;
+    try {
+      const added = await fetchGapFillStates(seenIds, allStates);
+      if (added > 0) {
+        if (source.value === 'none') source.value = 'gap-fill';
+        fetchSources.gapFillUsed = true;
+      }
+    } catch (e) {
+      console.warn(`  [Gap-fill] ${e.message}`);
+    }
+  } else if (!GAP_FILL_NONCOMMERCIAL_ENABLED) {
+    console.log('  [Gap-fill] disabled (non-commercial providers require explicit opt-in via WM_ENABLE_NONCOMMERCIAL_ADSB_GAP_FILL=1)');
+  } else {
+    console.log('  [Gap-fill] skipped (adsb.lol primary succeeded)');
   }
 
   return { allStates, source: source.value, fetchSources };
@@ -925,6 +1220,7 @@ function summarizeClassificationAudit(rawStates, flights, rejected, stageCounter
       militaryHint: stageCounters.sourceHintCounts.militaryHint,
       militaryOperatorHint: stageCounters.sourceHintCounts.militaryOperatorHint,
       commercialHint: stageCounters.sourceHintCounts.commercialHint,
+      authoritativeMilitary: stageCounters.sourceHintCounts.authoritativeMilitary,
       sourceOperatorCandidateHits: stageCounters.sourceOperatorCandidateHits,
       sourceTypeCandidateHits: stageCounters.sourceTypeCandidateHits,
       rawKeyOnlyCandidates: stageCounters.rawKeyOnlyCandidates,
@@ -1035,6 +1331,34 @@ function classifyHexMatchedFlight({ state, hexMatch, callsign, sourceMeta, sourc
   };
 }
 
+// Admits a state with neither a callsign nor a known-hex match on the strength
+// of the source itself being authoritative (adsb.lol /v2/mil is pre-filtered
+// to military aircraft server-side — see buildAdsbSourceMeta / deriveSourceHints).
+function classifyAuthoritativeSourceFlight(sourceMeta, originCountry = '') {
+  const sourceOperator = deriveOperatorFromSourceMeta(sourceMeta);
+  const aircraftType = detectAircraftTypeFromSourceMeta(sourceMeta);
+  return {
+    operator: sourceOperator?.operator || 'other',
+    operatorCountry: sourceOperator?.operatorCountry || sourceMeta.originCountry || originCountry || 'Unknown',
+    aircraftType,
+    confidence: sourceOperator ? 'high' : 'medium',
+    admissionReason: 'authoritative_military_source',
+    classificationReason: aircraftType === 'unknown' ? 'untyped' : 'source_metadata',
+    aircraftTypeInferenceReason: aircraftType === 'unknown' ? 'untyped' : 'source_metadata',
+    operatorInferenceReason: sourceOperator ? 'source_metadata' : 'unresolved',
+  };
+}
+
+function getSourcePrefix(state) {
+  const sourceMeta = state[15] || {};
+  const src = sourceMeta.source || '';
+  if (src === 'adsb.lol') return 'adsb';
+  if (src === 'airplanes.live') return 'apl';
+  if (src === 'adsb.fi') return 'adsbfi';
+  if (src === 'wingbits') return 'wingbits';
+  return 'opensky';
+}
+
 function buildMilitaryFlightRecord(state, classified, sourceHints) {
   const icao24 = state[0];
   const callsign = (state[1] || '').trim();
@@ -1047,9 +1371,10 @@ function buildMilitaryFlightRecord(state, classified, sourceHints) {
   const hotspot = getNearbyHotspot(lat, lon);
   const isInteresting = (hotspot && hotspot.priority === 'high') ||
     classified.aircraftType === 'bomber' || classified.aircraftType === 'reconnaissance' || classified.aircraftType === 'awacs';
+  const sourcePrefix = getSourcePrefix(state);
 
   return {
-    id: `opensky-${icao24}`,
+    id: `${sourcePrefix}-${icao24}`,
     callsign: callsign || `UNKN-${icao24.substring(0, 4).toUpperCase()}`,
     hexCode: icao24.toUpperCase(),
     lat,
@@ -1063,6 +1388,7 @@ function buildMilitaryFlightRecord(state, classified, sourceHints) {
     ...classified,
     sourceMeta: summarizeSourceMeta(state[15] || {}),
     sourceHints: {
+      authoritativeMilitary: sourceHints.authoritativeMilitary,
       militaryHint: sourceHints.militaryHint,
       militaryOperatorHint: sourceHints.militaryOperatorHint,
       commercialHint: sourceHints.commercialHint,
@@ -1099,21 +1425,26 @@ function filterMilitaryFlights(allStates) {
     const hexMatch = isKnownHex(icao24);
     if (csMatch) stageCounters.callsignMatched += 1;
     if (hexMatch) stageCounters.hexMatched += 1;
-    if (csMatch || hexMatch) stageCounters.candidateStates += 1;
+    if (csMatch || hexMatch || sourceHints.authoritativeMilitary) stageCounters.candidateStates += 1;
 
-    if (!csMatch && commercialMatch && !sourceHints.militaryHint) {
+    if (!csMatch && commercialMatch && !sourceHints.authoritativeMilitary && !sourceHints.militaryHint) {
       pushRejectedFlight(rejected, state, 'commercial_callsign_override');
       continue;
     }
 
-    if (!csMatch && !hexMatch) {
+    // adsb.lol's /v2/mil is pre-filtered to military aircraft server-side, so a
+    // record with neither a matching callsign nor a known hex range is still
+    // admissible evidence when it came from that authoritative source.
+    if (!csMatch && !hexMatch && !sourceHints.authoritativeMilitary) {
       pushRejectedFlight(rejected, state, 'no_military_signal');
       continue;
     }
 
     const classified = csMatch
       ? classifyCallsignMatchedFlight({ csMatch, hexMatch, callsign, sourceMeta })
-      : classifyHexMatchedFlight({ state, hexMatch, callsign, sourceMeta, sourceHints, rejected });
+      : hexMatch
+        ? classifyHexMatchedFlight({ state, hexMatch, callsign, sourceMeta, sourceHints, rejected })
+        : classifyAuthoritativeSourceFlight(sourceMeta, originCountry);
     if (!classified) continue;
 
     const flight = buildMilitaryFlightRecord(state, {
@@ -1383,4 +1714,11 @@ export {
   deriveSourceHints,
   deriveOperatorFromSourceMeta,
   filterMilitaryFlights,
+  parseAircraftResponse,
+  buildAdsbSourceMeta,
+  convertToStates,
+  fetchAdsbLol,
+  fetchAirplanesLivePoint,
+  fetchAdsbFiPoint,
+  fetchGapFillStates,
 };
