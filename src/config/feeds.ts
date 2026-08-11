@@ -488,6 +488,12 @@ const FULL_FEEDS: Record<string, Feed[]> = {
     { name: 'The Hill', url: rss('https://thehill.com/news/feed') },
     { name: 'Axios', url: rss('https://api.axios.com/feed/') },
     { name: 'Fox News', url: rss('https://moxie.foxnews.com/google-publisher/us.xml') },
+    // Canada + North America key-country pack. CBC World is the EN-default
+    // (noise-acceptable public broadcaster); Globe and Global News stay
+    // catalog opt-in (not in DEFAULT_ENABLED_SOURCES).
+    { name: 'CBC News', url: rss('https://www.cbc.ca/webfeed/rss/rss-world') },
+    { name: 'Globe and Mail', url: rss('https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/canada/?outputType=xml') },
+    { name: 'Global News', url: rss('https://globalnews.ca/feed/') },
   ],
   europe: [
     {
@@ -541,20 +547,56 @@ const FULL_FEEDS: Record<string, Feed[]> = {
     { name: 'SVT Nyheter', url: rss('https://www.svt.se/nyheter/rss.xml'), lang: 'sv' },
     { name: 'Dagens Nyheter', url: rss('https://www.dn.se/rss/'), lang: 'sv' },
     { name: 'Svenska Dagbladet', url: rss('https://www.svd.se/feed/articles.rss'), lang: 'sv' },
+    // Arctic / Nordic security pack — High North + Nordics beyond Sweden.
+    // no/da/fi are not UI locales, so native Nordics are left unscoped (no
+    // lang tag) so EN analysts can enable them. Yle News + Arctic Today are English.
+    { name: 'Yle News', url: rss('https://yle.fi/rss/news') },
+    { name: 'NRK', url: rss('https://www.nrk.no/nyheter/siste.rss') },
+    { name: 'Aftenposten', url: rss('https://www.aftenposten.no/rss') },
+    { name: 'DR Nyheder', url: rss('https://www.dr.dk/nyheder/service/feeds/allenyheder') },
+    { name: 'Arctic Today', url: rss('https://news.google.com/rss/search?q=site:arctictoday.com+when:14d&hl=en-US&gl=US&ceid=US:en') },
     // Turkish (TR)
     { name: 'BBC Turkce', url: rss('https://feeds.bbci.co.uk/turkce/rss.xml'), lang: 'tr' },
     { name: 'DW Turkish', url: rss('https://rss.dw.com/xml/rss-tur-all'), lang: 'tr' },
     { name: 'Hurriyet', url: rss('https://www.hurriyet.com.tr/rss/anasayfa'), lang: 'tr' },
+    { name: 'Daily Sabah', url: rss('https://www.dailysabah.com/rss/home-page') },
     // Polish (PL)
     { name: 'TVN24', url: rss('https://tvn24.pl/swiat.xml'), lang: 'pl' },
     { name: 'Polsat News', url: rss('https://www.polsatnews.pl/rss/wszystkie.xml'), lang: 'pl' },
     { name: 'Rzeczpospolita', url: rss('https://www.rp.pl/rss_main'), lang: 'pl' },
+    // Hungarian (HU) — V4/CEE coverage.
+    { name: 'Telex', url: rss('https://telex.hu/rss'), lang: 'hu' },
+    { name: 'Index.hu', url: rss('https://index.hu/24ora/rss'), lang: 'hu' },
+    { name: 'HVG', url: rss('https://hvg.hu/rss'), lang: 'hu' },
+    { name: '444.hu', url: rss('https://444.hu/feed'), lang: 'hu' },
+    { name: '24.hu', url: rss('https://24.hu/feed/'), lang: 'hu' },
+    { name: 'Híradó', url: rss('https://news.google.com/rss/search?q=site:hirado.hu+when:2d&hl=hu&gl=HU&ceid=HU:hu'), lang: 'hu' },
+    { name: 'Portfolio.hu', url: rss('https://portfolio.hu/rss/all.xml'), lang: 'hu' },
+    { name: 'ATV', url: rss('https://www.atv.hu/rss'), lang: 'hu' },
+    // Czech (CS) — V4 balance with Hungary.
+    { name: 'Seznam Zprávy', url: rss('https://www.seznamzpravy.cz/rss'), lang: 'cs' },
+    // Croatian (HR) — mainstream + investigative.
+    { name: 'N1 Croatia', url: rss('https://n1info.hr/feed/'), lang: 'hr' },
+    { name: 'Index.hr', url: rss('https://www.index.hr/rss'), lang: 'hr' },
+    { name: 'Jutarnji list', url: rss('https://www.jutarnji.hr/feed'), lang: 'hr' },
+    { name: 'Balkan Insight', url: rss('https://balkaninsight.com/feed/') },
+    // Romanian (RO) — Eastern flank.
+    { name: 'Digi24', url: rss('https://www.digi24.ro/rss'), lang: 'ro' },
+    { name: 'HotNews', url: rss('https://www.hotnews.ro/rss'), lang: 'ro' },
+    { name: 'G4Media', url: rss('https://www.g4media.ro/feed/'), lang: 'ro' },
+    // Bulgarian (BG) — Black Sea flank.
+    { name: 'Dnevnik', url: rss('https://www.dnevnik.bg/rss/'), lang: 'bg' },
     // Greek (EL)
     { name: 'Kathimerini', url: rss('https://news.google.com/rss/search?q=site:kathimerini.gr+when:2d&hl=el&gl=GR&ceid=GR:el'), lang: 'el' },
     { name: 'Naftemporiki', url: rss('https://www.naftemporiki.gr/feed/'), lang: 'el' },
     { name: 'in.gr', url: rss('https://www.in.gr/feed/'), lang: 'el' },
     { name: 'iefimerida', url: rss('https://www.iefimerida.gr/rss.xml'), lang: 'el' },
     { name: 'Proto Thema', url: rss('https://news.google.com/rss/search?q=site:protothema.gr+when:2d&hl=el&gl=GR&ceid=GR:el'), lang: 'el' },
+    // Baltic states — Eastern flank. English-language services (no lang tag)
+    // so EN digests can include them as flank sources.
+    { name: 'ERR News', url: rss('https://news.err.ee/rss') },
+    { name: 'LRT English', url: rss('https://www.lrt.lt/en/news-in-english?rss') },
+    { name: 'LSM English', url: rss('https://eng.lsm.lv/rss/') },
     // Russia & Ukraine (independent sources)
     { name: 'BBC Russian', url: rss('https://feeds.bbci.co.uk/russian/rss.xml'), lang: 'ru' },
     { name: 'Meduza', url: rss('https://meduza.io/rss/all'), lang: 'ru' },
@@ -563,7 +605,29 @@ const FULL_FEEDS: Record<string, Feed[]> = {
     { name: 'RT', url: rss('https://www.rt.com/rss/') },
     { name: 'RT Russia', url: rss('https://www.rt.com/rss/russia/') },
     { name: 'Kyiv Independent', url: rss('https://news.google.com/rss/search?q=site:kyivindependent.com+when:3d&hl=en-US&gl=US&ceid=US:en') },
+    // Ukraine depth pack — local institutional + independent EN sources.
+    { name: 'Ukrinform', url: rss('https://news.google.com/rss/search?q=site:ukrinform.net+when:3d&hl=en-US&gl=US&ceid=US:en') },
+    { name: 'Suspilne', url: rss('https://news.google.com/rss/search?q=site:suspilne.media+when:2d&hl=en-US&gl=US&ceid=US:en') },
+    { name: 'Ukrainska Pravda EN', url: rss('https://news.google.com/rss/search?q=site:euromaidanpress.com+when:2d&hl=en-US&gl=US&ceid=US:en') },
+    { name: 'NV EN', url: rss('https://news.google.com/rss/search?q=site:english.nv.ua+when:2d&hl=en-US&gl=US&ceid=US:en') },
+    { name: 'Hromadske EN', url: rss('https://news.google.com/rss/search?q=site:hromadske.ua+when:3d&hl=en-US&gl=US&ceid=US:en') },
+    // Ukrainian (uk) — native-language pack for uk locale.
+    { name: 'Ukrainska Pravda', url: rss('https://news.google.com/rss/search?q=site:pravda.com.ua+when:2d&hl=uk&gl=UA&ceid=UA:uk'), lang: 'uk' },
+    { name: 'Hromadske', url: rss('https://news.google.com/rss/search?q=site:hromadske.ua+when:3d&hl=uk&gl=UA&ceid=UA:uk'), lang: 'uk' },
+    { name: 'Bihus.Info', url: rss('https://news.google.com/rss/search?q=site:bihus.info+when:7d&hl=uk&gl=UA&ceid=UA:uk'), lang: 'uk' },
+    { name: 'Slidstvo.Info', url: rss('https://news.google.com/rss/search?q=site:slidstvo.info+when:7d&hl=uk&gl=UA&ceid=UA:uk'), lang: 'uk' },
+    { name: 'ZN.UA', url: rss('https://news.google.com/rss/search?q=site:zn.ua+when:3d&hl=uk&gl=UA&ceid=UA:uk'), lang: 'uk' },
     { name: 'Moscow Times', url: rss('https://www.themoscowtimes.com/rss/news') },
+    // Caucasus — secondary Russian periphery / BRI hinterland.
+    { name: 'Civil.ge', url: rss('https://civil.ge/feed/') },
+    { name: 'OC Media', url: rss('https://oc-media.org/feed/') },
+    { name: 'JAMnews', url: rss('https://jam-news.net/feed/') },
+    { name: 'Azertag', url: rss('https://news.google.com/rss/search?q=site:azertag.az+when:3d&hl=en-US&gl=US&ceid=US:en') },
+    { name: 'Armenpress', url: rss('https://news.google.com/rss/search?q=site:armenpress.am+when:3d&hl=en-US&gl=US&ceid=US:en') },
+    // Belarus / Moldova — secondary pressure line.
+    { name: 'Zerkalo', url: rss('https://news.google.com/rss/search?q=site:zerkalo.io+when:2d&hl=en-US&gl=US&ceid=US:en') },
+    { name: 'NewsMaker', url: rss('https://newsmaker.md/feed'), lang: 'ru' },
+    { name: 'Ziarul de Gardă', url: rss('https://www.zdg.md/feed/'), lang: 'ro' },
   ],
   middleeast: [
     { name: 'BBC Middle East', url: rss('https://feeds.bbci.co.uk/news/world/middle_east/rss.xml') },
