@@ -73,7 +73,12 @@ async function fetchData() {
   let decoders = null;
 
   await new Promise((resolve) => {
-    const socket = io(FEEDER_URL, {
+    // acarshub serves its live feed on the `/main` Socket.IO namespace —
+    // connecting to the default `/` namespace succeeds (connect event fires)
+    // but the server never emits anything on it. Confirmed by decompiling
+    // acarshub's frontend bundle: SocketService connects via
+    // `io(url, {...}, '/main')`.
+    const socket = io(`${FEEDER_URL}/main`, {
       path: '/socket.io',
       transports: ['websocket'],
       reconnection: false,
