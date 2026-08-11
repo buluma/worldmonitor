@@ -300,6 +300,7 @@ var BOOTSTRAP_CACHE_KEYS = {
   nationalDebt: "economic:national-debt:v1",
   hfPropagation: "rf:propagation:v1",
   localAdsb: "adsb:local:v1",
+  acars: "acars:messages:v1",
   pipelinesGas: "energy:pipelines:gas:v1",
   pipelinesOil: "energy:pipelines:oil:v1",
   storageFacilities: "energy:storage-facilities:v1",
@@ -399,6 +400,7 @@ var FAST_KEYS = /* @__PURE__ */ new Set([
   "correlationCards",
   "forecasts",
   "localAdsb",
+  "acars",
   "socialVelocity",
   "ddosAttacks",
   "trafficAnomalies"

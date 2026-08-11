@@ -30,6 +30,7 @@ export * from './StrategicPosturePanel';
 export * from './ThreatTimelinePanel';
 export * from './HFPropagationPanel';
 export * from './LocalAdsbPanel';
+export * from './AcarsPanel';
 export * from './IntelligenceGapBadge';
 export * from './TechEventsPanel';
 export * from './ServiceStatusPanel';

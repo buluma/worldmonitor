@@ -185,7 +185,8 @@ var BOOTSTRAP_KEYS = {
   aiTokens: "market:ai-tokens:v1",
   otherTokens: "market:other-tokens:v1",
   hfPropagation: "rf:propagation:v1",
-  localAdsb: "adsb:local:v1"
+  localAdsb: "adsb:local:v1",
+  acars: "acars:messages:v1"
 };
 var STANDALONE_KEYS = {
   serviceStatuses: "infra:service-statuses:v1",
@@ -306,6 +307,7 @@ var SEED_META = {
 };
 var ON_DEMAND_KEYS = /* @__PURE__ */ new Set([
   "localAdsb",
+  "acars",
   "riskScoresLive",
   "usniFleetStale",
   "positiveEventsLive",

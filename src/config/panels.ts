@@ -23,6 +23,7 @@ const FULL_PANELS: Record<string, PanelConfig> = {
   'threat-timeline': { name: 'Threat Timeline', enabled: true, priority: 1 },
   'hf-propagation': { name: 'HF Propagation', enabled: true, priority: 3 },
   'local-adsb': { name: 'Local ADS-B', enabled: true, priority: 2 },
+  acars: { name: 'ACARS / VDL2', enabled: true, priority: 3 },
   intel: { name: 'Intel Feed', enabled: true, priority: 1 },
   'gdelt-intel': { name: 'Live Intelligence', enabled: true, priority: 1 },
   cascade: { name: 'Infrastructure Cascade', enabled: true, priority: 1 },
