@@ -949,9 +949,30 @@ describe('forecast run world state', () => {
     ]);
     buildForecastCase(supply);
 
+    // Market consequences require real corroborating world-signal evidence (chokepoint
+    // risk feeds, quote moves, etc.) -- buildMarketTransmissionGraph only types a
+    // transmission edge's channel from worldSignals, never from prediction.evidence, so
+    // without these inputs every consequence falls back to the generic 'derived_transmission'
+    // channel and is gated out by isMarketBucketChannelAllowed as inadmissible.
+    const inputs = {
+      // Red Sea chokepoint risk -> shipping_cost_shock/energy_supply_shock/commodity_repricing
+      // signals in the 'Red Sea' region, admissible for the supply situation's freight bucket.
+      chokepoints: { routes: [{ id: 'redsea-1', name: 'Red Sea', region: 'Red Sea', riskScore: 78 }] },
+      // Broad equity weakness -> risk_off_rotation signal (domain: market), admissible for
+      // the market situation's sovereign_risk bucket (its cluster label never matches the
+      // oil/gas/energy regex that would route it to the energy bucket instead).
+      marketQuotes: { quotes: [
+        { symbol: 'A', name: 'A', change: -2.1 },
+        { symbol: 'B', name: 'B', change: -1.8 },
+        { symbol: 'C', name: 'C', change: -2.4 },
+        { symbol: 'D', name: 'D', change: -1.9 },
+      ] },
+    };
+
     const worldState = buildForecastRunWorldState({
       generatedAt: Date.parse('2026-03-19T13:30:00Z'),
       predictions: [market, supply],
+      inputs,
     });
 
     const marketUnit = worldState.simulationState.situationSimulations.find((unit) => unit.label.includes('Japan'));
@@ -1285,12 +1306,45 @@ describe('forecast run world state', () => {
 
     const patchedSimulationState = structuredClone(worldState.simulationState);
     const cyberUnit = patchedSimulationState.situationSimulations.find((item) => item.label.includes('Estonia'));
+    const politicalUnit = patchedSimulationState.situationSimulations.find((item) => item.label.includes('Latvia'));
     assert.ok(cyberUnit);
+    assert.ok(politicalUnit);
     cyberUnit.posture = 'contested';
     cyberUnit.postureScore = 0.422;
     cyberUnit.totalPressure = 0.59;
     cyberUnit.totalStabilization = 0.28;
     cyberUnit.effectChannels = [{ type: 'regional_spillover', count: 1 }];
+
+    // buildCrossSituationEffects (mode: 'reportable', the default) reads
+    // simulationState.reportableInteractionLedger directly -- it does not re-derive
+    // interactions from situationSimulations, so patching the units above has no effect
+    // on its own. Construct the ledger entries this scenario is meant to exercise: a
+    // weak channel count (1) on the source unit, offset by a direct actor overlap
+    // (sharedActor) carried across 2 rounds, which is what lets
+    // canEmitCrossSituationEffect and the political_spillover carryover gate both pass.
+    const makeInteraction = (stage) => ({
+      id: `simint-manual-${stage}`,
+      stage,
+      sourceSituationId: cyberUnit.situationId,
+      sourceLabel: cyberUnit.label,
+      sourceFamilyId: cyberUnit.familyId,
+      sourceFamilyLabel: cyberUnit.familyLabel,
+      sourceActorName: 'Shared Regional Actor',
+      targetSituationId: politicalUnit.situationId,
+      targetLabel: politicalUnit.label,
+      targetFamilyId: politicalUnit.familyId,
+      targetFamilyLabel: politicalUnit.familyLabel,
+      targetActorName: 'Shared Regional Actor',
+      interactionType: 'reinforcement',
+      strongestChannel: 'regional_spillover',
+      sharedActor: true,
+      regionLink: false,
+      actorSpecificity: 0.8,
+      directLinkCount: 1,
+      score: 2.6,
+      confidence: 0.85,
+    });
+    patchedSimulationState.reportableInteractionLedger = [makeInteraction('round_1'), makeInteraction('round_2')];
 
     const effects = buildCrossSituationEffects(patchedSimulationState);
     assert.ok(effects.some((item) => item.channel === 'regional_spillover' && item.relation === 'regional pressure transfer'));
