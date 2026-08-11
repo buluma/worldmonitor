@@ -136,6 +136,57 @@ describe('military flight classification', () => {
     assert.equal(audit.admittedByReason.hex_trusted, 1);
   });
 
+  it('identifies specific known PLAAF airframes by exact hex match', () => {
+    const fixtures = [
+      { hex: '7A4262', type: 'reconnaissance' },
+      { hex: '7A444F', type: 'tanker' },
+      { hex: '7A446F', type: 'transport' },
+      { hex: '7A4403', type: 'transport' },
+    ];
+
+    for (const fixture of fixtures) {
+      const { flights } = filterMilitaryFlights([makeState({
+        icao24: fixture.hex,
+        callsign: '',
+        country: 'China',
+        lon: 120,
+        lat: 25,
+      })]);
+      assert.equal(flights.length, 1, `${fixture.hex} should classify by exact record`);
+      assert.equal(flights[0].operator, 'plaaf');
+      assert.equal(flights[0].operatorCountry, 'China');
+      assert.equal(flights[0].aircraftType, fixture.type);
+      assert.equal(flights[0].confidence, 'high');
+      assert.equal(flights[0].admissionReason, 'hex_exact');
+    }
+  });
+
+  it('admits explicit trusted PLAAF and PLAN operator metadata on otherwise-unclassified hexes', () => {
+    const fixtures = [
+      { hex: '780123', operatorCode: 'PLAAF', expected: 'plaaf', type: 'J-16 fighter' },
+      { hex: '781234', operatorCode: 'PLAN', expected: 'plan', type: 'Y-9 patrol aircraft' },
+    ];
+
+    for (const fixture of fixtures) {
+      const { flights } = filterMilitaryFlights([makeState({
+        icao24: fixture.hex,
+        callsign: '',
+        country: 'China',
+        lon: 120,
+        lat: 25,
+        sourceMeta: {
+          operatorCode: fixture.operatorCode,
+          aircraftTypeLabel: fixture.type,
+        },
+      })]);
+      assert.equal(flights.length, 1, `${fixture.operatorCode} metadata should be trusted`);
+      assert.equal(flights[0].operator, fixture.expected);
+      assert.equal(flights[0].operatorCountry, 'China');
+      assert.equal(flights[0].admissionReason, 'source_operator_trusted');
+      assert.equal(flights[0].operatorInferenceReason, 'source_metadata');
+    }
+  });
+
   it('admits ambiguous hex matches when source metadata clearly indicates military context', () => {
     const state = makeState({
       icao24: '06A255',
