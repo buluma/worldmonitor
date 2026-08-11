@@ -11,6 +11,31 @@ async function loadS3SDK() {
   return { S3Client: _S3Client, PutObjectCommand: _PutObjectCommand, GetObjectCommand: _GetObjectCommand };
 }
 
+// ── S3-mode timeout guards (issue #4786) ─────────────────────────────────
+// The Cloudflare-R2-API branches below bound every request with
+// AbortSignal.timeout(30_000). The S3-SDK branches historically did NOT: a
+// stalled `client.send`, or a `Body.transformToString()` whose socket is
+// silently reaped by the keep-alive agent, leaves a promise that NEVER
+// settles — no rejection for a try/catch to catch, and no open handle to
+// keep the event loop alive. In a seeder that awaits R2 at the top level
+// (e.g. seed-forecasts reading prior trace state) that drains the loop and
+// Node exits 13 with "Detected unsettled top-level await" — a red cron
+// badge that is neither a graceful skip nor a catchable failure.
+const R2_S3_TIMEOUT_MS = 30_000;
+
+// Guarantees the returned promise settles: rejects if `promise` has not
+// settled within `ms`. clearTimeout in finally so a fast-settling call
+// leaves no pending timer holding the event loop open.
+function withSettleTimeout(promise, ms, label) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    // "timed out" keeps isRetryableR2Error treating a transient stall as
+    // retryable, mirroring the api-mode AbortSignal.timeout failures.
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms (S3 op did not settle)`)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
 function getEnvValue(env, keys) {
   for (const key of keys) {
     if (env[key]) return env[key];
@@ -142,6 +167,9 @@ async function getR2StorageClient(config) {
       region: config.region,
       credentials: config.credentials,
       forcePathStyle: config.forcePathStyle,
+      // Bound connection + socket-inactivity so a stalled R2 socket fails
+      // fast (→ withR2Retry → caller fallback) rather than hanging the run.
+      requestHandler: { requestTimeout: R2_S3_TIMEOUT_MS, connectionTimeout: 10_000 },
     });
     CLIENT_CACHE.set(cacheKey, client);
   }
@@ -179,14 +207,18 @@ async function putR2JsonObject(config, key, payload, metadata = {}) {
   return withR2Retry(async () => {
     const { PutObjectCommand } = await loadS3SDK();
     const client = await getR2StorageClient(config);
-    await client.send(new PutObjectCommand({
-      Bucket: config.bucket,
-      Key: key,
-      Body: body,
-      ContentType: 'application/json; charset=utf-8',
-      CacheControl: 'no-store',
-      Metadata: metadata,
-    }));
+    await withSettleTimeout(
+      client.send(new PutObjectCommand({
+        Bucket: config.bucket,
+        Key: key,
+        Body: body,
+        ContentType: 'application/json; charset=utf-8',
+        CacheControl: 'no-store',
+        Metadata: metadata,
+      }), { abortSignal: AbortSignal.timeout(R2_S3_TIMEOUT_MS) }),
+      R2_S3_TIMEOUT_MS,
+      `R2 s3 put ${key}`,
+    );
     return { bucket: config.bucket, key, bytes: Buffer.byteLength(body, 'utf8') };
   }, {
     op: 'put',
@@ -223,11 +255,17 @@ async function getR2JsonObject(config, key) {
     const { GetObjectCommand } = await loadS3SDK();
     const client = await getR2StorageClient(config);
     try {
-      const response = await client.send(new GetObjectCommand({
-        Bucket: config.bucket,
-        Key: key,
-      }));
-      const body = await response.Body?.transformToString?.();
+      const response = await withSettleTimeout(
+        client.send(new GetObjectCommand({
+          Bucket: config.bucket,
+          Key: key,
+        }), { abortSignal: AbortSignal.timeout(R2_S3_TIMEOUT_MS) }),
+        R2_S3_TIMEOUT_MS,
+        `R2 s3 get ${key} send`,
+      );
+      const body = response.Body
+        ? await withSettleTimeout(response.Body.transformToString(), R2_S3_TIMEOUT_MS, `R2 s3 get ${key} body`)
+        : null;
       if (!body) return null;
       return JSON.parse(body);
     } catch (err) {

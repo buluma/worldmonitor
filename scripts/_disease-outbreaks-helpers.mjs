@@ -17,6 +17,7 @@
 // because the test imports the same code.
 
 import { extractCountryCode } from './shared/geo-extract.mjs';
+import { decodeHtmlEntities } from './_html-entities.mjs';
 
 // WHO DON uses multi-word or hyphenated country names that the bigram scanner misses.
 // These override extractCountryCode for exact substring matches (checked first, case-insensitive).
@@ -115,6 +116,18 @@ export function detectDisease(title) {
 //   - _originalPublishedMs:         parsed-ms or null (null when synthetic)
 //   - _publishedAtIsSynthetic:      boolean — true when publishedMs was a fallback
 // publishTransform strips the underscore-prefixed helpers before publish.
+
+/**
+ * Clean one RSS <description> body: decode entities, strip tags, trim,
+ * truncate to 300 chars. Order matters — decode before tag-strip so escaped
+ * markup publishers intended as text survives the strip. Decoding is a
+ * single pass via the shared decoder: `&amp;lt;` stays `&lt;` instead of
+ * becoming live `<` markup, which a chained &lt;-then-&amp; replace would do.
+ */
+export function cleanRssDescription(rawDesc) {
+  return decodeHtmlEntities(rawDesc || '')
+    .replace(/<[^>]+>/g, '').trim().slice(0, 300);
+}
 
 /**
  * Normalize one WHO DON API item.
