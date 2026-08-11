@@ -10,7 +10,7 @@ import { cachedFetchJson, getCachedJsonBatch } from '../../../_shared/redis';
 import { markNoCacheResponse } from '../../../_shared/response-headers';
 import { sha256Hex } from '../../../_shared/hash';
 import { CHROME_UA } from '../../../_shared/constants';
-import { VARIANT_FEEDS, INTEL_SOURCES, type ServerFeed } from './_feeds';
+import { VARIANT_FEEDS, INTEL_SOURCES, isServerFeedReachableForLanguage, orderServerFeedEntries, type ServerFeed } from './_feeds';
 import { classifyByKeyword, type ThreatLevel } from './_classifier';
 
 function getRelayBaseUrl(): string | null {
@@ -324,14 +324,14 @@ async function buildDigest(variant: string, lang: string): Promise<ListFeedDiges
     const allEntries: Array<{ category: string; feed: ServerFeed }> = [];
 
     for (const [category, feeds] of Object.entries(feedsByCategory)) {
-      const filtered = feeds.filter(f => !f.lang || f.lang === lang);
+      const filtered = feeds.filter(f => isServerFeedReachableForLanguage(f, lang));
       for (const feed of filtered) {
         allEntries.push({ category, feed });
       }
     }
 
     if (variant === 'full') {
-      const filteredIntel = INTEL_SOURCES.filter(f => !f.lang || f.lang === lang);
+      const filteredIntel = INTEL_SOURCES.filter(f => isServerFeedReachableForLanguage(f, lang));
       for (const feed of filteredIntel) {
         allEntries.push({ category: 'intel', feed });
       }
@@ -342,10 +342,17 @@ async function buildDigest(variant: string, lang: string): Promise<ListFeedDiges
     // distinguish a genuine timeout (never ran) from a successful empty fetch.
     const completedFeeds = new Set<string>();
 
-    for (let i = 0; i < allEntries.length; i += BATCH_CONCURRENCY) {
+    // Entries are fetched in fixed-size batches below, so an aborted cold
+    // build (deadline hit mid-run) always drops whatever is left in the
+    // queue — order feeds by deadlinePriority so high-value sources with
+    // a fetch-scheduling hint (e.g. an otherwise-healthy source whose seed
+    // transport tends to run late) get their batch slot first.
+    const orderedEntries = orderServerFeedEntries(allEntries);
+
+    for (let i = 0; i < orderedEntries.length; i += BATCH_CONCURRENCY) {
       if (deadlineController.signal.aborted) break;
 
-      const batch = allEntries.slice(i, i + BATCH_CONCURRENCY);
+      const batch = orderedEntries.slice(i, i + BATCH_CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(async ({ category, feed }) => {
           const items = await fetchAndParseRss(feed, variant, deadlineController.signal);
