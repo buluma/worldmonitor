@@ -55,7 +55,7 @@ import { dataFreshness } from '@/services/data-freshness';
 import { mlWorker } from '@/services/ml-worker';
 import { UnifiedSettings } from '@/components/UnifiedSettings';
 import { openWidgetChatModal } from '@/components/WidgetChatModal';
-import { t } from '@/services/i18n';
+import { t, tSafeLabel } from '@/services/i18n';
 import { TvModeController } from '@/services/tv-mode';
 
 export interface EventHandlerCallbacks {
@@ -1326,9 +1326,7 @@ export class EventHandlerManager implements AppModule {
       return t('modals.runtimeConfig.title');
     }
     const key = panelKey.replace(/-([a-z])/g, (_match, group: string) => group.toUpperCase());
-    const lookup = `panels.${key}`;
-    const localized = t(lookup);
-    return localized === lookup ? fallback : localized;
+    return tSafeLabel(`panels.${key}`, fallback);
   }
 
   getAllSourceNames(): string[] {

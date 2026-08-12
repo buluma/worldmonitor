@@ -70,7 +70,7 @@ import {
   VARIANT_DEFAULTS,
 } from '@/config';
 import { BETA_MODE } from '@/config/beta';
-import { t } from '@/services/i18n';
+import { t, tSafeLabel } from '@/services/i18n';
 import { getCurrentTheme } from '@/utils';
 import { trackCriticalBannerAction } from '@/services/analytics';
 import { hasWorldMonitorAccess } from '@/services/runtime-config';
@@ -1940,14 +1940,7 @@ export class PanelLayoutManager implements AppModule {
       return t('modals.runtimeConfig.title');
     }
     const key = panelKey.replace(/-([a-z])/g, (_match, group: string) => group.toUpperCase());
-    const lookup = `panels.${key}`;
-    const localized = t(lookup);
-    if (localized === lookup || typeof localized !== 'string') {
-      const titled = t(`${lookup}.title`);
-      if (titled !== `${lookup}.title` && typeof titled === 'string') return titled;
-      return fallback;
-    }
-    return localized;
+    return tSafeLabel(`panels.${key}`, fallback);
   }
 
   getAllSourceNames(): string[] {

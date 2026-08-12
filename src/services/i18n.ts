@@ -120,6 +120,29 @@ export function t(key: string, options?: Record<string, unknown>): string {
   return i18next.t(key, options);
 }
 
+/**
+ * Resolve a translation key that may point to either a leaf string or a
+ * nested object (e.g. `panels.satelliteFires` = { title, noData } vs most
+ * `panels.*` keys, which are flat strings). i18next.t() on an object key
+ * returns its own diagnostic string ("key '...' returned an object instead
+ * of string.") rather than the key itself or an error — a naive
+ * `t(key) === key` missing-key check doesn't catch it, and that diagnostic
+ * string leaks into the UI as if it were the label.
+ *
+ * Checks the raw resolved value's type directly instead of pattern-matching
+ * i18next's message text. Falls back to `${key}.title` when the key
+ * resolves to an object with a title, then to `fallback`.
+ */
+export function tSafeLabel(key: string, fallback: string): string {
+  const raw = i18next.t(key, { returnObjects: true }) as unknown;
+  if (typeof raw === 'string' && raw !== key) return raw;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const title = (raw as Record<string, unknown>).title;
+    if (typeof title === 'string') return title;
+  }
+  return fallback;
+}
+
 // Helper to change language
 export async function changeLanguage(lng: string): Promise<void> {
   const normalized = await ensureLanguageLoaded(lng);
