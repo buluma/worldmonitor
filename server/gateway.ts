@@ -13,6 +13,7 @@ import { createRouter, type RouteDescriptor } from './router';
 import { getCorsHeaders, isDisallowedOrigin } from './cors';
 // @ts-expect-error — JS module, no declaration file
 import { validateApiKey } from '../api/_api-key.js';
+import { timingSafeEqual } from './_shared/internal-auth';
 import { mapErrorToResponse } from './error-mapper';
 import { checkRateLimit, checkEndpointRateLimit, hasEndpointRatePolicy } from './_shared/rate-limit';
 import { drainResponseHeaders } from './_shared/response-headers';
@@ -211,6 +212,25 @@ const RPC_CACHE_TIER: Record<string, CacheTier> = {
   '/api/military/v1/list-defense-patents': 'static',
 };
 
+// True only when the request is a get-resilience-ranking?refresh=1 call
+// carrying the dedicated seed-refresh secret (timing-safe compared). Returns
+// false whenever WORLDMONITOR_SEED_REFRESH_KEY is unset so a misconfigured
+// deploy fails closed rather than silently exempting the route from
+// validateApiKey.
+async function isResilienceRankingSeedRefreshRequest(request: Request, pathname: string): Promise<boolean> {
+  if (pathname !== '/api/resilience/v1/get-resilience-ranking') return false;
+  const expected = process.env.WORLDMONITOR_SEED_REFRESH_KEY?.trim() ?? '';
+  if (!expected) return false;
+  try {
+    const url = new URL(request.url);
+    if (url.searchParams.get('refresh') !== '1') return false;
+  } catch {
+    return false;
+  }
+  const candidate = request.headers.get('X-WorldMonitor-Key') ?? '';
+  return timingSafeEqual(candidate, expected);
+}
+
 /**
  * Creates a Vercel Edge handler for a single domain's routes.
  *
@@ -247,8 +267,16 @@ export function createDomainGateway(
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
+    // Seed-refresh bypass — scripts/seed-resilience-scores.mjs calls
+    // get-resilience-ranking?refresh=1 to force-recompute the ranking.
+    // WORLDMONITOR_VALID_KEYS (validateApiKey's allowlist) has no reason to
+    // know about this key, so without this check the seeder's legitimate
+    // X-WorldMonitor-Key would 401 against the wrong allowlist. Fails
+    // CLOSED: an unset WORLDMONITOR_SEED_REFRESH_KEY never bypasses.
+    const seedRefreshVerified = await isResilienceRankingSeedRefreshRequest(request, pathname);
+
     // API key validation (origin-aware)
-    const keyCheck = validateApiKey(request);
+    const keyCheck = seedRefreshVerified ? { valid: true, required: false } : validateApiKey(request);
     if (keyCheck.required && !keyCheck.valid) {
       return new Response(JSON.stringify({ error: keyCheck.error }), {
         status: 401,
