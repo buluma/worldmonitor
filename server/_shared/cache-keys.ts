@@ -131,3 +131,5 @@ export const BOOTSTRAP_TIERS: Record<string, 'slow' | 'fast'> = {
 };
 
 export const HEALTH_AIR_QUALITY_KEY = 'health:air-quality:v1';
+export const CHINA_CORRIDOR_CONTROL_TOWERS_KEY =
+  'supply_chain:china-corridor-control-towers:v1';

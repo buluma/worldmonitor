@@ -909,6 +909,9 @@ export class PanelLayoutManager implements AppModule {
     this.lazyPanel('storage-facility-map', () =>
       import('@/components/StorageFacilityMapPanel').then(m => { const p = new m.StorageFacilityMapPanel(); void p.fetchData(); return p; }),
     );
+    this.lazyPanel('china-corridors', () =>
+      import('@/components/ChinaCorridorPanel').then(m => { const p = new m.ChinaCorridorPanel(); void p.fetchData(); return p; }),
+    );
     this.lazyPanel('chokepoint-strip', () =>
       import('@/components/ChokepointStripPanel').then(m => { const p = new m.ChokepointStripPanel(); void p.fetchData(); return p; }),
     );

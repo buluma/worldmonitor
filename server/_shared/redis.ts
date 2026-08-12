@@ -130,7 +130,7 @@ const NEG_SENTINEL = '__WM_NEG__';
  * Batch GET using Upstash pipeline API — single HTTP round-trip for N keys.
  * Returns a Map of key → parsed JSON value (missing/failed/sentinel keys omitted).
  */
-export async function getCachedJsonBatch(keys: string[]): Promise<Map<string, unknown>> {
+export async function getCachedJsonBatch(keys: string[], raw = false): Promise<Map<string, unknown>> {
   const result = new Map<string, unknown>();
   if (keys.length === 0) return result;
 
@@ -138,13 +138,14 @@ export async function getCachedJsonBatch(keys: string[]): Promise<Map<string, un
   if (backend === 'local-file') {
     const { localCacheGetBatch } = await import('./local-cache-store');
     try {
-      const rawMap = await localCacheGetBatch(keys.map((key) => prefixKey(key)));
-      for (const key of keys) {
-        const raw = rawMap.get(prefixKey(key));
-        if (!raw) continue;
+      const finalKeys = keys.map((key) => raw ? key : prefixKey(key));
+      const rawMap = await localCacheGetBatch(finalKeys);
+      for (let i = 0; i < keys.length; i++) {
+        const value = rawMap.get(finalKeys[i]!);
+        if (!value) continue;
         try {
-          const parsed = JSON.parse(raw);
-          if (parsed !== NEG_SENTINEL) result.set(key, unwrapEnvelope(parsed).data);
+          const parsed = JSON.parse(value);
+          if (parsed !== NEG_SENTINEL) result.set(keys[i]!, unwrapEnvelope(parsed).data);
         } catch {
           // skip malformed local entries
         }
@@ -160,7 +161,7 @@ export async function getCachedJsonBatch(keys: string[]): Promise<Map<string, un
   if (!url || !token) return result;
 
   try {
-    const pipeline = keys.map((k) => ['GET', prefixKey(k)]);
+    const pipeline = keys.map((k) => ['GET', raw ? k : prefixKey(k)]);
     const resp = await fetch(`${url}/pipeline`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
