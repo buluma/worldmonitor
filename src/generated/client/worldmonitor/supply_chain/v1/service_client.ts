@@ -378,6 +378,15 @@ export class ApiError extends Error {
   }
 }
 
+export interface GetChinaCorridorControlTowersRequest {
+}
+
+export interface GetChinaCorridorControlTowersResponse {
+  payloadJson: string;
+  generatedAt: string;
+  upstreamUnavailable: boolean;
+}
+
 export interface SupplyChainServiceClientOptions {
   fetch?: typeof fetch;
   defaultHeaders?: Record<string, string>;
@@ -645,6 +654,29 @@ export class SupplyChainServiceClient {
     }
 
     return await resp.json() as GetStorageFacilityDetailResponse;
+  }
+
+  async getChinaCorridorControlTowers(_req: GetChinaCorridorControlTowersRequest, options?: SupplyChainServiceCallOptions): Promise<GetChinaCorridorControlTowersResponse> {
+    let path = "/api/supply-chain/v1/get-china-corridor-control-towers";
+    const url = this.baseURL + path;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
+    return await resp.json() as GetChinaCorridorControlTowersResponse;
   }
 
   private async handleError(resp: Response): Promise<never> {

@@ -47,12 +47,20 @@ import type { DisplacementFlow } from '@/services/displacement';
 import type { Earthquake } from '@/services/earthquakes';
 import type { ClimateAnomaly } from '@/services/climate';
 import type { RadiationObservation } from '@/services/radiation';
+import {
+  deriveStoragePublicBadge,
+  type StorageEvidenceInput,
+  type StoragePublicBadge,
+} from '@/shared/storage-evidence';
+import { getCachedStorageFacilityRegistry } from '@/shared/storage-facility-registry-store';
+import { getCachedFuelShortageRegistry } from '@/shared/fuel-shortage-registry-store';
 import { ArcLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
 import { PathStyleExtension } from '@deck.gl/extensions';
 import type { WeatherAlert } from '@/services/weather';
 import { escapeHtml } from '@/utils/sanitize';
+import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 import { tokenizeForMatch, matchKeyword, matchesAnyKeyword, findMatchingKeywords } from '@/utils/keyword-match';
 import { t } from '@/services/i18n';
 import { debounce, rafSchedule, getCurrentTheme } from '@/utils/index';
@@ -106,7 +114,7 @@ import type { KindnessPoint } from '@/services/kindness-data';
 import type { HappinessData } from '@/services/happiness-data';
 import type { RenewableInstallation } from '@/services/renewable-installations';
 import type { SpeciesRecovery } from '@/services/conservation-data';
-import { getCountriesGeoJson, getCountryAtCoordinates, getCountryBbox } from '@/services/country-geometry';
+import { getCountriesGeoJson, getCountryAtCoordinates, getCountryBbox, getCountryCentroid } from '@/services/country-geometry';
 import type { FeatureCollection, Geometry } from 'geojson';
 
 import { isAllowedPreviewUrl } from '@/utils/imagery-preview';
@@ -353,6 +361,7 @@ export class DeckGLMap {
   // CII choropleth data
   private ciiScoresMap: Map<string, { score: number; level: string }> = new Map();
   private ciiScoresVersion = 0;
+
 
   // Country highlight state
   private countryGeoJsonLoaded = false;
@@ -1578,6 +1587,21 @@ export class DeckGLMap {
     if (mapLayers.ciiChoropleth) {
       const ciiLayer = this.createCIIChoroplethLayer();
       if (ciiLayer) layers.push(ciiLayer);
+    }
+    // Storage facilities layer. Registry is seeded weekly by
+    // scripts/seed-storage-facilities.mjs; colors by derived publicBadge
+    // identical to the panel's evidence deriver so first-paint map dots match
+    // panel status exactly.
+    if (mapLayers.storageFacilities) {
+      const storageLayer = this.createEnergyStorageLayer();
+      if (storageLayer) layers.push(storageLayer);
+    }
+    // Fuel shortage pins. One pin per active shortage placed at the country
+    // centroid. Color by severity; click opens the FuelShortagePanel drawer
+    // via event.
+    if (mapLayers.fuelShortages) {
+      const shortageLayer = this.createEnergyShortagePinsLayer();
+      if (shortageLayer) layers.push(shortageLayer);
     }
     // Phase 8: Species recovery zones
     if (mapLayers.speciesRecovery && this.speciesRecoveryZones.length > 0) {
@@ -3298,6 +3322,213 @@ export class DeckGLMap {
     });
   }
 
+  private createEnergyStorageLayer(): ScatterplotLayer | null {
+    const cacheKey = 'storage-facilities-layer';
+
+    interface RawEntry {
+      id?: string; name?: string; operator?: string;
+      facilityType?: string; country?: string;
+      location?: { lat?: number; lon?: number };
+      capacityTwh?: number; capacityMb?: number; capacityMtpa?: number;
+      evidence?: StorageEvidenceInput;
+    }
+    interface EnergyStorageDot {
+      id: string;
+      name: string;
+      operator: string;
+      facilityType: string;
+      country: string;
+      position: [number, number];
+      capacityDisplay: string;
+      radius: number;
+      badge: StoragePublicBadge;
+    }
+
+    const { registry } = getCachedStorageFacilityRegistry() as {
+      registry: { facilities?: Record<string, RawEntry> } | undefined;
+    };
+    const rawEntries: RawEntry[] = Object.values(registry?.facilities ?? {});
+    if (rawEntries.length === 0) return null;
+
+    const data: EnergyStorageDot[] = rawEntries
+      .map(raw => {
+        const id = typeof raw.id === 'string' ? raw.id : '';
+        if (!id) return null;
+        const loc = raw.location;
+        if (!loc || typeof loc.lat !== 'number' || typeof loc.lon !== 'number') return null;
+
+        // Capacity → radius. Each facility type has its own unit, so
+        // normalize to a common "relative size" before log — Mtpa is
+        // already the largest numerically; TWh and Mb are comparable.
+        let cap = 0;
+        let capDisplay = '—';
+        if (raw.facilityType === 'ugs' && typeof raw.capacityTwh === 'number' && raw.capacityTwh > 0) {
+          cap = raw.capacityTwh;
+          capDisplay = `${raw.capacityTwh.toFixed(1)} TWh`;
+        } else if ((raw.facilityType === 'spr' || raw.facilityType === 'crude_tank_farm')
+                   && typeof raw.capacityMb === 'number' && raw.capacityMb > 0) {
+          cap = raw.capacityMb;
+          capDisplay = `${raw.capacityMb.toLocaleString()} Mb`;
+        } else if ((raw.facilityType === 'lng_export' || raw.facilityType === 'lng_import')
+                   && typeof raw.capacityMtpa === 'number' && raw.capacityMtpa > 0) {
+          cap = raw.capacityMtpa;
+          capDisplay = `${raw.capacityMtpa.toFixed(1)} Mtpa`;
+        }
+        // log-scale radius so small sites stay visible; floor + ceiling to
+        // keep hit targets reasonable at all zoom levels.
+        const radius = Math.max(6000, Math.min(26000, 5000 + Math.log(Math.max(cap, 1)) * 5500));
+
+        return {
+          id,
+          name: raw.name || id,
+          operator: raw.operator || '',
+          facilityType: raw.facilityType || 'unknown',
+          country: raw.country || '',
+          position: [loc.lon, loc.lat] as [number, number],
+          capacityDisplay: capDisplay,
+          radius,
+          badge: deriveStoragePublicBadge(raw.evidence),
+        } as EnergyStorageDot;
+      })
+      .filter((d): d is EnergyStorageDot => d != null);
+
+    const badgeColor = (b: StoragePublicBadge): [number, number, number, number] => {
+      switch (b) {
+        case 'operational': return [46, 204, 113, 220];  // green
+        case 'reduced':     return [243, 156, 18, 230];  // amber
+        case 'offline':     return [231, 76, 60, 240];   // red
+        case 'disputed':    return [155, 89, 182, 230];  // purple
+      }
+    };
+
+    return new ScatterplotLayer<EnergyStorageDot>({
+      id: cacheKey,
+      data,
+      getPosition: d => d.position,
+      getFillColor: d => badgeColor(d.badge),
+      getRadius: d => d.radius,
+      stroked: true,
+      getLineColor: [255, 255, 255, 200],
+      lineWidthMinPixels: 1,
+      radiusMinPixels: 5,
+      radiusMaxPixels: 28,
+      pickable: true,
+      onClick: info => {
+        const obj = info?.object as EnergyStorageDot | undefined;
+        if (!obj?.id) return false;
+        // Dispatch to StorageFacilityMapPanel — same loose-coupling
+        // pattern as the pipelines layer.
+        try {
+          window.dispatchEvent(new CustomEvent('energy:open-storage-facility-detail', {
+            detail: { facilityId: obj.id },
+          }));
+        } catch {
+          // Silent no-op on non-browser runtimes.
+        }
+        return true;
+      },
+    });
+  }
+
+  /**
+   * Fuel shortage pins. One dot per active shortage placed at the country
+   * centroid. Color by severity (confirmed = red, watch = amber). Click
+   * dispatches 'energy:open-fuel-shortage-detail' which FuelShortagePanel
+   * listens for.
+   *
+   * Multiple shortages in the same country stack with a small angular
+   * offset so they don't render as one overlapping dot.
+   */
+  private createEnergyShortagePinsLayer(): ScatterplotLayer | null {
+    const cacheKey = 'fuel-shortages-layer';
+
+    interface RawEntry {
+      id?: string; country?: string; product?: string; severity?: string;
+      shortDescription?: string;
+      resolvedAt?: string | null;
+    }
+    interface ShortagePin {
+      id: string;
+      country: string;
+      product: string;
+      severity: string;
+      description: string;
+      position: [number, number];
+    }
+
+    const { registry } = getCachedFuelShortageRegistry() as {
+      registry: { shortages?: Record<string, RawEntry> } | undefined;
+    };
+    // Exclude resolved shortages — a pin on the map is a claim of an
+    // ACTIVE crisis, and rendering resolved entries as active inflates
+    // severity counts and shows stale crisis data. Classifier writes
+    // resolvedAt as ISO string on resolution; raw seed uses null.
+    const rawEntries: RawEntry[] = Object.values(registry?.shortages ?? {})
+      .filter(s => !s.resolvedAt);
+    if (rawEntries.length === 0) return null;
+
+    // Stack multiple shortages per country by offsetting longitudes.
+    const perCountryCount = new Map<string, number>();
+
+    const data: ShortagePin[] = rawEntries
+      .map(raw => {
+        const id = typeof raw.id === 'string' ? raw.id : '';
+        if (!id) return null;
+        const country = raw.country;
+        if (typeof country !== 'string' || country.length !== 2) return null;
+        const centroid = getCountryCentroid(country);
+        if (!centroid) return null;
+        const idx = perCountryCount.get(country) ?? 0;
+        perCountryCount.set(country, idx + 1);
+        // ~0.8° offset per additional pin in the same country.
+        const offsetLon = idx === 0 ? 0 : (idx * 0.8 * (idx % 2 === 0 ? 1 : -1));
+        return {
+          id,
+          country,
+          product: raw.product || '',
+          severity: raw.severity || 'watch',
+          description: raw.shortDescription || '',
+          position: [centroid.lon + offsetLon, centroid.lat] as [number, number],
+        };
+      })
+      .filter((d): d is ShortagePin => d != null);
+
+    const severityColor = (sev: string): [number, number, number, number] => {
+      switch (sev) {
+        case 'confirmed': return [231, 76, 60, 240];  // red
+        case 'watch':     return [243, 156, 18, 230]; // amber
+        default:          return [127, 140, 141, 200]; // grey
+      }
+    };
+
+    return new ScatterplotLayer<ShortagePin>({
+      id: cacheKey,
+      data,
+      getPosition: d => d.position,
+      getFillColor: d => severityColor(d.severity),
+      // Confirmed pins slightly larger than watch to pre-attentively indicate weight.
+      getRadius: d => d.severity === 'confirmed' ? 55000 : 38000,
+      stroked: true,
+      getLineColor: [255, 255, 255, 230],
+      lineWidthMinPixels: 1.5,
+      radiusMinPixels: 7,
+      radiusMaxPixels: 24,
+      pickable: true,
+      onClick: info => {
+        const obj = info?.object as ShortagePin | undefined;
+        if (!obj?.id) return false;
+        try {
+          window.dispatchEvent(new CustomEvent('energy:open-fuel-shortage-detail', {
+            detail: { shortageId: obj.id },
+          }));
+        } catch {
+          // Silent no-op on non-browser runtimes.
+        }
+        return true;
+      },
+    });
+  }
+
   private createSpeciesRecoveryLayer(): ScatterplotLayer {
     return new ScatterplotLayer({
       id: 'species-recovery-layer',
@@ -3567,6 +3798,20 @@ export class DeckGLMap {
         if (!ciiEntry) return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/><span style="opacity:.7">No CII data</span></div>` };
         const levelColor = DeckGLMap.CII_LEVEL_HEX[ciiEntry.level] ?? '#888';
         return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/>CII: <span style="color:${levelColor};font-weight:600">${ciiEntry.score}/100</span><br/><span style="text-transform:capitalize;opacity:.7">${text(ciiEntry.level)}</span></div>` };
+      }
+      case 'storage-facilities-layer': {
+        const typeLabel = {
+          ugs: 'UGS', spr: 'SPR',
+          lng_export: 'LNG export', lng_import: 'LNG import',
+          crude_tank_farm: 'Crude hub',
+        }[String(obj.facilityType)] ?? text(obj.facilityType);
+        const badge = String(obj.badge || 'disputed').toUpperCase();
+        const cap = text(obj.capacityDisplay || '—');
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.name)}</strong><br/>${typeLabel} &middot; ${text(obj.country)} &middot; ${cap}<br/><strong>${text(badge)}</strong></div>` };
+      }
+      case 'fuel-shortages-layer': {
+        const severity = String(obj.severity || 'watch').toUpperCase();
+        return { html: `<div class="deckgl-tooltip"><strong>${text(obj.country)} &middot; ${text(obj.product)}</strong><br/>${text(obj.description)}<br/><strong>${text(severity)}</strong></div>` };
       }
       case 'species-recovery-layer': {
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.commonName)}</strong><br/>${text(obj.recoveryZone?.name ?? obj.region)}<br/><span style="opacity:.7">Status: ${text(obj.recoveryStatus)}</span></div>` };
@@ -4090,11 +4335,8 @@ export class DeckGLMap {
           this.state.layers[layer] = (input as HTMLInputElement).checked;
           if (layer === 'flights') this.manageAircraftTimer((input as HTMLInputElement).checked);
           this.render();
+          this.updateLegend();
           this.onLayerChange?.(layer, (input as HTMLInputElement).checked, 'user');
-          if (layer === 'ciiChoropleth') {
-            const ciiLeg = this.container.querySelector('#ciiChoroplethLegend') as HTMLElement | null;
-            if (ciiLeg) ciiLeg.style.display = (input as HTMLInputElement).checked ? 'block' : 'none';
-          }
           this.enforceLayerLimit();
         }
       });
@@ -4302,54 +4544,54 @@ export class DeckGLMap {
     };
 
     const isLight = getCurrentTheme() === 'light';
-    const legendItems = SITE_VARIANT === 'tech'
+    const legendItems: { shape: string; label: string; layerKey: keyof MapLayers }[] = SITE_VARIANT === 'tech'
       ? [
-        { shape: shapes.circle(isLight ? 'rgb(22, 163, 74)' : 'rgb(0, 255, 150)'), label: t('components.deckgl.legend.startupHub') },
-        { shape: shapes.circle('rgb(100, 200, 255)'), label: t('components.deckgl.legend.techHQ') },
-        { shape: shapes.circle(isLight ? 'rgb(180, 120, 0)' : 'rgb(255, 200, 0)'), label: t('components.deckgl.legend.accelerator') },
-        { shape: shapes.circle('rgb(150, 100, 255)'), label: t('components.deckgl.legend.cloudRegion') },
-        { shape: shapes.square('rgb(136, 68, 255)'), label: t('components.deckgl.legend.datacenter') },
+        { shape: shapes.circle(isLight ? 'rgb(22, 163, 74)' : 'rgb(0, 255, 150)'), label: t('components.deckgl.legend.startupHub'), layerKey: 'startupHubs' },
+        { shape: shapes.circle('rgb(100, 200, 255)'), label: t('components.deckgl.legend.techHQ'), layerKey: 'techHQs' },
+        { shape: shapes.circle(isLight ? 'rgb(180, 120, 0)' : 'rgb(255, 200, 0)'), label: t('components.deckgl.legend.accelerator'), layerKey: 'accelerators' },
+        { shape: shapes.circle('rgb(150, 100, 255)'), label: t('components.deckgl.legend.cloudRegion'), layerKey: 'cloudRegions' },
+        { shape: shapes.square('rgb(136, 68, 255)'), label: t('components.deckgl.legend.datacenter'), layerKey: 'datacenters' },
       ]
       : SITE_VARIANT === 'finance'
         ? [
-          { shape: shapes.circle('rgb(255, 215, 80)'), label: t('components.deckgl.legend.stockExchange') },
-          { shape: shapes.circle('rgb(0, 220, 150)'), label: t('components.deckgl.legend.financialCenter') },
-          { shape: shapes.hexagon('rgb(255, 210, 80)'), label: t('components.deckgl.legend.centralBank') },
-          { shape: shapes.square('rgb(255, 150, 80)'), label: t('components.deckgl.legend.commodityHub') },
-          { shape: shapes.triangle('rgb(80, 170, 255)'), label: t('components.deckgl.legend.waterway') },
+          { shape: shapes.circle('rgb(255, 215, 80)'), label: t('components.deckgl.legend.stockExchange'), layerKey: 'stockExchanges' },
+          { shape: shapes.circle('rgb(0, 220, 150)'), label: t('components.deckgl.legend.financialCenter'), layerKey: 'financialCenters' },
+          { shape: shapes.hexagon('rgb(255, 210, 80)'), label: t('components.deckgl.legend.centralBank'), layerKey: 'centralBanks' },
+          { shape: shapes.square('rgb(255, 150, 80)'), label: t('components.deckgl.legend.commodityHub'), layerKey: 'commodityHubs' },
+          { shape: shapes.triangle('rgb(80, 170, 255)'), label: t('components.deckgl.legend.waterway'), layerKey: 'waterways' },
         ]
         : SITE_VARIANT === 'happy'
           ? [
-            { shape: shapes.circle('rgb(34, 197, 94)'), label: 'Positive Event' },
-            { shape: shapes.circle('rgb(234, 179, 8)'), label: 'Breakthrough' },
-            { shape: shapes.circle('rgb(74, 222, 128)'), label: 'Act of Kindness' },
-            { shape: shapes.circle('rgb(255, 100, 50)'), label: 'Natural Event' },
-            { shape: shapes.square('rgb(34, 180, 100)'), label: 'Happy Country' },
-            { shape: shapes.circle('rgb(74, 222, 128)'), label: 'Species Recovery Zone' },
-            { shape: shapes.circle('rgb(255, 200, 50)'), label: 'Renewable Installation' },
-            { shape: shapes.circle('rgb(160, 100, 255)'), label: t('components.deckgl.legend.aircraft') },
+            { shape: shapes.circle('rgb(34, 197, 94)'), label: 'Positive Event', layerKey: 'positiveEvents' },
+            { shape: shapes.circle('rgb(234, 179, 8)'), label: 'Breakthrough', layerKey: 'positiveEvents' },
+            { shape: shapes.circle('rgb(74, 222, 128)'), label: 'Act of Kindness', layerKey: 'kindness' },
+            { shape: shapes.circle('rgb(255, 100, 50)'), label: 'Natural Event', layerKey: 'natural' },
+            { shape: shapes.square('rgb(34, 180, 100)'), label: 'Happy Country', layerKey: 'happiness' },
+            { shape: shapes.circle('rgb(74, 222, 128)'), label: 'Species Recovery Zone', layerKey: 'speciesRecovery' },
+            { shape: shapes.circle('rgb(255, 200, 50)'), label: 'Renewable Installation', layerKey: 'renewableInstallations' },
+            { shape: shapes.circle('rgb(160, 100, 255)'), label: t('components.deckgl.legend.aircraft'), layerKey: 'flights' },
           ]
           : [
-            { shape: shapes.circle('rgb(255, 68, 68)'), label: t('components.deckgl.legend.highAlert') },
-            { shape: shapes.circle('rgb(255, 165, 0)'), label: t('components.deckgl.legend.elevated') },
-            { shape: shapes.circle(isLight ? 'rgb(180, 120, 0)' : 'rgb(255, 255, 0)'), label: t('components.deckgl.legend.monitoring') },
-            { shape: shapes.triangle('rgb(68, 136, 255)'), label: t('components.deckgl.legend.base') },
-            { shape: shapes.hexagon(isLight ? 'rgb(180, 120, 0)' : 'rgb(255, 220, 0)'), label: t('components.deckgl.legend.nuclear') },
-            { shape: shapes.square('rgb(136, 68, 255)'), label: t('components.deckgl.legend.datacenter') },
-            { shape: shapes.circle('rgb(160, 100, 255)'), label: t('components.deckgl.legend.aircraft') },
+            { shape: shapes.circle('rgb(255, 68, 68)'), label: t('components.deckgl.legend.highAlert'), layerKey: 'hotspots' },
+            { shape: shapes.circle('rgb(255, 165, 0)'), label: t('components.deckgl.legend.elevated'), layerKey: 'hotspots' },
+            { shape: shapes.circle(isLight ? 'rgb(180, 120, 0)' : 'rgb(255, 255, 0)'), label: t('components.deckgl.legend.monitoring'), layerKey: 'hotspots' },
+            { shape: shapes.triangle('rgb(68, 136, 255)'), label: t('components.deckgl.legend.base'), layerKey: 'bases' },
+            { shape: shapes.hexagon(isLight ? 'rgb(180, 120, 0)' : 'rgb(255, 220, 0)'), label: t('components.deckgl.legend.nuclear'), layerKey: 'nuclear' },
+            { shape: shapes.square('rgb(136, 68, 255)'), label: t('components.deckgl.legend.datacenter'), layerKey: 'datacenters' },
+            { shape: shapes.circle('rgb(160, 100, 255)'), label: t('components.deckgl.legend.aircraft'), layerKey: 'flights' },
           ];
 
-    legend.innerHTML = `
+    setTrustedHtml(legend, trustedHtml(`
       <span class="legend-label-title">${t('components.deckgl.legend.title')}</span>
-      ${legendItems.map(({ shape, label }) => `<span class="legend-item">${shape}<span class="legend-label">${label}</span></span>`).join('')}
-    `;
+      ${legendItems.map(({ shape, label, layerKey }) => `<span class="legend-item" data-layer="${layerKey}">${shape}<span class="legend-label">${label}</span></span>`).join('')}
+    `, 'legend items are shape() SVG builders + i18n labels, no user input'));
 
     // CII choropleth gradient legend (shown when layer is active)
     const ciiLegend = document.createElement('div');
     ciiLegend.className = 'cii-choropleth-legend';
     ciiLegend.id = 'ciiChoroplethLegend';
     ciiLegend.style.display = this.state.layers.ciiChoropleth ? 'block' : 'none';
-    ciiLegend.innerHTML = `
+    setTrustedHtml(ciiLegend, trustedHtml(`
       <span class="legend-label-title" style="font-size:9px;letter-spacing:0.5px;">CII SCALE</span>
       <div style="display:flex;align-items:center;gap:2px;margin-top:2px;">
         <div style="width:100%;height:8px;border-radius:3px;background:linear-gradient(to right,#28b33e,#dcc030,#e87425,#dc2626,#7f1d1d);"></div>
@@ -4357,10 +4599,26 @@ export class DeckGLMap {
       <div style="display:flex;justify-content:space-between;font-size:8px;opacity:0.7;margin-top:1px;">
         <span>0</span><span>31</span><span>51</span><span>66</span><span>81</span><span>100</span>
       </div>
-    `;
+    `, 'static gradient legend markup, no user input'));
     legend.appendChild(ciiLegend);
 
     this.container.appendChild(legend);
+    this.updateLegend();
+  }
+
+  // Hides/shows each legend entry based on whether its layer is currently
+  // toggled on, so the legend only ever shows markers actually on the map
+  // instead of a fixed list for the whole variant.
+  private updateLegend(): void {
+    this.container.querySelectorAll<HTMLElement>('.legend-item[data-layer]').forEach(item => {
+      const layerKey = item.dataset.layer;
+      if (!layerKey || !(layerKey in this.state.layers)) return;
+      item.style.display = this.state.layers[layerKey as keyof MapLayers] ? '' : 'none';
+    });
+    const ciiLegend = this.container.querySelector<HTMLElement>('#ciiChoroplethLegend');
+    if (ciiLegend) {
+      ciiLegend.style.display = this.state.layers.ciiChoropleth ? 'block' : 'none';
+    }
   }
 
   // Public API methods (matching MapComponent interface)
@@ -5195,6 +5453,7 @@ export class DeckGLMap {
       const toggle = this.container.querySelector(`.layer-toggle[data-layer="${layer}"] input`) as HTMLInputElement;
       if (toggle) toggle.checked = true;
       this.render();
+      this.updateLegend();
       this.onLayerChange?.(layer, true, 'programmatic');
       this.enforceLayerLimit();
     }
@@ -5206,6 +5465,7 @@ export class DeckGLMap {
     const toggle = this.container.querySelector(`.layer-toggle[data-layer="${layer}"] input`) as HTMLInputElement;
     if (toggle) toggle.checked = this.state.layers[layer];
     this.render();
+    this.updateLegend();
     this.onLayerChange?.(layer, this.state.layers[layer], 'programmatic');
     this.enforceLayerLimit();
   }

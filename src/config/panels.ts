@@ -48,6 +48,7 @@ const FULL_PANELS: Record<string, PanelConfig> = {
   economic: { name: 'Macro Stress', enabled: true, priority: 1 },
   'trade-policy': { name: 'Trade Policy', enabled: true, priority: 1 },
   'supply-chain': { name: 'Supply Chain', enabled: true, priority: 1 },
+  'china-corridors': { name: 'China Logistics Corridors', enabled: true, priority: 1 },
   finance: { name: 'Financial', enabled: true, priority: 1 },
   tech: { name: 'Technology', enabled: true, priority: 2 },
   crypto: { name: 'Crypto', enabled: true, priority: 2 },
@@ -169,6 +170,8 @@ const FULL_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 const FULL_MOBILE_MAP_LAYERS: MapLayers = {
@@ -231,6 +234,8 @@ const FULL_MOBILE_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 // ============================================
@@ -335,6 +340,8 @@ const TECH_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 const TECH_MOBILE_MAP_LAYERS: MapLayers = {
@@ -396,6 +403,8 @@ const TECH_MOBILE_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 // ============================================
@@ -508,6 +517,8 @@ const FINANCE_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 const FINANCE_MOBILE_MAP_LAYERS: MapLayers = {
@@ -569,6 +580,8 @@ const FINANCE_MOBILE_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 // ============================================
@@ -646,6 +659,8 @@ const HAPPY_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 const HAPPY_MOBILE_MAP_LAYERS: MapLayers = {
@@ -707,6 +722,8 @@ const HAPPY_MOBILE_MAP_LAYERS: MapLayers = {
   commodityPorts: false,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 // ============================================
@@ -801,6 +818,8 @@ const COMMODITY_MAP_LAYERS: MapLayers = {
   commodityPorts: true,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 const COMMODITY_MOBILE_MAP_LAYERS: MapLayers = {
@@ -862,6 +881,8 @@ const COMMODITY_MOBILE_MAP_LAYERS: MapLayers = {
   commodityPorts: true,
   webcams: false,
   weatherRadar: false,
+  storageFacilities: false,
+  fuelShortages: false,
 };
 
 // ============================================

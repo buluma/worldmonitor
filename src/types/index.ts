@@ -650,6 +650,10 @@ export interface MapLayers {
   commodityPorts: boolean;
   webcams: boolean;
   weatherRadar: boolean;
+  // Energy storage facilities (UGS, SPR, LNG terminals, crude tank farms)
+  storageFacilities: boolean;
+  // Fuel shortage severity choropleth
+  fuelShortages: boolean;
 }
 
 export interface AIDataCenter {

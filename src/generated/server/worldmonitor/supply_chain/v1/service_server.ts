@@ -384,6 +384,15 @@ export interface ServerContext {
   headers: Record<string, string>;
 }
 
+export interface GetChinaCorridorControlTowersRequest {
+}
+
+export interface GetChinaCorridorControlTowersResponse {
+  payloadJson: string;
+  generatedAt: string;
+  upstreamUnavailable: boolean;
+}
+
 export interface ServerOptions {
   onError?: (error: unknown, req: Request) => Response | Promise<Response>;
   validateRequest?: (methodName: string, body: unknown) => FieldViolation[] | undefined;
@@ -406,6 +415,7 @@ export interface SupplyChainServiceHandler {
   getPipelineDetail(ctx: ServerContext, req: GetPipelineDetailRequest): Promise<GetPipelineDetailResponse>;
   listStorageFacilities(ctx: ServerContext, req: ListStorageFacilitiesRequest): Promise<ListStorageFacilitiesResponse>;
   getStorageFacilityDetail(ctx: ServerContext, req: GetStorageFacilityDetailRequest): Promise<GetStorageFacilityDetailResponse>;
+  getChinaCorridorControlTowers(ctx: ServerContext, req: GetChinaCorridorControlTowersRequest): Promise<GetChinaCorridorControlTowersResponse>;
 }
 
 export function createSupplyChainServiceRoutes(
@@ -836,6 +846,43 @@ export function createSupplyChainServiceRoutes(
 
           const result = await handler.getStorageFacilityDetail(ctx, body);
           return new Response(JSON.stringify(result as GetStorageFacilityDetailResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/get-china-corridor-control-towers",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const body = {} as GetChinaCorridorControlTowersRequest;
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.getChinaCorridorControlTowers(ctx, body);
+          return new Response(JSON.stringify(result as GetChinaCorridorControlTowersResponse), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });

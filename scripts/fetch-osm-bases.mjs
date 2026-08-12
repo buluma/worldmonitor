@@ -39,7 +39,10 @@ async function fetchOverpassData() {
   try {
     const res = await fetch(OVERPASS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'worldmonitor-fetch/1.0 (https://worldmonitor.app)',
+      },
       body: `data=${encodeURIComponent(OVERPASS_QUERY)}`,
       signal: controller.signal,
     });

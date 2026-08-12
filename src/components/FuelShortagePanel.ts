@@ -122,6 +122,11 @@ export class FuelShortagePanel extends Panel {
   private selectedId: string | null = null;
   private detail: GetFuelShortageDetailResponse | null = null;
   private detailLoading = false;
+  private openDetailHandler = (ev: Event): void => {
+    const id = (ev as CustomEvent<{ shortageId?: string }>).detail?.shortageId;
+    if (!id || !this.element?.isConnected) return;
+    void this.loadDetail(id);
+  };
 
   constructor() {
     super({
@@ -133,6 +138,16 @@ export class FuelShortagePanel extends Panel {
         '(confirmed / watch) is a classifier output. Every row carries the full evidence ' +
         'source list.',
     });
+    if (typeof window !== 'undefined') {
+      window.addEventListener('energy:open-fuel-shortage-detail', this.openDetailHandler);
+    }
+  }
+
+  public destroy(): void {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('energy:open-fuel-shortage-detail', this.openDetailHandler);
+    }
+    super.destroy?.();
   }
 
   public async fetchData(): Promise<void> {

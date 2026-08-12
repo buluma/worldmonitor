@@ -10,6 +10,7 @@ import { listPipelines } from './list-pipelines';
 import { getPipelineDetail } from './get-pipeline-detail';
 import { listStorageFacilities } from './list-storage-facilities';
 import { getStorageFacilityDetail } from './get-storage-facility-detail';
+import { getChinaCorridorControlTowers } from './get-china-corridor-control-towers';
 
 export const supplyChainHandler: SupplyChainServiceHandler = {
   getShippingRates,
@@ -22,4 +23,5 @@ export const supplyChainHandler: SupplyChainServiceHandler = {
   getPipelineDetail,
   listStorageFacilities,
   getStorageFacilityDetail,
+  getChinaCorridorControlTowers,
 };
