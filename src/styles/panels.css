@@ -2671,3 +2671,202 @@
     margin-top: 6px;
   }
 }
+
+/* Climate News Panel */
+.climate-news-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.climate-news-card {
+  display: block;
+  padding: 8px 10px;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.15s;
+}
+.climate-news-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.climate-news-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+
+.climate-news-card__source {
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-green, #22c55e);
+  opacity: 0.8;
+}
+
+.climate-news-card__time {
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-faint);
+}
+
+.climate-news-card__title {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.climate-news-card__summary {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  line-height: 1.3;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* ── Geo Hubs & Tech Hubs Panels ─────────────────────────────────────── */
+.geo-hub-item,
+.tech-hub-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.geo-hub-item:hover,
+.tech-hub-item:hover {
+  background: color-mix(in srgb, var(--text-dim) 6%, transparent);
+}
+
+.hub-rank {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 14px;
+  text-align: right;
+}
+
+.geo-hub-indicator,
+.hub-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.geo-hub-indicator.high,
+.hub-indicator.high {
+  background: var(--semantic-critical);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--semantic-critical) 60%, transparent);
+}
+.geo-hub-indicator.elevated,
+.hub-indicator.elevated {
+  background: var(--semantic-elevated);
+}
+.geo-hub-indicator.low,
+.hub-indicator.low {
+  background: var(--text-muted);
+}
+
+.hub-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hub-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.3;
+}
+
+.hub-name {
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hub-flag {
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  flex-shrink: 0;
+}
+
+.hub-breaking {
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--semantic-high) 15%, transparent);
+  color: var(--semantic-high);
+  border: 1px solid color-mix(in srgb, var(--semantic-high) 25%, transparent);
+}
+.hub-breaking.geo {
+  background: color-mix(in srgb, var(--semantic-critical) 15%, transparent);
+  color: var(--semantic-critical);
+  border-color: color-mix(in srgb, var(--semantic-critical) 25%, transparent);
+}
+
+.hub-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.hub-news-count {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-dim);
+}
+
+.hub-trend {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+}
+.hub-trend.rising { color: var(--semantic-critical); }
+.hub-trend.falling { color: var(--semantic-normal); }
+
+.geo-hub-type,
+.hub-tier {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-muted);
+}
+
+.hub-score {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  font-weight: 700;
+  color: var(--text-dim);
+  min-width: 26px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.hub-score.geo { color: var(--semantic-high); }
+.geo-hub-item.high .hub-score.geo { color: var(--semantic-critical); }
+
+.hub-top-story,
+a.hub-top-story {
+  display: block;
+  padding: 4px 10px 7px 30px;
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  line-height: 1.35;
+  color: var(--link-color, #4a9eff);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-subtle);
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+.hub-top-story:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
