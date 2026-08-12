@@ -517,7 +517,7 @@ export class DataLoaderManager implements AppModule {
     if (SITE_VARIANT !== 'happy' && shouldLoad('cross-source-signals')) {
       tasks.push({ name: 'crossSourceSignals', task: runGuarded('crossSourceSignals', () => this.loadCrossSourceSignals()) });
     }
-    if (shouldLoad('disease-outbreaks')) {
+    if (this.ctx.mapLayers.diseaseOutbreaks || shouldLoad('disease-outbreaks')) {
       tasks.push({ name: 'diseaseOutbreaks', task: runGuarded('diseaseOutbreaks', () => this.loadDiseaseOutbreaks()) });
     }
 
@@ -2874,8 +2874,12 @@ export class DataLoaderManager implements AppModule {
   async loadDiseaseOutbreaks(): Promise<void> {
     try {
       const data = await fetchDiseaseOutbreaks();
-      const panel = this.ctx.panels['disease-outbreaks'] as { updateData?: (outbreaks: unknown[]) => void } | undefined;
-      panel?.updateData?.(data.outbreaks);
+      if (data.outbreaks?.length) {
+        const panel = this.ctx.panels['disease-outbreaks'] as { updateData?: (outbreaks: unknown[]) => void } | undefined;
+        panel?.updateData?.(data.outbreaks);
+        this.ctx.map?.setDiseaseOutbreaks(data.outbreaks);
+        this.ctx.map?.setLayerReady('diseaseOutbreaks', true);
+      }
     } catch (e) {
       console.error('[App] Disease outbreaks load failed:', e);
     }

@@ -232,6 +232,7 @@ export const DEFAULT_MAP_LAYERS: MapLayers = {
   weatherRadar: false,
   storageFacilities: false,
   fuelShortages: false,
+  diseaseOutbreaks: false,
 };
 
 // Mobile defaults for finance variant
@@ -295,6 +296,7 @@ export const MOBILE_DEFAULT_MAP_LAYERS: MapLayers = {
   weatherRadar: false,
   storageFacilities: false,
   fuelShortages: false,
+  diseaseOutbreaks: false,
 };
 
 export const VARIANT_CONFIG: VariantConfig = {

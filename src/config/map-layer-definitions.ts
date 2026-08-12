@@ -55,7 +55,7 @@ export const LAYER_REGISTRY: Record<keyof MapLayers, LayerDefinition> = {
   gpsJamming:               def('gpsJamming',               '&#128225;', 'gpsJamming',               'GPS Jamming', ['flat', 'globe']),
   ciiChoropleth:            def('ciiChoropleth',            '&#127758;', 'ciiChoropleth',            'CII Instability', ['flat']),
   dayNight:                 def('dayNight',                 '&#127763;', 'dayNight',                 'Day/Night', ['flat']),
-  sanctions:                def('sanctions',                '&#128683;', 'sanctions',                'Sanctions', []),
+  sanctions:                def('sanctions',                '&#128683;', 'sanctions',                'Sanctions', ['flat']),
   startupHubs:              def('startupHubs',              '&#128640;', 'startupHubs',              'Startup Hubs'),
   techHQs:                  def('techHQs',                  '&#127970;', 'techHQs',                  'Tech HQs'),
   accelerators:             def('accelerators',             '&#9889;',   'accelerators',             'Accelerators'),
@@ -79,6 +79,7 @@ export const LAYER_REGISTRY: Record<keyof MapLayers, LayerDefinition> = {
   // DeckGL-only: no SVG-flat or Globe render path for either layer.
   storageFacilities:        def('storageFacilities',        '&#127959;', 'storageFacilities',        'Storage Facilities', ['flat']),
   fuelShortages:            def('fuelShortages',            '&#9881;',   'fuelShortages',            'Fuel Shortages', ['flat']),
+  diseaseOutbreaks:         def('diseaseOutbreaks',         '&#129440;', 'diseaseOutbreaks',         'Disease Outbreaks', ['flat']),
 };
 
 const VARIANT_LAYER_ORDER: Record<MapVariant, Array<keyof MapLayers>> = {
@@ -90,8 +91,8 @@ const VARIANT_LAYER_ORDER: Record<MapVariant, Array<keyof MapLayers>> = {
     'ucdpEvents', 'displacement', 'climate', 'weather',
     'outages', 'cyberThreats', 'natural', 'fires',
     'waterways', 'economic', 'minerals', 'gpsJamming',
-    'satellites', 'ciiChoropleth', 'dayNight', 'webcams', 'weatherRadar',
-    'storageFacilities', 'fuelShortages',
+    'satellites', 'ciiChoropleth', 'sanctions', 'dayNight', 'webcams', 'weatherRadar',
+    'storageFacilities', 'fuelShortages', 'diseaseOutbreaks',
   ],
   tech: [
     'startupHubs', 'techHQs', 'accelerators', 'cloudRegions',
@@ -102,7 +103,7 @@ const VARIANT_LAYER_ORDER: Record<MapVariant, Array<keyof MapLayers>> = {
     'stockExchanges', 'financialCenters', 'centralBanks', 'commodityHubs',
     'gulfInvestments', 'tradeRoutes', 'cables', 'pipelines',
     'outages', 'weather', 'economic', 'waterways',
-    'natural', 'cyberThreats', 'dayNight', 'weatherRadar',
+    'natural', 'cyberThreats', 'sanctions', 'dayNight', 'weatherRadar',
   ],
   happy: [
     'positiveEvents', 'kindness', 'happiness',
@@ -112,7 +113,7 @@ const VARIANT_LAYER_ORDER: Record<MapVariant, Array<keyof MapLayers>> = {
     'miningSites', 'processingPlants', 'commodityPorts', 'commodityHubs',
     'minerals', 'pipelines', 'waterways', 'tradeRoutes',
     'ais', 'economic', 'fires', 'climate',
-    'natural', 'weather', 'outages', 'dayNight', 'weatherRadar',
+    'natural', 'weather', 'outages', 'sanctions', 'dayNight', 'weatherRadar',
   ],
 };
 

@@ -39,6 +39,7 @@ import type { KindnessPoint } from '@/services/kindness-data';
 import type { HappinessData } from '@/services/happiness-data';
 import type { SpeciesRecovery } from '@/services/conservation-data';
 import type { RenewableInstallation } from '@/services/renewable-installations';
+import type { DiseaseOutbreakItem } from '@/services/disease-outbreaks';
 import type { RadiationObservation } from '@/services/radiation';
 import type { GpsJamHex } from '@/services/gps-interference';
 import type { SatellitePosition } from '@/services/satellites';
@@ -133,6 +134,7 @@ export class MapContainer {
   private cachedCIIScores: CIIScore[] | null = null;
   private cachedSpeciesRecovery: SpeciesRecovery[] | null = null;
   private cachedRenewableInstallations: RenewableInstallation[] | null = null;
+  private cachedDiseaseOutbreaks: DiseaseOutbreakItem[] | null = null;
   private cachedHotspotActivity: NewsItem[] | null = null;
   private cachedEscalationFlights: MilitaryFlight[] | null = null;
   private cachedEscalationVessels: MilitaryVessel[] | null = null;
@@ -298,6 +300,7 @@ export class MapContainer {
     if (this.cachedCIIScores) this.setCIIScores(this.cachedCIIScores);
     if (this.cachedSpeciesRecovery) this.setSpeciesRecoveryZones(this.cachedSpeciesRecovery);
     if (this.cachedRenewableInstallations) this.setRenewableInstallations(this.cachedRenewableInstallations);
+    if (this.cachedDiseaseOutbreaks) this.setDiseaseOutbreaks(this.cachedDiseaseOutbreaks);
     if (this.cachedHotspotActivity) this.updateHotspotActivity(this.cachedHotspotActivity);
     if (this.cachedEscalationFlights && this.cachedEscalationVessels) this.updateMilitaryForEscalation(this.cachedEscalationFlights, this.cachedEscalationVessels);
     if (this.cachedImageryScenes) this.setImageryScenes(this.cachedImageryScenes);
@@ -659,6 +662,14 @@ export class MapContainer {
     // SVG map does not support renewable installations layer
   }
 
+  public setDiseaseOutbreaks(outbreaks: DiseaseOutbreakItem[]): void {
+    this.cachedDiseaseOutbreaks = outbreaks;
+    if (this.useDeckGL) {
+      this.deckGLMap?.setDiseaseOutbreaks(outbreaks);
+    }
+    // SVG map and Globe do not support the disease outbreaks layer
+  }
+
   public updateHotspotActivity(news: NewsItem[]): void {
     this.cachedHotspotActivity = news;
     if (this.useDeckGL) {
@@ -976,6 +987,7 @@ export class MapContainer {
     this.cachedCIIScores = null;
     this.cachedSpeciesRecovery = null;
     this.cachedRenewableInstallations = null;
+    this.cachedDiseaseOutbreaks = null;
     this.cachedHotspotActivity = null;
     this.cachedEscalationFlights = null;
     this.cachedEscalationVessels = null;

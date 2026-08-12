@@ -654,6 +654,8 @@ export interface MapLayers {
   storageFacilities: boolean;
   // Fuel shortage severity choropleth
   fuelShortages: boolean;
+  // Disease outbreak alert points
+  diseaseOutbreaks: boolean;
 }
 
 export interface AIDataCenter {

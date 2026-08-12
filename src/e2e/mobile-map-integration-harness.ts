@@ -140,6 +140,7 @@ const layers = {
   weatherRadar: false,
   storageFacilities: false,
   fuelShortages: false,
+  diseaseOutbreaks: false,
 };
 
 await initI18n();

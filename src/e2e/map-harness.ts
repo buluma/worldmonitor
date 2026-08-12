@@ -191,6 +191,7 @@ const allLayersEnabled: MapLayers = {
   weatherRadar: false,
   storageFacilities: true,
   fuelShortages: true,
+  diseaseOutbreaks: true,
 };
 
 const allLayersDisabled: MapLayers = {
@@ -249,6 +250,7 @@ const allLayersDisabled: MapLayers = {
   weatherRadar: false,
   storageFacilities: false,
   fuelShortages: false,
+  diseaseOutbreaks: false,
 };
 
 const SEEDED_NEWS_LOCATIONS: Array<{

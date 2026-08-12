@@ -54,6 +54,7 @@ import {
 } from '@/shared/storage-evidence';
 import { getCachedStorageFacilityRegistry } from '@/shared/storage-facility-registry-store';
 import { getCachedFuelShortageRegistry } from '@/shared/fuel-shortage-registry-store';
+import type { DiseaseOutbreakItem } from '@/services/disease-outbreaks';
 import { ArcLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { H3HexagonLayer } from '@deck.gl/geo-layers';
@@ -387,6 +388,7 @@ export class DeckGLMap {
   private happinessSource = '';
   private speciesRecoveryZones: Array<SpeciesRecovery & { recoveryZone: { name: string; lat: number; lon: number } }> = [];
   private renewableInstallations: RenewableInstallation[] = [];
+  private diseaseOutbreaks: DiseaseOutbreakItem[] = [];
   private webcamData: Array<WebcamEntry | WebcamCluster> = [];
   private countriesGeoJsonData: FeatureCollection<Geometry> | null = null;
   private conflictZoneGeoJson: GeoJSON.FeatureCollection | null = null;
@@ -1635,6 +1637,9 @@ export class DeckGLMap {
     if (mapLayers.fuelShortages) {
       const shortageLayer = this.createEnergyShortagePinsLayer();
       if (shortageLayer) layers.push(shortageLayer);
+    }
+    if (mapLayers.diseaseOutbreaks && this.diseaseOutbreaks.length > 0) {
+      layers.push(this.createDiseaseOutbreaksLayer(this.diseaseOutbreaks));
     }
     // Phase 8: Species recovery zones
     if (mapLayers.speciesRecovery && this.speciesRecoveryZones.length > 0) {
@@ -3566,6 +3571,38 @@ export class DeckGLMap {
     });
   }
 
+  private createDiseaseOutbreaksLayer(items: DiseaseOutbreakItem[]): ScatterplotLayer<{ lon: number; lat: number; item: DiseaseOutbreakItem }> {
+    type Point = { lon: number; lat: number; item: DiseaseOutbreakItem };
+    const points: Point[] = [];
+    for (const item of items) {
+      if (Number.isFinite(item.lat) && item.lat !== 0 && Number.isFinite(item.lng) && item.lng !== 0) {
+        points.push({ lon: item.lng, lat: item.lat, item });
+      } else {
+        const centroid = getCountryCentroid(item.countryCode ?? '');
+        if (centroid) points.push({ lon: centroid.lon, lat: centroid.lat, item });
+      }
+    }
+    return new ScatterplotLayer<Point>({
+      id: 'disease-outbreaks-layer',
+      data: points,
+      getPosition: (d) => [d.lon, d.lat],
+      getRadius: (d) => d.item.alertLevel === 'alert' ? 180000 : d.item.alertLevel === 'warning' ? 130000 : 90000,
+      getFillColor: (d) => (
+        d.item.alertLevel === 'alert'
+          ? [231, 76, 60, 200]
+          : d.item.alertLevel === 'warning'
+            ? [230, 126, 34, 190]
+            : [241, 196, 15, 170]
+      ) as [number, number, number, number],
+      getLineColor: [255, 255, 255, 120],
+      stroked: true,
+      lineWidthMinPixels: 1,
+      radiusMinPixels: 5,
+      radiusMaxPixels: 22,
+      pickable: true,
+    });
+  }
+
   private createSpeciesRecoveryLayer(): ScatterplotLayer {
     return new ScatterplotLayer({
       id: 'species-recovery-layer',
@@ -3849,6 +3886,16 @@ export class DeckGLMap {
       case 'fuel-shortages-layer': {
         const severity = String(obj.severity || 'watch').toUpperCase();
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.country)} &middot; ${text(obj.product)}</strong><br/>${text(obj.description)}<br/><strong>${text(severity)}</strong></div>` };
+      }
+      case 'disease-outbreaks-layer': {
+        const item = (obj as { item: DiseaseOutbreakItem }).item;
+        if (!item) return null;
+        const lvlColor = item.alertLevel === 'alert' ? '#e74c3c' : item.alertLevel === 'warning' ? '#e67e22' : '#f1c40f';
+        const casesHtml = item.cases ? ` | ${item.cases} case${item.cases !== 1 ? 's' : ''}` : '';
+        const dateStr = new Date(item.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const metaHtml = `<br/><span style="opacity:.6;font-size:11px">${text(item.sourceName || '')} | ${dateStr}${casesHtml}</span>`;
+        const summaryHtml = item.summary ? `<br/><span style="opacity:.75">${text(item.summary.slice(0, 100))}${item.summary.length > 100 ? '…' : ''}</span>` : '';
+        return { html: `<div class="deckgl-tooltip"><strong style="color:${lvlColor}">${text(item.alertLevel.toUpperCase())}</strong> ${text(item.disease)}<br/>${text(item.location)}${summaryHtml}${metaHtml}</div>` };
       }
       case 'species-recovery-layer': {
         return { html: `<div class="deckgl-tooltip"><strong>${text(obj.commonName)}</strong><br/>${text(obj.recoveryZone?.name ?? obj.region)}<br/><span style="opacity:.7">Status: ${text(obj.recoveryStatus)}</span></div>` };
@@ -4616,6 +4663,9 @@ export class DeckGLMap {
             { shape: shapes.hexagon(isLight ? 'rgb(180, 120, 0)' : 'rgb(255, 220, 0)'), label: t('components.deckgl.legend.nuclear'), layerKey: 'nuclear' },
             { shape: shapes.square('rgb(136, 68, 255)'), label: t('components.deckgl.legend.datacenter'), layerKey: 'datacenters' },
             { shape: shapes.circle('rgb(160, 100, 255)'), label: t('components.deckgl.legend.aircraft'), layerKey: 'flights' },
+            { shape: shapes.circle('rgb(231, 76, 60)'), label: t('components.deckgl.legend.diseaseAlert'), layerKey: 'diseaseOutbreaks' },
+            { shape: shapes.circle('rgb(230, 126, 34)'), label: t('components.deckgl.legend.diseaseWarning'), layerKey: 'diseaseOutbreaks' },
+            { shape: shapes.circle('rgb(241, 196, 15)'), label: t('components.deckgl.legend.diseaseWatch'), layerKey: 'diseaseOutbreaks' },
           ];
 
     setTrustedHtml(legend, trustedHtml(`
@@ -5281,6 +5331,11 @@ export class DeckGLMap {
 
   public setRenewableInstallations(installations: RenewableInstallation[]): void {
     this.renewableInstallations = installations;
+    this.render();
+  }
+
+  public setDiseaseOutbreaks(outbreaks: DiseaseOutbreakItem[]): void {
+    this.diseaseOutbreaks = outbreaks;
     this.render();
   }
 
