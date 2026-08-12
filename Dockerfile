@@ -24,6 +24,10 @@ RUN node docker/build-handlers.mjs
 
 # Build Vite frontend (outputs to dist/)
 # Skip blog build — blog-site has its own deps not installed here
+# Cyber Threats layer is flag-gated at build time (baked into the client bundle);
+# default it on here since self-host seeders already source the data.
+ARG VITE_ENABLE_CYBER_LAYER=true
+ENV VITE_ENABLE_CYBER_LAYER=$VITE_ENABLE_CYBER_LAYER
 RUN npx tsc && npx vite build
 
 # ── Stage 2: Runtime ─────────────────────────────────────────────────────────
