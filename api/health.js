@@ -222,7 +222,9 @@ var STANDALONE_KEYS = {
   chokepointTransits: "supply_chain:chokepoint_transits:v1",
   transitSummaries: "supply_chain:transit-summaries:v1",
   thermalEscalation: "thermal:escalation:v1",
-  tariffTrendsUs: "trade:tariffs:v1:840:all:10"
+  tariffTrendsUs: "trade:tariffs:v1:840:all:10",
+  resilienceStaticIndex: 'resilience:static:index:v1',
+  resilienceStaticFao: 'resilience:static:fao'
 };
 var SEED_META = {
   earthquakes: { key: "seed-meta:seismology:earthquakes", maxStaleMin: 90 },
@@ -303,7 +305,11 @@ var SEED_META = {
   tariffTrendsUs: { key: "seed-meta:trade:tariffs:v1:840:all:10", maxStaleMin: 900 },
   tokenPanels: { key: "seed-meta:market:token-panels", maxStaleMin: 90 },
   // cron every 30min; 3× interval
-  hfPropagation: { key: "seed-meta:rf:propagation", maxStaleMin: 90 }
+  hfPropagation: { key: "seed-meta:rf:propagation", maxStaleMin: 90 },
+  // annual October snapshot; 400d threshold matches TTL and preserves prior-year data on source outages
+  resilienceStaticIndex: { key: 'seed-meta:resilience:static', maxStaleMin: 576000 },
+  // same seeder + same heartbeat as resilienceStaticIndex; required so EMPTY_DATA_OK + missing data degrades to STALE_SEED instead of silent OK
+  resilienceStaticFao: { key: 'seed-meta:resilience:static', maxStaleMin: 576000 }
 };
 var ON_DEMAND_KEYS = /* @__PURE__ */ new Set([
   "localAdsb",
@@ -342,7 +348,9 @@ var EMPTY_DATA_OK_KEYS = /* @__PURE__ */ new Set([
   // same
   "cableHealth",
   // submarine cable source intermittent
-  "riskScores"
+  "riskScores",
+  'resilienceStaticFao'
+  // empty aggregate = no IPC Phase 3+ countries this year (possible in theory); the key must exist but count=0 is fine
   // computed from other seeds, empty until full cycle
 ]);
 var CASCADE_GROUPS = {

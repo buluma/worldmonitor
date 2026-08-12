@@ -331,6 +331,18 @@ export async function localCacheRunPipeline(
           results.push({ result: updated });
           break;
         }
+        case 'DEL': {
+          let deleted = 0;
+          for (const keyRaw of args) {
+            const key = String(keyRaw);
+            if (store.kv[key]) { delete store.kv[key]; deleted += 1; }
+            if (store.zsets[key]) { delete store.zsets[key]; deleted += 1; }
+            if (store.hashes[key]) { delete store.hashes[key]; deleted += 1; }
+            if (store.geos[key]) { delete store.geos[key]; deleted += 1; }
+          }
+          results.push({ result: deleted });
+          break;
+        }
         case 'ZADD': {
           const key = String(args[0] ?? '');
           const zset = ensureZSet(store, key);
@@ -419,6 +431,21 @@ export async function localCacheRunPipeline(
     }
 
     return results;
+  });
+}
+
+// Atomic (single-process) compare-and-delete: deletes `key` only if its
+// current value equals `expectedValue`. Used to release a lock only if it's
+// still owned by the caller. mutateStore's callback runs synchronously
+// against the in-memory store, so the read+delete here can't race with
+// another mutateStore call the way two separate localCacheRunPipeline
+// round-trips could.
+export async function localCacheCompareAndDelete(key: string, expectedValue: string): Promise<boolean> {
+  return mutateStore((store) => {
+    const entry = store.kv[key];
+    if (!entry || isExpired(entry.expiresAt) || entry.value !== expectedValue) return false;
+    delete store.kv[key];
+    return true;
   });
 }
 

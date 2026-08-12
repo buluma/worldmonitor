@@ -507,6 +507,99 @@ describe('local-file cache backend', { concurrency: 1 }, () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  // These three exercise the resilience-ranking lock/publish path
+  // (server/worldmonitor/resilience/v1/get-resilience-ranking.ts): SET-NX to
+  // acquire, compare-DEL to release only if still owned, and an all-or-nothing
+  // transaction to publish ranking + metadata together.
+  it('readCachedJson distinguishes hit from miss', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'wm-local-cache-'));
+    const restoreEnv = withEnv({
+      WM_CACHE_BACKEND: 'local-file',
+      WM_LOCAL_CACHE_FILE: join(tempDir, 'cache.json'),
+      UPSTASH_REDIS_REST_URL: undefined,
+      UPSTASH_REDIS_REST_TOKEN: undefined,
+      LOCAL_API_MODE: undefined,
+      VERCEL_ENV: undefined,
+      VERCEL_GIT_COMMIT_SHA: undefined,
+    });
+
+    try {
+      const redis = await importRedisFresh();
+      assert.deepEqual(await redis.readCachedJson('missing:key'), { status: 'miss' });
+
+      await redis.setCachedJson('present:key', { n: 1 }, 60);
+      const reread = await importRedisFresh();
+      assert.deepEqual(await reread.readCachedJson('present:key'), { status: 'hit', value: { n: 1 } });
+    } finally {
+      restoreEnv();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('compareAndDeleteRedisKey only deletes when the value still matches (lock release)', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'wm-local-cache-'));
+    const restoreEnv = withEnv({
+      WM_CACHE_BACKEND: 'local-file',
+      WM_LOCAL_CACHE_FILE: join(tempDir, 'cache.json'),
+      UPSTASH_REDIS_REST_URL: undefined,
+      UPSTASH_REDIS_REST_TOKEN: undefined,
+      LOCAL_API_MODE: undefined,
+      VERCEL_ENV: undefined,
+      VERCEL_GIT_COMMIT_SHA: undefined,
+    });
+
+    try {
+      // Lock tokens are stored as bare strings (matches production's
+      // `SET lockKey, randomUUID()`), not JSON — so verify with a raw
+      // pipeline GET rather than readCachedJson, which always JSON-parses.
+      const redis = await importRedisFresh();
+      await redis.runRedisPipeline([['SET', 'lock:x', 'token-a', 'EX', 60]], true);
+
+      // wrong token: lock held by someone else now, must not delete it
+      assert.equal(await redis.compareAndDeleteRedisKey('lock:x', 'token-b', true), false);
+      let read = await redis.runRedisPipeline([['GET', 'lock:x']], true);
+      assert.equal(read[0]?.result, 'token-a');
+
+      // right token: release succeeds
+      assert.equal(await redis.compareAndDeleteRedisKey('lock:x', 'token-a', true), true);
+      read = await redis.runRedisPipeline([['GET', 'lock:x']], true);
+      assert.equal(read[0]?.result, null);
+    } finally {
+      restoreEnv();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runRedisTransaction publishes multiple keys together', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'wm-local-cache-'));
+    const restoreEnv = withEnv({
+      WM_CACHE_BACKEND: 'local-file',
+      WM_LOCAL_CACHE_FILE: join(tempDir, 'cache.json'),
+      UPSTASH_REDIS_REST_URL: undefined,
+      UPSTASH_REDIS_REST_TOKEN: undefined,
+      LOCAL_API_MODE: undefined,
+      VERCEL_ENV: undefined,
+      VERCEL_GIT_COMMIT_SHA: undefined,
+    });
+
+    try {
+      const redis = await importRedisFresh();
+      const results = await redis.runRedisTransaction([
+        ['SET', 'ranking:v1', JSON.stringify({ items: [] }), 'EX', 60],
+        ['SET', 'ranking:meta:v1', JSON.stringify({ count: 0 }), 'EX', 60],
+      ], true);
+      assert.equal(results.length, 2);
+      assert.ok(results.every((r) => r.result === 'OK'));
+
+      const reread = await importRedisFresh();
+      assert.deepEqual(await reread.getCachedJson('ranking:v1', true), { items: [] });
+      assert.deepEqual(await reread.getCachedJson('ranking:meta:v1', true), { count: 0 });
+    } finally {
+      restoreEnv();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('theater posture caching behavior', { concurrency: 1 }, () => {

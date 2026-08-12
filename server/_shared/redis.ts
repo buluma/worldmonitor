@@ -48,6 +48,29 @@ function prefixKey(key: string): string {
   return `${cachedPrefix}${key}`;
 }
 
+export type CacheReadResult = { status: 'hit'; value: unknown } | { status: 'miss' } | { status: 'error'; error: unknown };
+
+/**
+ * Cache read that keeps "miss" and "error" distinguishable, unlike
+ * `getCachedJson` which collapses both to `null`. Resilience scoring needs
+ * this: a read failure that looks like an empty key is exactly how a dead
+ * upstream source stays invisible in coverage/freshness accounting.
+ *
+ * Note: this fork's `getCachedJson` already catches its own fetch/parse
+ * errors and logs+returns null (see below), so in practice this wrapper's
+ * 'error' branch only fires if `getCachedJson` itself throws synchronously.
+ * Kept as a distinct status anyway so callers ported from upstream don't
+ * need their branching logic rewritten.
+ */
+export async function readCachedJson(key: string, raw = false): Promise<CacheReadResult> {
+  try {
+    const value = await getCachedJson(key, raw);
+    return value == null ? { status: 'miss' } : { status: 'hit', value };
+  } catch (err) {
+    return { status: 'error', error: err };
+  }
+}
+
 export async function getCachedJson(key: string, raw = false): Promise<unknown | null> {
   const backend = getCacheBackend();
 
@@ -416,5 +439,124 @@ export async function runRedisPipeline(
   } catch (err) {
     console.warn('[redis] runRedisPipeline failed:', errMsg(err));
     return [];
+  }
+}
+
+/**
+ * Like `runRedisPipeline`, but rejects the whole batch if any command fails
+ * (Upstash `/multi-exec` semantics) rather than best-effort per-command.
+ * Callers publishing multiple related keys (e.g. a ranking + its metadata)
+ * use this so readers never observe one written without the other.
+ *
+ * On the local-file backend there's no separate MULTI/EXEC concept — the
+ * whole batch already runs synchronously inside one `mutateStore` call via
+ * `localCacheRunPipeline`, so it's already all-or-nothing for practical
+ * purposes and reuses that path directly.
+ */
+export async function runRedisTransaction(
+  commands: Array<Array<string | number>>,
+  raw = false,
+): Promise<Array<{ result?: unknown; error?: unknown }>> {
+  if (commands.length === 0) return [];
+
+  const backend = getCacheBackend();
+  if (backend === 'local-file') {
+    const { localCacheRunPipeline } = await import('./local-cache-store');
+    const pipeline = commands.map((command) => {
+      const [verb, ...rest] = command;
+      if (raw || rest.length === 0 || typeof rest[0] !== 'string') {
+        return command.map((part) => String(part));
+      }
+      return [String(verb), prefixKey(rest[0]), ...rest.slice(1).map((part) => String(part))];
+    });
+    try {
+      return await localCacheRunPipeline(pipeline);
+    } catch (err) {
+      console.warn('[redis] local runRedisTransaction failed:', errMsg(err));
+      return [];
+    }
+  }
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return [];
+
+  const pipeline = commands.map((command) => {
+    const [verb, ...rest] = command;
+    if (raw || rest.length === 0 || typeof rest[0] !== 'string') {
+      return command.map((part) => String(part));
+    }
+    return [String(verb), prefixKey(rest[0]), ...rest.slice(1).map((part) => String(part))];
+  });
+
+  try {
+    const resp = await fetch(`${url}/multi-exec`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(pipeline),
+      signal: AbortSignal.timeout(REDIS_PIPELINE_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.warn(`[redis] runRedisTransaction HTTP ${resp.status}`);
+      return [];
+    }
+    const data = await resp.json().catch(() => null) as Array<{ result?: unknown; error?: unknown }> | null;
+    if (!Array.isArray(data)) {
+      console.warn('[redis] runRedisTransaction returned an invalid response');
+      return [];
+    }
+    return data;
+  } catch (err) {
+    console.warn('[redis] runRedisTransaction failed:', errMsg(err));
+    return [];
+  }
+}
+
+/**
+ * Deletes `key` only if its current value equals `expectedValue`. Used to
+ * release a lock without clobbering a lock someone else already acquired
+ * after ours expired (the classic SET-NX / compare-DEL lock pattern).
+ */
+export async function compareAndDeleteRedisKey(key: string, expectedValue: string, raw = false): Promise<boolean> {
+  if (!expectedValue) return false;
+
+  const backend = getCacheBackend();
+  const finalKey = raw ? key : prefixKey(key);
+
+  if (backend === 'local-file') {
+    const { localCacheCompareAndDelete } = await import('./local-cache-store');
+    try {
+      return await localCacheCompareAndDelete(finalKey, expectedValue);
+    } catch (err) {
+      console.warn('[redis] local compareAndDeleteRedisKey failed:', errMsg(err));
+      return false;
+    }
+  }
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return false;
+
+  const script = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+  try {
+    const resp = await fetch(`${url}/`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(['EVAL', script, '1', finalKey, expectedValue]),
+      signal: AbortSignal.timeout(REDIS_PIPELINE_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.warn(`[redis] compareAndDeleteRedisKey HTTP ${resp.status}`);
+      return false;
+    }
+    const data = await resp.json().catch(() => null) as { result?: unknown; error?: string } | null;
+    if (data?.error) {
+      console.warn('[redis] compareAndDeleteRedisKey failed:', data.error);
+      return false;
+    }
+    return data?.result === 1;
+  } catch (err) {
+    console.warn('[redis] compareAndDeleteRedisKey failed:', errMsg(err));
+    return false;
   }
 }
