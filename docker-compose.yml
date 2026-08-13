@@ -80,6 +80,19 @@ services:
     environment:
       AISSTREAM_API_KEY: "${AISSTREAM_API_KEY:-}"
       PORT: "3004"
+      # Needed for the in-process headline classify loop (seedClassify /
+      # startClassifySeedLoop) — without these it silently no-ops forever
+      # ("[Classify] Skipped — no LLM provider keys configured"), which is
+      # what starved news:insights of any llm-sourced threat tags. Mirrors
+      # the worldmonitor service's own block above.
+      UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
+      UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:-wm-local-token}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OLLAMA_API_URL: "${OLLAMA_API_URL:-}"
+    depends_on:
+      redis-rest:
+        condition: service_started
     restart: unless-stopped
 
   redis:
