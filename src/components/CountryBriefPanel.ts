@@ -79,6 +79,31 @@ export interface CountryFactsData {
   countryName: string;
 }
 
+export interface CountryDeepDiveDebtEntry {
+  debtToGdp: number;
+  debtUsd: number;
+  annualGrowth: number;
+  source: string;
+}
+
+export interface CountryDeepDiveSanctionsPressure {
+  entryCount: number;
+  sanctionsActive: boolean;
+}
+
+export interface CountryDeepDiveTradeFlow {
+  partnerName: string;
+  sector: string;
+  tradeValueUsd: number;
+  yoyChange: number;
+}
+
+export interface CountryDeepDiveTariffTrends {
+  currentRate: number;
+  trend: 'rising' | 'falling';
+  datapoints: Array<{ year: number; tariffRate: number }>;
+}
+
 export interface CountryBriefPanel {
   show(country: string, code: string, score: CountryScore | null, signals: CountryBriefSignals): void;
   hide(): void;
@@ -102,6 +127,10 @@ export interface CountryBriefPanel {
   updateMilitaryActivity?(summary: CountryDeepDiveMilitarySummary): void;
   updateEconomicIndicators?(indicators: CountryDeepDiveEconomicIndicator[]): void;
   updateCountryFacts?(data: CountryFactsData): void;
+  updateNationalDebt?(entry: CountryDeepDiveDebtEntry | null): void;
+  updateSanctionsPressure?(data: CountryDeepDiveSanctionsPressure | null): void;
+  updateTradeFlows?(flows: CountryDeepDiveTradeFlow[] | null): void;
+  updateTariffTrends?(data: CountryDeepDiveTariffTrends | null): void;
   maximize?(): void;
   minimize?(): void;
   getIsMaximized?(): boolean;

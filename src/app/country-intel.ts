@@ -40,6 +40,10 @@ import type { StrategicPosturePanel } from '@/components/StrategicPosturePanel';
 import type { NewsItem } from '@/types';
 import { getNearbyInfrastructure } from '@/services/related-assets';
 import { toFlagEmoji } from '@/utils/country-flag';
+import { getNationalDebtData } from '@/services/economic';
+import { fetchSanctionsPressure } from '@/services/sanctions-pressure';
+import { fetchTradeFlows, fetchTariffTrends } from '@/services/trade';
+import { iso2ToIso3, iso2ToComtradeReporterCode } from '@/utils/country-codes';
 
 type IntlDisplayNamesCtor = new (
   locales: string | string[],
@@ -267,6 +271,8 @@ export class CountryIntelManager implements AppModule {
         });
       });
 
+    this.fetchCountryEconomicSections(code);
+
     this.mountCountryTimeline(code, country);
 
     try {
@@ -395,6 +401,75 @@ export class CountryIntelManager implements AppModule {
     }
     const signals = this.getCountrySignals(code, name);
     page.updateScore?.(score, signals);
+  }
+
+  /**
+   * National Debt / Sanctions Pressure / Trade Flows / Tariff Trends —
+   * ported from koala73/main's CountryDeepDivePanel sections, minus the
+   * PRO gate (this fork has no premium tier, so these always render real
+   * data). All four reuse existing services already wired for other
+   * panels; none needed new backend work.
+   */
+  private fetchCountryEconomicSections(code: string): void {
+    const iso3 = iso2ToIso3(code);
+    getNationalDebtData().then((resp) => {
+      if (this.ctx.countryBriefPage?.getCode() !== code) return;
+      const entry = iso3 ? resp.entries?.find((e) => e.iso3 === iso3) : undefined;
+      this.ctx.countryBriefPage.updateNationalDebt?.(entry ? {
+        debtToGdp: entry.debtToGdp,
+        debtUsd: entry.debtUsd,
+        annualGrowth: entry.annualGrowth,
+        source: entry.source,
+      } : null);
+    }).catch(() => {
+      if (this.ctx.countryBriefPage?.getCode() === code) this.ctx.countryBriefPage.updateNationalDebt?.(null);
+    });
+
+    fetchSanctionsPressure().then((resp) => {
+      if (this.ctx.countryBriefPage?.getCode() !== code) return;
+      const entry = resp.countries.find((c) => c.countryCode === code || c.countryCode === iso3);
+      this.ctx.countryBriefPage.updateSanctionsPressure?.(entry && entry.entryCount > 0 ? {
+        entryCount: entry.entryCount,
+        sanctionsActive: true,
+      } : null);
+    }).catch(() => {
+      if (this.ctx.countryBriefPage?.getCode() === code) this.ctx.countryBriefPage.updateSanctionsPressure?.(null);
+    });
+
+    const reporterCode = iso2ToComtradeReporterCode(code);
+    if (reporterCode) {
+      fetchTradeFlows(reporterCode, '000').then((resp) => {
+        if (this.ctx.countryBriefPage?.getCode() !== code) return;
+        const topFlows = resp.upstreamUnavailable ? [] : (resp.flows || [])
+          .sort((a, b) => (b.exportValueUsd + b.importValueUsd) - (a.exportValueUsd + a.importValueUsd))
+          .slice(0, 5)
+          .map((f) => ({
+            partnerName: f.partnerCountry,
+            sector: f.productSector,
+            tradeValueUsd: f.exportValueUsd + f.importValueUsd,
+            yoyChange: f.yoyImportChange,
+          }));
+        this.ctx.countryBriefPage.updateTradeFlows?.(topFlows.length > 0 ? topFlows : null);
+      }).catch(() => {
+        if (this.ctx.countryBriefPage?.getCode() === code) this.ctx.countryBriefPage.updateTradeFlows?.(null);
+      });
+
+      fetchTariffTrends(reporterCode, '000').then((resp) => {
+        if (this.ctx.countryBriefPage?.getCode() !== code) return;
+        const pts = resp.datapoints || [];
+        const latest = pts[pts.length - 1];
+        this.ctx.countryBriefPage.updateTariffTrends?.(latest ? {
+          currentRate: resp.effectiveTariffRate?.tariffRate ?? latest.tariffRate,
+          trend: pts.length >= 2 && pts[pts.length - 1]!.tariffRate > pts[pts.length - 2]!.tariffRate ? 'rising' : 'falling',
+          datapoints: pts.map((p) => ({ year: p.year, tariffRate: p.tariffRate })),
+        } : null);
+      }).catch(() => {
+        if (this.ctx.countryBriefPage?.getCode() === code) this.ctx.countryBriefPage.updateTariffTrends?.(null);
+      });
+    } else {
+      this.ctx.countryBriefPage?.updateTradeFlows?.(null);
+      this.ctx.countryBriefPage?.updateTariffTrends?.(null);
+    }
   }
 
   private async fetchCountryIntelBrief(code: string, contextSnapshot: string): Promise<string> {
