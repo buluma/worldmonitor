@@ -160,12 +160,20 @@ async function fetchTier(tier: 'fast' | 'slow', signal: AbortSignal): Promise<Bo
 export async function fetchBootstrapData(): Promise<void> {
   // Each tier gets its own abort controller so a slow response in one
   // doesn't kill the other. Keep the cap tight so startup stays snappy
-  // and panels can fall through to their direct RPCs quickly.
+  // and panels can fall through to their direct RPCs quickly — but not
+  // every panel has a direct-RPC fallback (e.g. ThreatTimelinePanel's
+  // getServerInsights() reads hydration only, no retry). The original
+  // 1200/1800ms non-desktop budget was tuned against a cloud/CDN
+  // backend; measured against a self-hosted deployment (Caddy + Pi) the
+  // fast tier landed at 1.11s — close enough to the old 1200ms cap that
+  // ordinary jitter tips it into an abort, permanently starving any
+  // panel with no fallback for the rest of the page session. Widened to
+  // give self-hosted paths headroom.
   const desktop = isDesktopRuntime();
   const fastCtrl = new AbortController();
   const slowCtrl = new AbortController();
-  const fastTimeout = setTimeout(() => fastCtrl.abort(), desktop ? 2500 : 1200);
-  const slowTimeout = setTimeout(() => slowCtrl.abort(), desktop ? 4000 : 1800);
+  const fastTimeout = setTimeout(() => fastCtrl.abort(), desktop ? 2500 : 3000);
+  const slowTimeout = setTimeout(() => slowCtrl.abort(), desktop ? 4000 : 4500);
   try {
     const [slowState, fastState] = await Promise.all([
       fetchTier('slow', slowCtrl.signal),
