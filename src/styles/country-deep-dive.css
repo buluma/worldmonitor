@@ -43,6 +43,10 @@
   grid-template-columns: 1fr 1fr;
 }
 
+.country-deep-dive.maximized .cdp-summary-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
 .cdp-expanded-only {
   display: none;
 }
@@ -239,6 +243,13 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
+}
+
+.cdp-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  contain: layout paint;
 }
 
 .cdp-score-top {
@@ -781,3 +792,290 @@
 .cdp-facts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .cdp-facts-grid .cdp-fact-item { font-size: 0.78rem; }
 .cdp-facts-grid .cdp-fact-label { color: var(--cdp-muted); text-transform: uppercase; font-size: 0.65rem; }
+
+/* Resilience widget — ported from koala73/main src/styles/country-deep-dive.css */
+.resilience-widget {
+  gap: 8px;
+}
+
+.resilience-widget__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resilience-widget__title {
+  margin: 0;
+}
+
+.resilience-widget__help {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  line-height: 1;
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.resilience-widget__body {
+  gap: 10px;
+}
+
+.resilience-widget__overall {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resilience-widget__bar-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.resilience-widget__bar-track {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-faint) 14%, transparent);
+  overflow: hidden;
+}
+
+.resilience-widget__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.45s ease;
+}
+
+.resilience-widget__overall-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.resilience-widget__overall-score {
+  font-size: calc(26px * var(--wm-panel-effective-scale, 1));
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.resilience-widget__overall-level,
+.resilience-widget__overall-trend {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.resilience-widget__overall-trend {
+  color: var(--text-muted);
+}
+
+.resilience-widget__domains {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resilience-widget__domain-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 104px) minmax(0, 1fr) 32px;
+  gap: 10px;
+  align-items: center;
+}
+
+.resilience-widget__domain-label {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-muted);
+}
+
+.resilience-widget__domain-score {
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+}
+
+/* T1.6 Phase 1 of the country-resilience reference-grade upgrade plan:
+   per-dimension confidence grid. Renders a compact 2-column grid of the
+   19 scorer dimensions between the 6-domain bars and the footer.
+   Each cell shows a short label, a coverage bar, and a percentage.
+   Status modifiers (--observed, --partial, --imputed, --absent) tint
+   the bar fill so analysts can see provenance at a glance. */
+.resilience-widget__dimension-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.resilience-widget__dimension-cell {
+  display: grid;
+  /* label | coverage-bar | imputation-icon | percentage | freshness-dot */
+  grid-template-columns: minmax(56px, 72px) minmax(0, 1fr) 12px 28px 10px;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.resilience-widget__dimension-label {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resilience-widget__dimension-bar-track {
+  height: 4px;
+  background: var(--bar-track, rgba(255, 255, 255, 0.06));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.resilience-widget__dimension-bar-fill {
+  height: 100%;
+  background: var(--text-faint);
+  border-radius: 2px;
+  transition: width 0.25s ease-out;
+}
+
+/* Status modifiers tint the fill so the provenance class is legible
+   even when the cell label is truncated. Colors reuse the existing
+   resilience visual-level palette from resilience-widget-utils.ts so
+   the grid stays in the same chromatic family as the domain bars. */
+.resilience-widget__dimension-cell--observed .resilience-widget__dimension-bar-fill {
+  background: #84cc16;
+}
+
+.resilience-widget__dimension-cell--partial .resilience-widget__dimension-bar-fill {
+  background: #eab308;
+}
+
+.resilience-widget__dimension-cell--imputed .resilience-widget__dimension-bar-fill {
+  background: #f97316;
+}
+
+.resilience-widget__dimension-cell--absent .resilience-widget__dimension-bar-fill {
+  background: var(--text-faint);
+  opacity: 0.35;
+}
+
+.resilience-widget__dimension-cell--absent .resilience-widget__dimension-label,
+.resilience-widget__dimension-cell--absent .resilience-widget__dimension-pct {
+  opacity: 0.55;
+}
+
+.resilience-widget__dimension-pct {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* T1.6 full grid: imputation class icon column between the coverage
+   bar and the percentage. Rendered as a single glyph (checkmark,
+   question mark, exclamation, em-dash) tinted per class. Empty span
+   when the dimension has observed data or the scorer has not tagged
+   the class. Tooltip is carried on the parent cell's `title`. */
+.resilience-widget__dimension-imputation {
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.resilience-widget__dimension-imputation--stable-absence { color: #84cc16; }
+.resilience-widget__dimension-imputation--unmonitored { color: #eab308; }
+.resilience-widget__dimension-imputation--source-failure { color: #ef4444; }
+.resilience-widget__dimension-imputation--not-applicable { color: var(--text-faint); }
+
+/* T1.5 propagation: freshness glyph at the far right. Shape and color
+   both mirror the fresh/aging/stale staleness levels from the
+   classifier. Empty span when freshness is unknown so the grid column
+   reserves its 10px slot and rows stay aligned. */
+.resilience-widget__dimension-freshness {
+  font-size: calc(9px * var(--wm-panel-effective-scale, 1));
+  line-height: 1;
+  text-align: center;
+  cursor: help;
+}
+
+.resilience-widget__dimension-freshness--fresh { color: #22c55e; }
+.resilience-widget__dimension-freshness--aging { color: #eab308; }
+.resilience-widget__dimension-freshness--stale { color: #ef4444; }
+
+.resilience-widget__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.resilience-widget__confidence,
+.resilience-widget__delta {
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  color: var(--text-faint);
+}
+
+.resilience-widget__confidence--low {
+  color: var(--semantic-elevated);
+}
+
+.resilience-widget__retry {
+  align-self: flex-start;
+}
+
+.resilience-widget__error {
+  align-items: flex-start;
+}
+
+@media (max-width: 560px) {
+  .resilience-widget__bar-block {
+    grid-template-columns: 1fr;
+  }
+
+  .resilience-widget__overall-meta {
+    justify-content: flex-start;
+  }
+
+  .resilience-widget__domain-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .resilience-widget__domain-score {
+    text-align: left;
+  }
+
+  .resilience-widget__dimension-grid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  /* T1.6 full grid on narrow widths: tighten the label column and
+     shrink the inter-column gap so all five cells stay on one row
+     without wrapping. The imputation / freshness slots stay at their
+     12px / 10px intrinsic widths. */
+  .resilience-widget__dimension-cell {
+    grid-template-columns: minmax(48px, 64px) minmax(0, 1fr) 12px 24px 10px;
+    gap: 4px;
+  }
+}

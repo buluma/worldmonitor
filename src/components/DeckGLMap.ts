@@ -122,6 +122,13 @@ import { isAllowedPreviewUrl } from '@/utils/imagery-preview';
 import { pinWebcam, isPinned } from '@/services/webcams/pinned-store';
 import type { WebcamEntry, WebcamCluster } from '@/generated/client/worldmonitor/webcam/v1/service_client';
 import { fetchWebcamImage } from '@/services/webcams';
+import {
+  RESILIENCE_CHOROPLETH_COLORS,
+  buildResilienceChoroplethMap,
+  formatResilienceChoroplethLevel,
+  type ResilienceChoroplethEntry,
+  type ResilienceRankingRowLike,
+} from './resilience-choropleth-utils';
 
 export type TimeRange = '1h' | '6h' | '24h' | '48h' | '7d' | 'all';
 export type DeckMapView = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
@@ -396,6 +403,11 @@ export class DeckGLMap {
   // CII choropleth data
   private ciiScoresMap: Map<string, { score: number; level: string }> = new Map();
   private ciiScoresVersion = 0;
+
+  // Resilience choropleth data — structural complement to CII above (see
+  // resilienceScore layer def comment).
+  private resilienceScoresMap: Map<string, ResilienceChoroplethEntry> = new Map();
+  private resilienceScoresVersion = 0;
 
 
   // Country highlight state
@@ -1622,6 +1634,11 @@ export class DeckGLMap {
     if (mapLayers.ciiChoropleth) {
       const ciiLayer = this.createCIIChoroplethLayer();
       if (ciiLayer) layers.push(ciiLayer);
+    }
+    // Resilience choropleth (structural complement to CII)
+    if (mapLayers.resilienceScore) {
+      const resilienceLayer = this.createResilienceChoroplethLayer();
+      if (resilienceLayer) layers.push(resilienceLayer);
     }
     // Storage facilities layer. Registry is seeded weekly by
     // scripts/seed-storage-facilities.mjs; colors by derived publicBadge
@@ -3342,6 +3359,10 @@ export class DeckGLMap {
     critical: '#b91c1c', high: '#dc2626', elevated: '#f59e0b', normal: '#eab308', low: '#22c55e',
   };
 
+  private static readonly RESILIENCE_LEVEL_HEX: Record<string, string> = {
+    very_high: '#22c55e', high: '#84cc16', moderate: '#eab308', low: '#f97316', very_low: '#ef4444', insufficient_data: '#888',
+  };
+
   private createCIIChoroplethLayer(): GeoJsonLayer | null {
     if (!this.countriesGeoJsonData || this.ciiScoresMap.size === 0) return null;
     const scores = this.ciiScoresMap;
@@ -3361,6 +3382,28 @@ export class DeckGLMap {
       lineWidthMinPixels: 0.5,
       pickable: true,
       updateTriggers: { getFillColor: [this.ciiScoresVersion] },
+    });
+  }
+
+  private createResilienceChoroplethLayer(): GeoJsonLayer | null {
+    if (!this.countriesGeoJsonData || this.resilienceScoresMap.size === 0) return null;
+    const scores = this.resilienceScoresMap;
+    const colors = RESILIENCE_CHOROPLETH_COLORS;
+    return new GeoJsonLayer({
+      id: 'resilience-choropleth-layer',
+      data: this.countriesGeoJsonData,
+      filled: true,
+      stroked: true,
+      getFillColor: (feature: { properties?: Record<string, unknown> }) => {
+        const code = feature.properties?.['ISO3166-1-Alpha-2'] as string | undefined;
+        const entry = code ? scores.get(code) : undefined;
+        return entry ? colors[entry.level] : [0, 0, 0, 0];
+      },
+      getLineColor: [80, 80, 80, 80] as [number, number, number, number],
+      getLineWidth: 1,
+      lineWidthMinPixels: 0.5,
+      pickable: true,
+      updateTriggers: { getFillColor: [this.resilienceScoresVersion] },
     });
   }
 
@@ -3872,6 +3915,17 @@ export class DeckGLMap {
         if (!ciiEntry) return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/><span style="opacity:.7">No CII data</span></div>` };
         const levelColor = DeckGLMap.CII_LEVEL_HEX[ciiEntry.level] ?? '#888';
         return { html: `<div class="deckgl-tooltip"><strong>${text(ciiName)}</strong><br/>CII: <span style="color:${levelColor};font-weight:600">${ciiEntry.score}/100</span><br/><span style="text-transform:capitalize;opacity:.7">${text(ciiEntry.level)}</span></div>` };
+      }
+      case 'resilience-choropleth-layer': {
+        const resName = obj.properties?.name ?? 'Unknown';
+        const resCode = obj.properties?.['ISO3166-1-Alpha-2'];
+        const resEntry = resCode ? this.resilienceScoresMap.get(resCode as string) : undefined;
+        if (!resEntry) return { html: `<div class="deckgl-tooltip"><strong>${text(resName)}</strong><br/><span style="opacity:.7">No resilience data</span></div>` };
+        const resColor = DeckGLMap.RESILIENCE_LEVEL_HEX[resEntry.level] ?? '#888';
+        const outsideNote = resEntry.outsideHeadlineRanking
+          ? '<br/><span style="opacity:.6;font-size:0.9em">Below ranking confidence threshold</span>'
+          : '';
+        return { html: `<div class="deckgl-tooltip"><strong>${text(resName)}</strong><br/>Resilience: <span style="color:${resColor};font-weight:600">${resEntry.overallScore}/100</span><br/><span style="text-transform:capitalize;opacity:.7">${text(formatResilienceChoroplethLevel(resEntry.level))}</span>${outsideNote}</div>` };
       }
       case 'storage-facilities-layer': {
         const typeLabel = {
@@ -4689,6 +4743,24 @@ export class DeckGLMap {
     `, 'static gradient legend markup, no user input'));
     legend.appendChild(ciiLegend);
 
+    // Resilience choropleth gradient legend. Gradient runs red→green
+    // (low→high resilience) — the reverse direction of CII's green→red
+    // above, since higher is better here rather than worse.
+    const resilienceLegend = document.createElement('div');
+    resilienceLegend.className = 'cii-choropleth-legend';
+    resilienceLegend.id = 'resilienceChoroplethLegend';
+    resilienceLegend.style.display = this.state.layers.resilienceScore ? 'block' : 'none';
+    setTrustedHtml(resilienceLegend, trustedHtml(`
+      <span class="legend-label-title" style="font-size:9px;letter-spacing:0.5px;">RESILIENCE SCALE</span>
+      <div style="display:flex;align-items:center;gap:2px;margin-top:2px;">
+        <div style="width:100%;height:8px;border-radius:3px;background:linear-gradient(to right,#ef4444,#f97316,#eab308,#84cc16,#22c55e);"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:8px;opacity:0.7;margin-top:1px;">
+        <span>0</span><span>20</span><span>40</span><span>60</span><span>80</span><span>100</span>
+      </div>
+    `, 'static gradient legend markup, no user input'));
+    legend.appendChild(resilienceLegend);
+
     this.container.appendChild(legend);
     this.updateLegend();
   }
@@ -4705,6 +4777,10 @@ export class DeckGLMap {
     const ciiLegend = this.container.querySelector<HTMLElement>('#ciiChoroplethLegend');
     if (ciiLegend) {
       ciiLegend.style.display = this.state.layers.ciiChoropleth ? 'block' : 'none';
+    }
+    const resilienceLegend = this.container.querySelector<HTMLElement>('#resilienceChoroplethLegend');
+    if (resilienceLegend) {
+      resilienceLegend.style.display = this.state.layers.resilienceScore ? 'block' : 'none';
     }
   }
 
@@ -5318,6 +5394,12 @@ export class DeckGLMap {
   public setCIIScores(scores: Array<{ code: string; score: number; level: string }>): void {
     this.ciiScoresMap = new Map(scores.map(s => [s.code, { score: s.score, level: s.level }]));
     this.ciiScoresVersion++;
+    this.render();
+  }
+
+  public setResilienceScores(items: ResilienceRankingRowLike[], greyedOut: ResilienceRankingRowLike[] = []): void {
+    this.resilienceScoresMap = buildResilienceChoroplethMap(items, greyedOut);
+    this.resilienceScoresVersion++;
     this.render();
   }
 

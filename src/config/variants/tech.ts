@@ -274,6 +274,7 @@ export const DEFAULT_MAP_LAYERS: MapLayers = {
   storageFacilities: false,
   fuelShortages: false,
   diseaseOutbreaks: false,
+  resilienceScore: false,
 };
 
 // Mobile defaults for tech variant
@@ -338,6 +339,7 @@ export const MOBILE_DEFAULT_MAP_LAYERS: MapLayers = {
   storageFacilities: false,
   fuelShortages: false,
   diseaseOutbreaks: false,
+  resilienceScore: false,
 };
 
 export const VARIANT_CONFIG: VariantConfig = {

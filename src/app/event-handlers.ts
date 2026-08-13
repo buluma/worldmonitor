@@ -1054,6 +1054,19 @@ export class EventHandlerManager implements AppModule {
       console.log(`[App.onLayerChange] ${layer}: ${enabled} (${source})`);
       trackMapLayerToggle(layer, enabled, source);
       this.ctx.mapLayers[layer] = enabled;
+
+      // CII and resilience are mutually exclusive choropleths — both
+      // painting simultaneously just looks broken. Whichever one was just
+      // turned on wins; toggleLayer flips the other off through the normal
+      // pipeline rather than writing its state directly, so this callback
+      // itself fires again (enabled=false, source='programmatic') and
+      // storage/URL sync stay consistent.
+      if (enabled && layer === 'ciiChoropleth' && this.ctx.mapLayers.resilienceScore) {
+        this.ctx.map?.toggleLayer('resilienceScore');
+      } else if (enabled && layer === 'resilienceScore' && this.ctx.mapLayers.ciiChoropleth) {
+        this.ctx.map?.toggleLayer('ciiChoropleth');
+      }
+
       saveToStorage(STORAGE_KEYS.mapLayers, this.ctx.mapLayers);
       this.syncUrlState();
 

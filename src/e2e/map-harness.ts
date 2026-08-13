@@ -192,6 +192,7 @@ const allLayersEnabled: MapLayers = {
   storageFacilities: true,
   fuelShortages: true,
   diseaseOutbreaks: true,
+  resilienceScore: false,
 };
 
 const allLayersDisabled: MapLayers = {
@@ -251,6 +252,7 @@ const allLayersDisabled: MapLayers = {
   storageFacilities: false,
   fuelShortages: false,
   diseaseOutbreaks: false,
+  resilienceScore: false,
 };
 
 const SEEDED_NEWS_LOCATIONS: Array<{

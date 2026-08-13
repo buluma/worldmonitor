@@ -167,6 +167,7 @@ import { fetchSocialVelocity } from '@/services/social-velocity';
 import { fetchCrossSourceSignals } from '@/services/cross-source-signals';
 import { fetchDdosAttacks, fetchTrafficAnomalies } from '@/services/infrastructure/index';
 import { fetchDiseaseOutbreaks } from '@/services/disease-outbreaks';
+import { getResilienceRanking } from '@/services/resilience';
 import type { SocialVelocityPanel } from '@/components/SocialVelocityPanel';
 import type { InternetDisruptionsPanel } from '@/components/InternetDisruptionsPanel';
 import type { CrossSourceSignalsPanel } from '@/components/CrossSourceSignalsPanel';
@@ -520,6 +521,9 @@ export class DataLoaderManager implements AppModule {
     if (this.ctx.mapLayers.diseaseOutbreaks || shouldLoad('disease-outbreaks')) {
       tasks.push({ name: 'diseaseOutbreaks', task: runGuarded('diseaseOutbreaks', () => this.loadDiseaseOutbreaks()) });
     }
+    if (this.ctx.mapLayers.resilienceScore) {
+      tasks.push({ name: 'resilienceScore', task: runGuarded('resilienceScore', () => this.loadResilienceScores()) });
+    }
 
     // Stagger startup: run tasks in small batches to avoid hammering upstreams
     const BATCH_SIZE = 4;
@@ -629,6 +633,9 @@ export class DataLoaderManager implements AppModule {
         case 'climate':
         case 'gpsJamming':
           await this.loadIntelligenceSignals();
+          break;
+        case 'resilienceScore':
+          await this.loadResilienceScores();
           break;
       }
     } finally {
@@ -2882,6 +2889,24 @@ export class DataLoaderManager implements AppModule {
       }
     } catch (e) {
       console.error('[App] Disease outbreaks load failed:', e);
+    }
+  }
+
+  async loadResilienceScores(): Promise<void> {
+    try {
+      const data = await getResilienceRanking();
+      // The choropleth shows every scored country, not just headline-eligible
+      // ones — greyedOut entries are still real per-country scores, just
+      // below the ranking's confidence bar. Excluding them would leave the
+      // map mostly blank whenever global data coverage is thin.
+      // buildResilienceChoroplethMap (used downstream) tracks which list
+      // each country came from so the map/tooltip can flag that distinction.
+      if (data.items.length + data.greyedOut.length > 0) {
+        this.ctx.map?.setResilienceScores(data.items, data.greyedOut);
+        this.ctx.map?.setLayerReady('resilienceScore', true);
+      }
+    } catch (e) {
+      console.error('[App] Resilience scores load failed:', e);
     }
   }
 }

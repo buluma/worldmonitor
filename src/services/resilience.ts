@@ -1,0 +1,29 @@
+import { getRpcBaseUrl } from '@/services/rpc-client';
+import {
+  ResilienceServiceClient,
+  type GetResilienceRankingResponse,
+  type GetResilienceScoreResponse,
+  type ResilienceDomain,
+  type ResilienceDimension,
+  type ResilienceRankingItem,
+  type ScoreInterval,
+} from '@/generated/client/worldmonitor/resilience/v1/service_client';
+
+export type ResilienceScoreResponse = GetResilienceScoreResponse;
+export type ResilienceRankingResponse = GetResilienceRankingResponse;
+export type { ResilienceDomain, ResilienceDimension, ResilienceRankingItem, ScoreInterval };
+
+const client = new ResilienceServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
+
+function normalizeCountryCode(countryCode: string): string {
+  const normalized = countryCode.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : '';
+}
+
+export async function getResilienceScore(countryCode: string): Promise<ResilienceScoreResponse> {
+  return client.getResilienceScore({ countryCode: normalizeCountryCode(countryCode) });
+}
+
+export async function getResilienceRanking(): Promise<ResilienceRankingResponse> {
+  return client.getResilienceRanking({});
+}

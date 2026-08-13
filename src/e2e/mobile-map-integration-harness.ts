@@ -141,6 +141,7 @@ const layers = {
   storageFacilities: false,
   fuelShortages: false,
   diseaseOutbreaks: false,
+  resilienceScore: false,
 };
 
 await initI18n();

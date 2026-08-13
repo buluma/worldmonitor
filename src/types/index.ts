@@ -642,6 +642,10 @@ export interface MapLayers {
 
   // CII choropleth layer
   ciiChoropleth: boolean;
+  // Resilience score choropleth layer (structural complement to CII —
+  // CII asks "how much stress right now," resilience asks "how
+  // well-positioned to absorb and recover")
+  resilienceScore: boolean;
   // Overlay layers
   dayNight: boolean;
   // Commodity variant layers

@@ -75,6 +75,12 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
   private timelineBody: HTMLElement | null = null;
   private scoreCard: HTMLElement | null = null;
   private factsBody: HTMLElement | null = null;
+  // Structural complement to CII (the scoreCard above): CII asks "how much
+  // stress right now," resilience asks "how well-positioned to absorb and
+  // recover." Lazy-loaded (dynamic import) so the panel's base bundle stays
+  // light — most opens never scroll to it.
+  private resilienceWidget: import('./ResilienceWidget').ResilienceWidget | null = null;
+  private resilienceWidgetRequestId = 0;
 
   private readonly handleGlobalKeydown = (event: KeyboardEvent): void => {
     if (!this.panel.classList.contains('active')) return;
@@ -195,6 +201,7 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
       if (this.maximizeButton) this.maximizeButton.textContent = '\u26F6';
     }
     this.abortController.abort();
+    this.destroyResilienceWidget();
     this.close();
     this.currentCode = null;
     this.currentName = null;
@@ -617,6 +624,7 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
   }
 
   private renderSkeleton(country: string, code: string, score: CountryScore | null, signals: CountryBriefSignals): void {
+    this.destroyResilienceWidget();
     this.content.replaceChildren();
 
     const shell = this.el('div', 'cdp-shell');
@@ -727,8 +735,37 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     briefBody.append(this.makeLoading(t('countryBrief.generatingBrief')));
 
     bodyGrid.append(briefCard, factsExpanded, signalsCard, timelineCard, newsCard, militaryCard, infraCard, economicCard, marketsCard);
-    shell.append(header, scoreCard, bodyGrid);
+    const summaryGrid = this.el('div', 'cdp-summary-grid');
+    summaryGrid.append(scoreCard, this.renderResilienceWidgetSlot(code));
+    shell.append(header, summaryGrid, bodyGrid);
     this.content.append(shell);
+  }
+
+  private destroyResilienceWidget(): void {
+    this.resilienceWidgetRequestId += 1;
+    this.resilienceWidget?.destroy();
+    this.resilienceWidget = null;
+  }
+
+  private renderResilienceWidgetSlot(code: string): HTMLElement {
+    const slot = this.el('section', 'cdp-card resilience-widget resilience-widget--loading');
+    slot.append(this.makeLoading('Loading resilience score…'));
+
+    const requestId = ++this.resilienceWidgetRequestId;
+    import('./ResilienceWidget')
+      .then(({ ResilienceWidget }) => {
+        if (requestId !== this.resilienceWidgetRequestId) return;
+        const widget = new ResilienceWidget(code);
+        this.resilienceWidget = widget;
+        slot.replaceWith(widget.getElement());
+      })
+      .catch((error) => {
+        if (requestId !== this.resilienceWidgetRequestId) return;
+        console.warn('[CountryDeepDivePanel] failed to load ResilienceWidget:', error);
+        slot.replaceChildren(this.makeEmpty('Resilience score unavailable.'));
+      });
+
+    return slot;
   }
 
   private renderInitialSignals(signals: CountryBriefSignals): void {

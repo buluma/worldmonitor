@@ -7,6 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { isMobileDevice } from '@/utils';
 import { MapComponent } from './Map';
 import { DeckGLMap, type DeckMapView, type CountryClickPayload } from './DeckGLMap';
+import type { ResilienceRankingRowLike } from './resilience-choropleth-utils';
 import { GlobeMap } from './GlobeMap';
 import type {
   MapLayers,
@@ -132,6 +133,7 @@ export class MapContainer {
   private cachedKindnessData: KindnessPoint[] | null = null;
   private cachedHappinessScores: HappinessData | null = null;
   private cachedCIIScores: CIIScore[] | null = null;
+  private cachedResilienceScores: { items: ResilienceRankingRowLike[]; greyedOut: ResilienceRankingRowLike[] } | null = null;
   private cachedSpeciesRecovery: SpeciesRecovery[] | null = null;
   private cachedRenewableInstallations: RenewableInstallation[] | null = null;
   private cachedDiseaseOutbreaks: DiseaseOutbreakItem[] | null = null;
@@ -298,6 +300,7 @@ export class MapContainer {
     if (this.cachedKindnessData) this.setKindnessData(this.cachedKindnessData);
     if (this.cachedHappinessScores) this.setHappinessScores(this.cachedHappinessScores);
     if (this.cachedCIIScores) this.setCIIScores(this.cachedCIIScores);
+    if (this.cachedResilienceScores) this.setResilienceScores(this.cachedResilienceScores.items, this.cachedResilienceScores.greyedOut);
     if (this.cachedSpeciesRecovery) this.setSpeciesRecoveryZones(this.cachedSpeciesRecovery);
     if (this.cachedRenewableInstallations) this.setRenewableInstallations(this.cachedRenewableInstallations);
     if (this.cachedDiseaseOutbreaks) this.setDiseaseOutbreaks(this.cachedDiseaseOutbreaks);
@@ -644,6 +647,14 @@ export class MapContainer {
     if (this.useDeckGL) { this.deckGLMap?.setCIIScores(scores); }
   }
 
+  public setResilienceScores(items: ResilienceRankingRowLike[], greyedOut: ResilienceRankingRowLike[] = []): void {
+    this.cachedResilienceScores = { items, greyedOut };
+    if (this.useDeckGL) {
+      this.deckGLMap?.setResilienceScores(items, greyedOut);
+    }
+    // SVG map and Globe do not support the resilience choropleth layer
+  }
+
   public setSpeciesRecoveryZones(species: SpeciesRecovery[]): void {
     this.cachedSpeciesRecovery = species;
     if (this.useGlobe) { this.globeMap?.setSpeciesRecoveryZones(species); return; }
@@ -789,6 +800,15 @@ export class MapContainer {
     } else {
       this.svgMap?.setLayerLoading(layer, loading);
     }
+  }
+
+  // Flips a layer's on/off state through the same pipeline a user toggle
+  // uses (source='programmatic' so onLayerChange listeners can tell the two
+  // apart). GlobeMap has no toggle surface of its own — callers relying on
+  // this for a globe-supported layer while in globe mode get a no-op.
+  public toggleLayer(layer: keyof MapLayers): void {
+    if (this.useDeckGL) { this.deckGLMap?.toggleLayer(layer); return; }
+    if (!this.useGlobe) { this.svgMap?.toggleLayer(layer, 'programmatic'); }
   }
 
   public setLayerReady(layer: keyof MapLayers, hasData: boolean): void {
@@ -985,6 +1005,7 @@ export class MapContainer {
     this.cachedKindnessData = null;
     this.cachedHappinessScores = null;
     this.cachedCIIScores = null;
+    this.cachedResilienceScores = null;
     this.cachedSpeciesRecovery = null;
     this.cachedRenewableInstallations = null;
     this.cachedDiseaseOutbreaks = null;
