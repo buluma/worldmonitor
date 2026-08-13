@@ -2849,8 +2849,14 @@ async function seedClassifyForVariant(variant) {
   const digestUrl = `${RELAY_API_BASE}/api/news/v1/list-feed-digest?variant=${variant}&lang=en`;
   let digest;
   try {
+    // RELAY_API_BASE defaults to https://api.worldmonitor.app but self-hosted
+    // deployments point it at an internal http:// URL (WM_API_BASE_URL) —
+    // https.get() against an http:// URL throws immediately, which the catch
+    // below silently swallowed into total:0 with no error logged. Pick the
+    // transport from the actual URL scheme, mirroring upstashGet() above.
+    const transport = digestUrl.startsWith('https:') ? https : http;
     const resp = await new Promise((resolve, reject) => {
-      const req = https.get(digestUrl, {
+      const req = transport.get(digestUrl, {
         headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
         timeout: 15000,
       }, resolve);
