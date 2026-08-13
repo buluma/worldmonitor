@@ -24,6 +24,7 @@ import type {
   CountryDeepDiveSanctionsPressure,
   CountryDeepDiveTradeFlow,
   CountryDeepDiveTariffTrends,
+  CountryDeepDiveProduct,
 } from './CountryBriefPanel';
 import type { MapContainer } from './MapContainer';
 
@@ -89,6 +90,7 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
   private sanctionsBody: HTMLElement | null = null;
   private tradeFlowsBody: HTMLElement | null = null;
   private tariffBody: HTMLElement | null = null;
+  private productImportsBody: HTMLElement | null = null;
 
   private readonly handleGlobalKeydown = (event: KeyboardEvent): void => {
     if (!this.panel.classList.contains('active')) return;
@@ -734,6 +736,10 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     this.tariffBody = tariffBody;
     tariffBody.append(this.makeLoading('Loading tariff data…'));
 
+    const [productImportsCard, productImportsBody] = this.sectionCard('Product Imports', 'Top imported products by HS4 code with supplier breakdown.');
+    this.productImportsBody = productImportsBody;
+    productImportsBody.append(this.makeLoading('Loading product data…'));
+
     const [factsCard, factsBody] = this.sectionCard(t('countryBrief.countryFacts'));
     this.factsBody = factsBody;
     factsBody.append(this.makeLoading(t('countryBrief.loadingFacts')));
@@ -758,7 +764,7 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     marketsBody.append(this.makeLoading(t('countryBrief.loadingMarkets')));
     briefBody.append(this.makeLoading(t('countryBrief.generatingBrief')));
 
-    bodyGrid.append(briefCard, factsExpanded, signalsCard, timelineCard, newsCard, militaryCard, infraCard, economicCard, debtCard, sanctionsCard, tradeFlowsCard, tariffCard, marketsCard);
+    bodyGrid.append(briefCard, factsExpanded, signalsCard, timelineCard, newsCard, militaryCard, infraCard, economicCard, debtCard, sanctionsCard, tradeFlowsCard, tariffCard, productImportsCard, marketsCard);
     const summaryGrid = this.el('div', 'cdp-summary-grid');
     summaryGrid.append(scoreCard, this.renderResilienceWidgetSlot(code));
     shell.append(header, summaryGrid, bodyGrid);
@@ -870,6 +876,114 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
       this.proMetricBox('Trend', data.trend === 'rising' ? '↑ Rising' : '↓ Falling'),
     );
     this.tariffBody.append(grid);
+  }
+
+  /**
+   * Simplified from koala73's version: drops the chokepoint route-risk
+   * enrichment and recommendations sub-panel per supplier (a whole
+   * separate cross-analysis feature layered on top of the raw product/
+   * supplier data) — this renders the underlying product-imports data
+   * itself: top imported HS4 products and their top external suppliers
+   * by share and value.
+   */
+  public updateProductImports(products: CountryDeepDiveProduct[] | null): void {
+    if (!this.productImportsBody) return;
+    this.productImportsBody.replaceChildren();
+    if (!products || products.length === 0) {
+      this.productImportsBody.append(this.makeEmpty('No data available'));
+      return;
+    }
+    this.renderProductSelector(products);
+  }
+
+  private renderProductSelector(products: CountryDeepDiveProduct[]): void {
+    if (!this.productImportsBody) return;
+    const wrap = this.el('div', 'cdp-product-selector');
+    const input = this.el('input', 'cdp-product-search') as HTMLInputElement;
+    input.type = 'text';
+    input.placeholder = 'Search products...';
+    input.setAttribute('autocomplete', 'off');
+
+    const list = this.el('div', 'cdp-product-list');
+    const detailMount = this.el('div', 'cdp-product-detail');
+
+    const renderList = (filter: string) => {
+      list.replaceChildren();
+      const lower = filter.toLowerCase();
+      const filtered = lower
+        ? products.filter(p => p.description.toLowerCase().includes(lower) || p.hs4.includes(lower))
+        : products;
+      for (const p of filtered.slice(0, 12)) {
+        const item = this.el('button', 'cdp-product-item') as HTMLButtonElement;
+        item.type = 'button';
+        item.textContent = `${p.description} (HS ${p.hs4})`;
+        item.addEventListener('click', () => {
+          input.value = p.description;
+          list.replaceChildren();
+          this.renderProductDetail(detailMount, p);
+        });
+        list.append(item);
+      }
+    };
+
+    input.addEventListener('input', () => renderList(input.value));
+    input.addEventListener('focus', () => {
+      if (list.children.length === 0) renderList(input.value);
+    });
+
+    this.productImportsBody.addEventListener('click', (e) => {
+      if (!(e.target instanceof HTMLElement) || e.target.closest('.cdp-product-selector')) return;
+      list.replaceChildren();
+    });
+
+    wrap.append(input, list);
+    this.productImportsBody.append(wrap, detailMount);
+
+    const first = products[0];
+    if (first) {
+      input.value = first.description;
+      this.renderProductDetail(detailMount, first);
+    }
+  }
+
+  private renderProductDetail(mount: HTMLElement, product: CountryDeepDiveProduct): void {
+    mount.replaceChildren();
+
+    const header = this.el('div', 'cdp-product-header');
+    header.append(
+      this.el('span', 'cdp-product-name', `${product.description} (HS ${product.hs4})`),
+      this.el('span', 'cdp-product-value', this.formatMoney(product.totalValue)),
+    );
+    mount.append(header);
+
+    // Drop self-imports (receiver = supplier) and rows with unresolved partner
+    // ISO2 codes — the seeder emits partnerIso2='' when a UN code can't be
+    // mapped, which would otherwise surface as blank "N/A" rows.
+    const suppliers = product.topExporters.filter(e => e.partnerIso2 && e.partnerIso2 !== this.currentCode);
+    if (suppliers.length === 0) {
+      mount.append(this.makeEmpty('No exporter data'));
+      return;
+    }
+
+    const table = this.el('table', 'cdp-product-suppliers-table');
+    const thead = this.el('thead');
+    const hr = this.el('tr');
+    hr.append(this.el('th', '', 'Supplier'));
+    hr.append(this.el('th', '', 'Share'));
+    hr.append(this.el('th', '', 'Value'));
+    thead.append(hr);
+    table.append(thead);
+
+    const tbody = this.el('tbody');
+    for (const s of suppliers.slice(0, 10)) {
+      const tr = this.el('tr');
+      tr.append(this.el('td', '', s.partnerIso2));
+      tr.append(this.el('td', '', `${(s.share * 100).toFixed(1)}%`));
+      tr.append(this.el('td', '', this.formatMoney(s.value)));
+      tbody.append(tr);
+    }
+    table.append(tbody);
+    mount.append(table);
   }
 
   private renderInitialSignals(signals: CountryBriefSignals): void {

@@ -378,6 +378,31 @@ export class ApiError extends Error {
   }
 }
 
+export interface GetCountryProductsRequest {
+  iso2: string;
+}
+
+export interface GetCountryProductsResponse {
+  iso2: string;
+  products: CountryProduct[];
+  fetchedAt: string;
+}
+
+export interface CountryProduct {
+  hs4: string;
+  description: string;
+  totalValue: number;
+  topExporters: ProductExporter[];
+  year: number;
+}
+
+export interface ProductExporter {
+  partnerCode: number;
+  partnerIso2: string;
+  value: number;
+  share: number;
+}
+
 export interface GetChinaCorridorControlTowersRequest {
 }
 
@@ -654,6 +679,31 @@ export class SupplyChainServiceClient {
     }
 
     return await resp.json() as GetStorageFacilityDetailResponse;
+  }
+
+  async getCountryProducts(req: GetCountryProductsRequest, options?: SupplyChainServiceCallOptions): Promise<GetCountryProductsResponse> {
+    let path = "/api/supply-chain/v1/get-country-products";
+    const params = new URLSearchParams();
+    if (req.iso2 != null && req.iso2 !== "") params.set("iso2", String(req.iso2));
+    const url = this.baseURL + path + (params.toString() ? "?" + params.toString() : "");
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...this.defaultHeaders,
+      ...options?.headers,
+    };
+
+    const resp = await this.fetchFn(url, {
+      method: "GET",
+      headers,
+      signal: options?.signal,
+    });
+
+    if (!resp.ok) {
+      return this.handleError(resp);
+    }
+
+    return await resp.json() as GetCountryProductsResponse;
   }
 
   async getChinaCorridorControlTowers(_req: GetChinaCorridorControlTowersRequest, options?: SupplyChainServiceCallOptions): Promise<GetChinaCorridorControlTowersResponse> {

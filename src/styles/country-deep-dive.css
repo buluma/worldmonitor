@@ -1159,3 +1159,101 @@
 
 .cdp-pro-trend-up { color: var(--semantic-normal); }
 .cdp-pro-trend-down { color: var(--semantic-critical); }
+
+/* Country Intel Brief — Product Imports. Ported verbatim from
+   koala73/main's country-deep-dive.css. */
+.cdp-product-selector {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.cdp-product-search {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary, #1a1a2e);
+  color: var(--text);
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  outline: none;
+}
+
+.cdp-product-search:focus {
+  border-color: var(--accent, #3b82f6);
+}
+
+.cdp-product-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border);
+  border-radius: 0 0 6px 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.cdp-product-list:empty {
+  display: none;
+}
+
+.cdp-product-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+
+.cdp-product-item:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.cdp-product-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.cdp-product-name {
+  font-weight: 600;
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  color: var(--text);
+}
+
+.cdp-product-value {
+  font-weight: 600;
+  font-size: calc(12px * var(--wm-panel-effective-scale, 1));
+  color: var(--accent, #3b82f6);
+  white-space: nowrap;
+}
+
+.cdp-product-suppliers-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(11px * var(--wm-panel-effective-scale, 1));
+}
+
+.cdp-product-suppliers-table th {
+  text-align: left;
+  font-weight: 600;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: calc(10px * var(--wm-panel-effective-scale, 1));
+  text-transform: uppercase;
+}
+
+.cdp-product-suppliers-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}

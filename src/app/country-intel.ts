@@ -43,6 +43,7 @@ import { toFlagEmoji } from '@/utils/country-flag';
 import { getNationalDebtData } from '@/services/economic';
 import { fetchSanctionsPressure } from '@/services/sanctions-pressure';
 import { fetchTradeFlows, fetchTariffTrends } from '@/services/trade';
+import { fetchCountryProducts } from '@/services/supply-chain';
 import { iso2ToIso3, iso2ToComtradeReporterCode } from '@/utils/country-codes';
 
 type IntlDisplayNamesCtor = new (
@@ -470,6 +471,13 @@ export class CountryIntelManager implements AppModule {
       this.ctx.countryBriefPage?.updateTradeFlows?.(null);
       this.ctx.countryBriefPage?.updateTariffTrends?.(null);
     }
+
+    fetchCountryProducts(code).then((resp) => {
+      if (this.ctx.countryBriefPage?.getCode() !== code) return;
+      this.ctx.countryBriefPage.updateProductImports?.(resp.products.length > 0 ? resp.products : null);
+    }).catch(() => {
+      if (this.ctx.countryBriefPage?.getCode() === code) this.ctx.countryBriefPage.updateProductImports?.(null);
+    });
   }
 
   private async fetchCountryIntelBrief(code: string, contextSnapshot: string): Promise<string> {

@@ -104,6 +104,19 @@ export interface CountryDeepDiveTariffTrends {
   datapoints: Array<{ year: number; tariffRate: number }>;
 }
 
+export interface CountryDeepDiveProductExporter {
+  partnerIso2: string;
+  share: number;
+  value: number;
+}
+
+export interface CountryDeepDiveProduct {
+  hs4: string;
+  description: string;
+  totalValue: number;
+  topExporters: CountryDeepDiveProductExporter[];
+}
+
 export interface CountryBriefPanel {
   show(country: string, code: string, score: CountryScore | null, signals: CountryBriefSignals): void;
   hide(): void;
@@ -131,6 +144,7 @@ export interface CountryBriefPanel {
   updateSanctionsPressure?(data: CountryDeepDiveSanctionsPressure | null): void;
   updateTradeFlows?(flows: CountryDeepDiveTradeFlow[] | null): void;
   updateTariffTrends?(data: CountryDeepDiveTariffTrends | null): void;
+  updateProductImports?(products: CountryDeepDiveProduct[] | null): void;
   maximize?(): void;
   minimize?(): void;
   getIsMaximized?(): boolean;

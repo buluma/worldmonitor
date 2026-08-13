@@ -384,6 +384,31 @@ export interface ServerContext {
   headers: Record<string, string>;
 }
 
+export interface GetCountryProductsRequest {
+  iso2: string;
+}
+
+export interface GetCountryProductsResponse {
+  iso2: string;
+  products: CountryProduct[];
+  fetchedAt: string;
+}
+
+export interface CountryProduct {
+  hs4: string;
+  description: string;
+  totalValue: number;
+  topExporters: ProductExporter[];
+  year: number;
+}
+
+export interface ProductExporter {
+  partnerCode: number;
+  partnerIso2: string;
+  value: number;
+  share: number;
+}
+
 export interface GetChinaCorridorControlTowersRequest {
 }
 
@@ -415,6 +440,7 @@ export interface SupplyChainServiceHandler {
   getPipelineDetail(ctx: ServerContext, req: GetPipelineDetailRequest): Promise<GetPipelineDetailResponse>;
   listStorageFacilities(ctx: ServerContext, req: ListStorageFacilitiesRequest): Promise<ListStorageFacilitiesResponse>;
   getStorageFacilityDetail(ctx: ServerContext, req: GetStorageFacilityDetailRequest): Promise<GetStorageFacilityDetailResponse>;
+  getCountryProducts(ctx: ServerContext, req: GetCountryProductsRequest): Promise<GetCountryProductsResponse>;
   getChinaCorridorControlTowers(ctx: ServerContext, req: GetChinaCorridorControlTowersRequest): Promise<GetChinaCorridorControlTowersResponse>;
 }
 
@@ -846,6 +872,53 @@ export function createSupplyChainServiceRoutes(
 
           const result = await handler.getStorageFacilityDetail(ctx, body);
           return new Response(JSON.stringify(result as GetStorageFacilityDetailResponse), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err: unknown) {
+          if (err instanceof ValidationError) {
+            return new Response(JSON.stringify({ violations: err.violations }), {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          if (options?.onError) {
+            return options.onError(err, req);
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/supply-chain/v1/get-country-products",
+      handler: async (req: Request): Promise<Response> => {
+        try {
+          const pathParams: Record<string, string> = {};
+          const url = new URL(req.url, "http://localhost");
+          const params = url.searchParams;
+          const body: GetCountryProductsRequest = {
+            iso2: params.get("iso2") ?? "",
+          };
+          if (options?.validateRequest) {
+            const bodyViolations = options.validateRequest("getCountryProducts", body);
+            if (bodyViolations) {
+              throw new ValidationError(bodyViolations);
+            }
+          }
+
+          const ctx: ServerContext = {
+            request: req,
+            pathParams,
+            headers: Object.fromEntries(req.headers.entries()),
+          };
+
+          const result = await handler.getCountryProducts(ctx, body);
+          return new Response(JSON.stringify(result as GetCountryProductsResponse), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });

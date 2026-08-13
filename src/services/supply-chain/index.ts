@@ -4,11 +4,14 @@ import {
   type GetShippingRatesResponse,
   type GetChokepointStatusResponse,
   type GetCriticalMineralsResponse,
+  type GetCountryProductsResponse,
   type ShippingIndex,
   type ChokepointInfo,
   type CriticalMineral,
   type MineralProducer,
   type ShippingRatePoint,
+  type CountryProduct,
+  type ProductExporter,
 } from '@/generated/client/worldmonitor/supply_chain/v1/service_client';
 import { createCircuitBreaker } from '@/utils';
 import { getHydratedData } from '@/services/bootstrap';
@@ -34,12 +37,16 @@ export type {
   GetShippingRatesResponse,
   GetChokepointStatusResponse,
   GetCriticalMineralsResponse,
+  GetCountryProductsResponse,
   ShippingIndex,
   ChokepointInfo,
   CriticalMineral,
   MineralProducer,
   ShippingRatePoint,
+  CountryProduct,
+  ProductExporter,
 };
+export type { GetCountryProductsResponse as CountryProductsResponse };
 
 const client = new SupplyChainServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
 
@@ -103,5 +110,14 @@ export async function fetchCriticalMinerals(): Promise<GetCriticalMineralsRespon
     }, emptyMinerals);
   } catch {
     return emptyMinerals;
+  }
+}
+
+export async function fetchCountryProducts(iso2: string): Promise<GetCountryProductsResponse> {
+  const empty: GetCountryProductsResponse = { iso2, products: [], fetchedAt: '' };
+  try {
+    return await client.getCountryProducts({ iso2 }, { signal: AbortSignal.timeout(15_000) });
+  } catch {
+    return empty;
   }
 }
