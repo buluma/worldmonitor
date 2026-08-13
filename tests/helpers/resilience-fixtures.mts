@@ -18,12 +18,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:NO': {
     wgi: {
       indicators: {
-        'VA.EST': { value: 1.9, year: 2025 },
-        'PV.EST': { value: 1.7, year: 2025 },
-        'GE.EST': { value: 1.8, year: 2025 },
-        'RQ.EST': { value: 1.9, year: 2025 },
-        'RL.EST': { value: 1.8, year: 2025 },
-        'CC.EST': { value: 1.9, year: 2025 },
+        'GOV_WGI_VA.EST': { value: 1.9, year: 2025 },
+        'GOV_WGI_PV.EST': { value: 1.7, year: 2025 },
+        'GOV_WGI_GE.EST': { value: 1.8, year: 2025 },
+        'GOV_WGI_RQ.EST': { value: 1.9, year: 2025 },
+        'GOV_WGI_RL.EST': { value: 1.8, year: 2025 },
+        'GOV_WGI_CC.EST': { value: 1.9, year: 2025 },
       },
     },
     infrastructure: {
@@ -55,12 +55,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:US': {
     wgi: {
       indicators: {
-        'VA.EST': { value: 0.9, year: 2025 },
-        'PV.EST': { value: 0.6, year: 2025 },
-        'GE.EST': { value: 1.1, year: 2025 },
-        'RQ.EST': { value: 1.2, year: 2025 },
-        'RL.EST': { value: 1.0, year: 2025 },
-        'CC.EST': { value: 1.1, year: 2025 },
+        'GOV_WGI_VA.EST': { value: 0.9, year: 2025 },
+        'GOV_WGI_PV.EST': { value: 0.6, year: 2025 },
+        'GOV_WGI_GE.EST': { value: 1.1, year: 2025 },
+        'GOV_WGI_RQ.EST': { value: 1.2, year: 2025 },
+        'GOV_WGI_RL.EST': { value: 1.0, year: 2025 },
+        'GOV_WGI_CC.EST': { value: 1.1, year: 2025 },
       },
     },
     infrastructure: {
@@ -92,12 +92,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:YE': {
     wgi: {
       indicators: {
-        'VA.EST': { value: -1.9, year: 2025 },
-        'PV.EST': { value: -2.3, year: 2025 },
-        'GE.EST': { value: -1.8, year: 2025 },
-        'RQ.EST': { value: -1.7, year: 2025 },
-        'RL.EST': { value: -2.0, year: 2025 },
-        'CC.EST': { value: -2.1, year: 2025 },
+        'GOV_WGI_VA.EST': { value: -1.9, year: 2025 },
+        'GOV_WGI_PV.EST': { value: -2.3, year: 2025 },
+        'GOV_WGI_GE.EST': { value: -1.8, year: 2025 },
+        'GOV_WGI_RQ.EST': { value: -1.7, year: 2025 },
+        'GOV_WGI_RL.EST': { value: -2.0, year: 2025 },
+        'GOV_WGI_CC.EST': { value: -2.1, year: 2025 },
       },
     },
     infrastructure: {
@@ -334,12 +334,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:LB': {
     wgi: {
       indicators: {
-        'VA.EST': { value: -0.9, year: 2025 },
-        'PV.EST': { value: -1.8, year: 2025 },
-        'GE.EST': { value: -1.2, year: 2025 },
-        'RQ.EST': { value: -1.0, year: 2025 },
-        'RL.EST': { value: -1.1, year: 2025 },
-        'CC.EST': { value: -1.3, year: 2025 },
+        'GOV_WGI_VA.EST': { value: -0.9, year: 2025 },
+        'GOV_WGI_PV.EST': { value: -1.8, year: 2025 },
+        'GOV_WGI_GE.EST': { value: -1.2, year: 2025 },
+        'GOV_WGI_RQ.EST': { value: -1.0, year: 2025 },
+        'GOV_WGI_RL.EST': { value: -1.1, year: 2025 },
+        'GOV_WGI_CC.EST': { value: -1.3, year: 2025 },
       },
     },
     infrastructure: {
