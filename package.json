@@ -135,6 +135,6 @@
   "overrides": {
     "fast-xml-parser": "^5.10.1",
     "serialize-javascript": "^7.0.5",
-    "svgo": "^4.0.2"
+    "svgo": "^4.1.0"
   }
 }
