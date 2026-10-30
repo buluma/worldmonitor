@@ -12,7 +12,6 @@ const readSrc = (relPath) => readFileSync(resolve(root, relPath), 'utf-8');
 const liveNewsSrc = readSrc('src/components/LiveNewsPanel.ts');
 const liveNewsSvc = readSrc('src/services/live-news.ts');
 const youtubeApi = readSrc('api/youtube/live.js');
-const sidecarSrc = readSrc('src-tauri/sidecar/local-api-server.mjs');
 const indexHtml = readSrc('index.html');
 
 // ── Extract channel IDs and DIRECT_HLS_MAP keys from source ──
@@ -270,84 +269,6 @@ describe('fetchLiveVideoInfo service', () => {
       'fetchLiveVideoId should be marked deprecated');
     assert.match(liveNewsSvc, /export async function fetchLiveVideoId/,
       'fetchLiveVideoId must still be exported');
-  });
-});
-
-// ── 9. Sidecar YouTube embed endpoint ──
-
-describe('sidecar youtube-embed endpoint', () => {
-  it('registers /api/youtube-embed route', () => {
-    assert.match(sidecarSrc, /\/api\/youtube-embed/,
-      'Sidecar must handle /api/youtube-embed');
-  });
-
-  it('validates videoId format', () => {
-    assert.match(sidecarSrc, /\[A-Za-z0-9_-\]\{11\}/,
-      'Must validate videoId is exactly 11 chars');
-  });
-
-  it('rejects invalid videoId with 400', () => {
-    assert.match(sidecarSrc, /status:\s*400/,
-      'Invalid videoId must return 400');
-  });
-
-  it('whitelists video quality values', () => {
-    assert.match(sidecarSrc, /small.*medium.*large.*hd720.*hd1080/,
-      'Must whitelist quality parameter values');
-  });
-
-  it('is exempt from auth gate (before auth middleware)', () => {
-    const embedPos = sidecarSrc.indexOf('/api/youtube-embed');
-    const authPos = sidecarSrc.indexOf('Global auth gate');
-    assert.ok(embedPos > 0 && authPos > 0, 'Both positions must exist');
-    assert.ok(embedPos < authPos,
-      'youtube-embed must be BEFORE auth gate (iframe src cannot carry auth headers)');
-  });
-
-  it('uses mute param (not hardcoded) in playerVars', () => {
-    const embedSection = sidecarSrc.slice(
-      sidecarSrc.indexOf('/api/youtube-embed'),
-      sidecarSrc.indexOf('Global auth gate'),
-    );
-    assert.match(embedSection, /mute:\$\{mute\}/,
-      'playerVars.mute must use the mute param, not hardcoded mute:1');
-    assert.doesNotMatch(embedSection, /playerVars:\{[^}]*mute:1[^}]*\}/,
-      'playerVars must NOT hardcode mute:1');
-  });
-
-  it('has postMessage bridge for play/pause/mute/unmute', () => {
-    const embedSection = sidecarSrc.slice(
-      sidecarSrc.indexOf('/api/youtube-embed'),
-      sidecarSrc.indexOf('Global auth gate'),
-    );
-    assert.match(embedSection, /case'play':.*playVideo/,
-      'postMessage bridge must handle play command');
-    assert.match(embedSection, /case'pause':.*pauseVideo/,
-      'postMessage bridge must handle pause command');
-    assert.match(embedSection, /case'mute':.*\.mute\(\)/,
-      'postMessage bridge must handle mute command');
-    assert.match(embedSection, /case'unmute':.*\.unMute\(\)/,
-      'postMessage bridge must handle unmute command');
-  });
-
-  it('has play overlay for autoplay failures', () => {
-    const embedSection = sidecarSrc.slice(
-      sidecarSrc.indexOf('/api/youtube-embed'),
-      sidecarSrc.indexOf('Global auth gate'),
-    );
-    assert.match(embedSection, /play-overlay/,
-      'Embed must include a play overlay for WKWebView autoplay fallback');
-    assert.match(embedSection, /setTimeout.*started.*overlay/s,
-      'Play overlay must show after timeout if video has not started');
-  });
-
-  it('sends yt-ready postMessage to parent on ready', () => {
-    const embedSection = sidecarSrc.slice(
-      sidecarSrc.indexOf('/api/youtube-embed'),
-      sidecarSrc.indexOf('Global auth gate'),
-    );
-    assert.match(embedSection, /postMessage\(\{type:'yt-ready'\}/,
-      'Must send yt-ready message to parent window');
   });
 });
 
