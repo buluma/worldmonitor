@@ -133,7 +133,7 @@
     "youtubei.js": "^16.0.1"
   },
   "overrides": {
-    "fast-xml-parser": "^5.10.1",
+    "fast-xml-parser": "^5.11.2",
     "serialize-javascript": "^7.0.5",
     "svgo": "^4.1.0"
   }
