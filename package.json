@@ -89,7 +89,7 @@
     "h3-js": "^4.5.0",
     "markdownlint-cli2": "^0.24.0",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "vite": "^8.3.5",
     "vite-plugin-pwa": "^2.0.0"
   },
