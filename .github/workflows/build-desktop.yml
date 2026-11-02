@@ -35,16 +35,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-14'
-            args: '--target aarch64-apple-darwin'
-            node_target: 'aarch64-apple-darwin'
-            label: 'macOS-ARM64'
-            timeout: 180
-          - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
-            node_target: 'x86_64-apple-darwin'
-            label: 'macOS-x64'
-            timeout: 180
           - platform: 'windows-latest'
             args: ''
             node_target: 'x86_64-pc-windows-msvc'
