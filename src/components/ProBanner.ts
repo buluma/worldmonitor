@@ -1,3 +1,4 @@
+import { isSelfHostAccess } from '@/config/self-host-access';
 import { trackGateHit, trackProBannerClick } from '@/services/analytics';
 import {
   onEntitlementChange,
@@ -214,7 +215,7 @@ function resolveEffectiveBannerPremium(): EffectiveBannerPremium {
 }
 
 export function showProBanner(container: HTMLElement): void {
-  if (import.meta.env?.VITE_SELF_HOST_ACCESS === 'true') {
+  if (isSelfHostAccess()) {
     setReservation(false);
     return;
   }
@@ -336,7 +337,7 @@ export function showProBanner(container: HTMLElement): void {
 //     → re-mount via showProBanner. Same gate set as the initial mount path,
 //       so we can never surface a banner the user has already ✕'d this week.
 function syncProBanner(): void {
-  if (import.meta.env?.VITE_SELF_HOST_ACCESS === 'true') {
+  if (isSelfHostAccess()) {
     setReservation(false);
     return;
   }

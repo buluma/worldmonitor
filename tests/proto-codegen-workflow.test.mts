@@ -80,6 +80,7 @@ type ChangeClassifierOptions = {
   headSha?: string;
   pullRequestAuthor?: string;
   repositoryOwner?: string;
+  localDiffFiles?: string[];
 };
 
 function runChangeClassifier(
@@ -115,6 +116,11 @@ function runChangeClassifier(
     };
     writeFileSync(filesJson, JSON.stringify(pages ?? []));
     writeFileSync(metadataJson, JSON.stringify(metadata));
+    if (options.localDiffFiles) {
+      const localDiff = join(temp, 'local-diff');
+      writeFileSync(localDiff, options.localDiffFiles.join('\0') + '\0');
+      writeFileSync(join(fakeBin, 'git'), `#!/bin/sh\ncase "$1" in\n  cat-file) exit 0 ;;\n  diff) /bin/cat '${localDiff}' ;;\n  *) exit 1 ;;\nesac\n`, { mode: 0o755 });
+    }
     writeFileSync(
       join(fakeBin, 'gh'),
       pages
@@ -581,7 +587,15 @@ describe('proto codegen workflow trust boundaries (#3340)', () => {
     const truncated = runChangeClassifier(['src/components/Panel.ts'], { changedFiles: 3001 });
     assert.notEqual(truncated.status, 0);
     assert.equal(truncated.output, '');
-    assert.match(truncated.stdout, /returned 1 of 3001 changed files/i);
+    assert.match(truncated.stdout, /base or head commit is unavailable/i);
+
+    const complete = runChangeClassifier(['src/components/Panel.ts'], {
+      changedFiles: 3001,
+      localDiffFiles: ['src/components/Panel.ts', 'proto/service.proto'],
+    });
+    assert.equal(complete.status, 0, complete.stderr);
+    assert.match(complete.output, /^codegen=true$/m);
+    assert.match(complete.output, /^breaking=true$/m);
   });
 
   it('classifies every paginated PR-files page', () => {

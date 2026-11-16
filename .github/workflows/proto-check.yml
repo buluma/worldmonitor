@@ -148,6 +148,13 @@ jobs:
       breaking: ${{ steps.paths.outputs.breaking || steps.non-pr.outputs.breaking }}
       owner_trusted_head: ${{ steps.paths.outputs.owner_trusted_head || steps.non-pr.outputs.owner_trusted_head }}
     steps:
+      # The PR-files API truncates after 3000 files. Keep both exact commits
+      # available so unusually large migrations can be classified locally.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Classify proto codegen paths
         id: paths
         if: github.event_name == 'pull_request'
@@ -176,7 +183,13 @@ jobs:
             exit 1
           fi
 
-          if [ "$EXPECTED_FILE_COUNT" -gt 3000 ] || [ "$RETURNED_FILE_COUNT" -ne "$EXPECTED_FILE_COUNT" ]; then
+          if [ "$EXPECTED_FILE_COUNT" -gt 3000 ]; then
+            git cat-file -e "$EVENT_BASE_SHA^{commit}" && git cat-file -e "$EVENT_HEAD_SHA^{commit}" || {
+              echo "ERROR: Exact PR base or head commit is unavailable for local classification."
+              exit 1
+            }
+            FILES_JSON=$(git diff --name-only --no-renames -z "$EVENT_BASE_SHA...$EVENT_HEAD_SHA" | jq -Rs '[split("\u0000") | map(select(length > 0) | {filename: .})]')
+          elif [ "$RETURNED_FILE_COUNT" -ne "$EXPECTED_FILE_COUNT" ]; then
             echo "ERROR: GitHub returned $RETURNED_FILE_COUNT of $EXPECTED_FILE_COUNT changed files; refusing an incomplete codegen classification."
             exit 1
           fi

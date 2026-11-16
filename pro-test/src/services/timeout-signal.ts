@@ -42,7 +42,7 @@ export function fallbackTimeoutSignal(ms: number): AbortSignal {
       // Native `AbortSignal.timeout` aborts with a `TimeoutError` DOMException;
       // a bare `controller.abort()` produces an `AbortError` instead. The
       // difference is load-bearing in this codebase —
-      // `analytics-collector-transport.ts` branches on `name === 'TimeoutError'`
+      // `collector-transport.ts` branches on `name === 'TimeoutError'`
       // to tell a request that timed out from one the caller cancelled — so the
       // fallback reproduces the native reason rather than silently reclassifying
       // every old-engine timeout as a cancellation.

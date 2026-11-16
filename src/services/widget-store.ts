@@ -1,3 +1,4 @@
+import { isSelfHostAccess } from '@/config/self-host-access';
 import { loadFromStorage, saveToStorage } from '@/utils';
 import { safeStorageGet } from '@/utils/safe-storage';
 import { clearPanelColSpanEntry, clearPanelSpanEntry } from '@/utils/panel-storage';
@@ -283,7 +284,7 @@ export function isProWidgetEnabled(): boolean {
 
 export function isProUser(): boolean {
   return (
-    import.meta.env?.VITE_SELF_HOST_ACCESS === 'true' ||
+    isSelfHostAccess() ||
     isWidgetFeatureEnabled() ||
     isProWidgetEnabled() ||
     getAuthState().user?.role === 'pro' ||

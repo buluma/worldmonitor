@@ -624,6 +624,15 @@ jobs:
           else
             base="$PUSH_BEFORE"
           fi
+          # One-time migration from the legacy fork to this upstream snapshot.
+          # The legacy health module predates the exported registry contract;
+          # validate changes since the pinned upstream snapshot instead. This
+          # does not assert that its probes are seeded on this deployment.
+          if [ "$base" = "c6c881b02368d8af1988322b898ea45decff66a0" ] && \
+             git merge-base --is-ancestor 54fee2e1797919b280aba2ce99f675eac319a189 HEAD; then
+            echo "Migration baseline: upstream probes require separate deployment validation"
+            base=54fee2e1797919b280aba2ce99f675eac319a189
+          fi
           echo "health-probe cutover base: $base"
           node --import tsx scripts/check-health-probe-cutovers.mts "$base"
       - name: OpenAPI bundle capacity (#6558)

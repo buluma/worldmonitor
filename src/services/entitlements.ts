@@ -1,3 +1,4 @@
+import { isSelfHostAccess } from '@/config/self-host-access';
 /**
  * Frontend entitlement service with reactive ConvexClient subscription.
  *
@@ -345,7 +346,7 @@ export function hasEmbedAccessForAccount(role: 'free' | 'pro' | undefined): bool
  * presentation gate; the shared-dashboard gate is enforced in Convex.
  */
 export function hasTabFocusForAccount(): boolean {
-  return import.meta.env?.VITE_SELF_HOST_ACCESS === 'true' || hasTabFocus(currentState, Date.now());
+  return isSelfHostAccess() || hasTabFocus(currentState, Date.now());
 }
 
 /**
@@ -354,14 +355,14 @@ export function hasTabFocusForAccount(): boolean {
  * MCP tool refuses an account without it on the server.
  */
 export function hasTravelRiskAssessmentForAccount(): boolean {
-  return import.meta.env?.VITE_SELF_HOST_ACCESS === 'true' || hasTravelRiskAssessment(currentState, Date.now());
+  return isSelfHostAccess() || hasTravelRiskAssessment(currentState, Date.now());
 }
 
 /**
  * Check whether the user's tier meets or exceeds the given minimum.
  */
 export function hasTier(minTier: number): boolean {
-  if (import.meta.env?.VITE_SELF_HOST_ACCESS === 'true') return true;
+  if (isSelfHostAccess()) return true;
   if (currentState === null) return false;
   return currentState.features.tier >= minTier;
 }

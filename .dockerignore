@@ -9,6 +9,9 @@ dist
 .windsurf
 .agent
 .agents
+.gemini-tasks
+.worldmonitor-cache.json
+api/data/
 .claude
 .factory
 .planning
