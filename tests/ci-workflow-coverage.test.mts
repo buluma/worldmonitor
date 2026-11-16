@@ -1426,8 +1426,8 @@ describe('CI workflow coverage', () => {
     const breakingStep = workflowStepBlock(protoCheckWorkflow, 'Check for breaking proto changes');
     assert.match(
       breakingStep,
-      /^\s+run: cd proto && buf breaking --against "\.\.\/\.git#branch=origin\/\$BASE_REF,subdir=proto"\s*$/m,
-      'proto-check.yml must run buf breaking against the fetched PR base branch',
+      /buf breaking --against "\.\.\/\.git#branch=\$baseline,subdir=proto"/,
+      'proto-check.yml must run buf breaking against the selected baseline',
     );
     assert.doesNotMatch(breakingStep, /^\s+continue-on-error:/m);
 

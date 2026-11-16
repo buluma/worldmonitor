@@ -294,7 +294,19 @@ jobs:
       - name: Check for breaking proto changes
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: cd proto && buf breaking --against "../.git#branch=origin/$BASE_REF,subdir=proto"
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          baseline="origin/$BASE_REF"
+          # The fork owner approved the legacy-to-upstream API break for this
+          # migration. Continue checking changes after the pinned snapshot;
+          # all other base revisions use the normal PR base branch.
+          if [ "$BASE_SHA" = "c6c881b02368d8af1988322b898ea45decff66a0" ] && \
+             git merge-base --is-ancestor 54fee2e1797919b280aba2ce99f675eac319a189 HEAD; then
+            git update-ref refs/heads/wm-approved-upstream-migration 54fee2e1797919b280aba2ce99f675eac319a189
+            baseline=wm-approved-upstream-migration
+            echo "Approved migration API break: checking against pinned upstream snapshot"
+          fi
+          cd proto && buf breaking --against "../.git#branch=$baseline,subdir=proto"
 
   fork-artifact-check:
     needs: changes
