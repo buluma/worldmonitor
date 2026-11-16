@@ -532,5 +532,9 @@ export async function resolvePremiumCallerIdentity(request: Request): Promise<Pr
  * shape than the two edge routes and is deliberately not bundled here.
  */
 export async function isCallerPremium(request: Request): Promise<boolean> {
+  if (process.env.LOCAL_API_MODE === 'docker') {
+    const key = await validateApiKey(request, {});
+    if (key.valid && key.kind === 'session') return true;
+  }
   return (await resolvePremiumCallerIdentity(request)).isPremium;
 }

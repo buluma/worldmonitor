@@ -66,6 +66,13 @@ function post(body: unknown, headers: Record<string, string> = { Authorization: 
 }
 
 describe('travel risk export route: who gets in', () => {
+  it('accepts a verified local session without cloud entitlements', async () => {
+    const { deps, calls } = harness({ authorizeLocalSession: async () => true });
+    const res = await createTravelRiskExportHandler(deps)(post({ ...TRIP, format: 'markdown' }, {}));
+    assert.equal(res.status, 200);
+    assert.equal(calls.build, 1);
+    assert.equal(calls.entitlement.length, 0);
+  });
   it('admits Pro Business, API Business and Enterprise', async () => {
     for (const plan of ['pro_business_monthly', 'pro_business_annual', 'api_business', 'api_business_annual', 'enterprise']) {
       const { deps, calls } = harness({ plan });

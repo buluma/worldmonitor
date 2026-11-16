@@ -201,7 +201,7 @@ export function installFetchFailureAttribution(): boolean {
  * The restore is guarded on `window.fetch` still being OUR wrapper: if some
  * other instrumentation wrapped us afterwards, putting the original back would
  * tear that wrapper's delegate out from under it. In that case we clear the
- * latch only, exactly as `analytics-collector-transport.ts` does.
+ * latch only, exactly as `collector-transport.ts` does.
  */
 export function resetFetchFailureAttributionForTesting(): void {
   if (

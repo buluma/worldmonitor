@@ -16,6 +16,8 @@ export const config = { runtime: 'edge', regions: ['iad1', 'lhr1', 'fra1', 'sfo1
 // @ts-expect-error — JS module, no declaration file
 import { getCorsHeaders } from './_cors.js';
 // @ts-expect-error — JS module, no declaration file
+import { validateApiKey } from './_api-key.js';
+// @ts-expect-error — JS module, no declaration file
 import { captureSilentError } from './_sentry-edge.js';
 import { validateBearerToken } from '../server/auth-session';
 import { getEntitlements, isEntitlementBackendConfigured } from '../server/_shared/entitlement-check';
@@ -31,6 +33,11 @@ const RATE_WINDOW = '60 s';
 const tool = createTravelRiskTool();
 
 export default createTravelRiskExportHandler({
+  authorizeLocalSession: async (request) => {
+    if (process.env.LOCAL_API_MODE !== 'docker') return false;
+    const key = await validateApiKey(request, {});
+    return key.valid && key.kind === 'session';
+  },
   corsHeaders: (request) => getCorsHeaders(request, 'POST, OPTIONS'),
   // The role is not used, so skip the plan lookup it would trigger.
   validateBearer: (token) => validateBearerToken(token, { resolvePlan: false }),

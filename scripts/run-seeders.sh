@@ -133,15 +133,15 @@ for f in "$SCRIPT_DIR"/seed-*.mjs; do
   if caps_seed "$f" && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; }; then
     printf "TIMEOUT (killed after %ss)\n" "$SEED_TIMEOUT"
     timedout=$((timedout + 1))
+  elif [ "$rc" -ne 0 ]; then
+    printf "FAIL (%s)\n" "$last"
+    fail=$((fail + 1))
   elif echo "$last" | grep -qi "skip\|not set\|missing.*key\|not found"; then
     printf "SKIP (%s)\n" "$last"
     skip=$((skip + 1))
-  elif [ $rc -eq 0 ]; then
+  else
     printf "OK\n"
     ok=$((ok + 1))
-  else
-    printf "FAIL (%s)\n" "$last"
-    fail=$((fail + 1))
   fi
 done
 

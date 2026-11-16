@@ -12,6 +12,23 @@ import { join } from 'node:path';
 
 const repoRoot = new URL('..', import.meta.url).pathname;
 
+test('a failed bundle is not classified as skipped when its summary mentions skips', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wm-run-seeders-status-'));
+  try {
+    mkdirSync(join(dir, 'scripts'));
+    copyFileSync(join(repoRoot, 'scripts/run-seeders.sh'), join(dir, 'scripts/run-seeders.sh'));
+    writeFileSync(join(dir, '.env'), 'REDIS_TOKEN=test-token\n');
+    writeFileSync(join(dir, 'scripts/seed-bundle-probe.mjs'), "console.log('ran:1 skipped:2 failed:1'); process.exitCode = 1;\n");
+    const out = execFileSync('sh', [join(dir, 'scripts/run-seeders.sh')], {
+      env: { PATH: process.env.PATH, SEED_TIMEOUT: '0' }, encoding: 'utf8',
+    });
+    assert.match(out, /seed-bundle-probe\.mjs \.\.\. FAIL \(ran:1 skipped:2 failed:1\)/);
+    assert.match(out, /0 ok, 0 skipped, 1 failed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function runWithOverride(overrideYaml) {
   const dir = mkdtempSync(join(tmpdir(), 'wm-run-seeders-'));
   try {

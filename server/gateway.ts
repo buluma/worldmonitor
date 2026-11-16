@@ -966,7 +966,6 @@ const GATEWAY_DIRECT_LLM_QUOTA_METHODS: Record<string, string> = {
   '/api/news/v1/summarize-article': 'POST',
 };
 
-const COUNTRY_INTEL_BRIEF_PATH = '/api/intelligence/v1/get-country-intel-brief';
 
 // A direct-LLM reservation that dispatch() has charged but not yet settled,
 // keyed by the request it was charged for. dispatch() releases it itself on
@@ -1634,15 +1633,8 @@ export function createDomainGateway(
     }
     const requiresDirectLlmQuota = !internalMcpVerified && await shouldReserveGatewayDirectLlmQuota(directLlmPolicyRequest, pathname);
     const isTierGated = !internalMcpVerified && !isPublicNoAuthRpc && !seedRefreshVerified && !relayWarmPingVerified && getRequiredTier(pathname) !== null;
-    // Docker self-hosting has no Clerk/Convex entitlement backend. Its browser
-    // still obtains and presents a server-signed anonymous session, so that
-    // proof remains the gateway authentication boundary on this one route.
-    // Cloud deployments do not set LOCAL_API_MODE=docker, and every other
-    // premium route retains forceKey + entitlement enforcement below.
-    const isDockerSelfHostCountryBrief =
-      (request.method === 'GET' || request.method === 'HEAD') &&
-      pathname === COUNTRY_INTEL_BRIEF_PATH &&
-      process.env.LOCAL_API_MODE === 'docker';
+    // Self-hosted browsers use a signed local session instead of cloud billing.
+    const isDockerSelfHost = process.env.LOCAL_API_MODE === 'docker';
     const needsLegacyProBearerGate = !internalMcpVerified && !isPublicNoAuthRpc && PREMIUM_RPC_PATHS.has(pathname) && !isTierGated;
     const isProFreshCacheRpc = PRO_FRESH_CACHE_RPC_PATHS.has(pathname);
     const needsProFreshnessResolution =
@@ -1687,7 +1679,7 @@ export function createDomainGateway(
       ? { valid: true, required: false }
       : ((await validateApiKey(request, {
           forceKey: ((isTierGated && !sessionUserId) || needsLegacyProBearerGate)
-            && !isDockerSelfHostCountryBrief,
+            && !isDockerSelfHost,
         })) as { valid: boolean; required: boolean; error?: string; kind?: 'enterprise' | 'session' | 'user'; credential?: string });
 
     // User-owned API keys (wm_ prefix): when the static WORLDMONITOR_VALID_KEYS
@@ -1703,7 +1695,7 @@ export function createDomainGateway(
     let userKeyPrincipal: UserKeyPrincipal | null = null;
     const wmKey = getHeaderApiKey(request);
     const dockerSelfHostSessionAuthorized =
-      isDockerSelfHostCountryBrief &&
+      isDockerSelfHost &&
       keyCheck.valid &&
       !keyCheck.required &&
       keyCheck.kind === 'session';

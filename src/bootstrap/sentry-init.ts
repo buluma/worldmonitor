@@ -459,7 +459,7 @@ function buildSentryInitOptions(): Parameters<SentryNs['init']>[0] {
       //
       // This belongs in ignoreErrors, not the stack-gated beforeSend block,
       // precisely BECAUSE the string is ours: `CollectorTransportError` is
-      // constructed at exactly one line (analytics-collector-transport.ts) for
+      // constructed at exactly one line (collector-transport.ts) for
       // exactly one condition, so the match has no blind spot to trade away.
       // The rule that keeps generic runtime/network phrasings out of this array
       // exists because they can also come from our own minified bundle and would

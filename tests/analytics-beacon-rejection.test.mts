@@ -34,7 +34,7 @@ before(() => {
 });
 
 const { track, identifyUser, resetAnalyticsForTesting } = await import('../src/services/analytics.ts');
-const { COLLECTOR_QUEUE_LIMIT } = await import('../src/services/analytics-collector-transport.ts');
+const { COLLECTOR_QUEUE_LIMIT } = await import('../src/services/collector-transport.ts');
 const { fallbackAnySignal, fallbackTimeoutSignal } = await import('../src/services/timeout-signal.ts');
 
 type WinWithUmami = {
@@ -830,7 +830,7 @@ const {
   _setCollectorHealthReporterForTesting,
   _setCollectorOutcomeObserverForTesting,
   _setCollectorSentryEnqueueForTesting,
-} = await import('../src/services/analytics-collector-transport.ts');
+} = await import('../src/services/collector-transport.ts');
 
 function collectorEventInit(signal?: AbortSignal): RequestInit {
   return {

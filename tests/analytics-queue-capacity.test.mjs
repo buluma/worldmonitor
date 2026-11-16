@@ -37,7 +37,7 @@ describe('analytics queue capacity', () => {
       'UMAMI_QUEUE_LIMIT',
     );
     const collectorQueue = readNumericConstant(
-      '../src/services/analytics-collector-transport.ts',
+      '../src/services/collector-transport.ts',
       'COLLECTOR_QUEUE_LIMIT',
     );
 

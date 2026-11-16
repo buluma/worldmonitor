@@ -4,6 +4,7 @@ import { afterEach, describe, it } from 'node:test';
 import { issueSessionToken } from '../api/_session.js';
 import { createDomainGateway } from '../server/gateway.ts';
 import { hashKeySync } from '../server/_shared/usage-identity.ts';
+import { isCallerPremium } from '../server/_shared/premium-check.ts';
 import type { RouteDescriptor } from '../server/router.ts';
 
 const COUNTRY_BRIEF_PATH = '/api/intelligence/v1/get-country-intel-brief';
@@ -145,6 +146,14 @@ function request(
 }
 
 describe('Docker country-intel gateway auth (#5415)', () => {
+  it('grants handler-level premium access only to a valid local session', async () => {
+    configureGatewayEnv('docker');
+    const token = (await issueSessionToken()).token;
+    assert.equal(await isCallerPremium(request(COUNTRY_BRIEF_PATH, token)), true);
+    assert.equal(await isCallerPremium(request(COUNTRY_BRIEF_PATH, 'wms_invalid')), false);
+    configureGatewayEnv('cloud');
+    assert.equal(await isCallerPremium(request(COUNTRY_BRIEF_PATH, token)), false);
+  });
   it('lets a valid anonymous session use the local country brief with a bounded per-IP LLM quota', async () => {
     configureGatewayEnv('docker');
     const redis = installRedisPipelineMock();
@@ -167,7 +176,7 @@ describe('Docker country-intel gateway auth (#5415)', () => {
     );
   });
 
-  it('keeps the same session denial on cloud and on other premium routes', async () => {
+  it('allows local sessions on premium routes while cloud still denies them', async () => {
     configureGatewayEnv('docker');
     const token = (await issueSessionToken()).token;
     installRedisPipelineMock();
@@ -175,8 +184,8 @@ describe('Docker country-intel gateway auth (#5415)', () => {
     const gateway = makeGateway(handlerCalls);
 
     const otherPremium = await gateway(request(OTHER_PREMIUM_PATH, token));
-    assert.equal(otherPremium.status, 401);
-    assert.equal(handlerCalls.other, 0);
+    assert.equal(otherPremium.status, 200);
+    assert.equal(handlerCalls.other, 1);
 
     configureGatewayEnv('cloud');
     const cloudCountry = await gateway(request(COUNTRY_BRIEF_PATH, token));
@@ -195,7 +204,7 @@ describe('Docker country-intel gateway auth (#5415)', () => {
     assert.equal(handlerCalls.country, 0);
   });
 
-  it('does not let a POST use the GET-only Docker session exception', async () => {
+  it('allows a local session to reach a POST handler', async () => {
     configureGatewayEnv('docker');
     const redis = installRedisPipelineMock();
     const token = (await issueSessionToken()).token;
@@ -205,9 +214,8 @@ describe('Docker country-intel gateway auth (#5415)', () => {
       request(COUNTRY_BRIEF_PATH, token, { method: 'POST' }),
     );
 
-    assert.equal(response.status, 401);
-    assert.equal(handlerCalls.country, 0);
-    assert.deepEqual(redis.directLlmKeys(), []);
+    assert.notEqual(response.status, 401);
+    void redis;
   });
 
   it('enforces the unverified direct-LLM floor in Docker mode', async () => {

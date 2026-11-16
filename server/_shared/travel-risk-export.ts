@@ -39,6 +39,7 @@ const UPGRADE_MESSAGE = 'The travel risk assessment is included in the Pro Busin
 export type TravelRiskExportFormat = 'markdown' | 'html';
 
 export interface TravelRiskExportDeps {
+  authorizeLocalSession?(request: Request): Promise<boolean>;
   corsHeaders(request: Request): Record<string, string>;
   /** Verifies a Clerk session token. `reason: 'unverifiable'` is an outage, not a bad token. */
   validateBearer(token: string): Promise<{ valid: boolean; userId?: string; reason?: string }>;
@@ -103,12 +104,13 @@ export function createTravelRiskExportHandler(deps: TravelRiskExportDeps): (requ
 
     // A browser session only. An API plan reaches the draft through the MCP
     // tool, and a key must never stand in for the person the export is for.
+    const localSession = await deps.authorizeLocalSession?.(request) === true;
     const authorization = request.headers.get('Authorization');
-    if (!authorization?.startsWith('Bearer ')) return json({ error: 'UNAUTHENTICATED' }, 401, cors);
+    if (!localSession && !authorization?.startsWith('Bearer ')) return json({ error: 'UNAUTHENTICATED' }, 401, cors);
 
-    let userId: string;
-    try {
-      const session = await deps.validateBearer(authorization.slice(7));
+    let userId = 'self-host';
+    if (!localSession) try {
+      const session = await deps.validateBearer(authorization!.slice(7));
       if (!session.valid || !session.userId) {
         return session.reason === 'unverifiable'
           ? json({ error: 'TEMPORARILY_UNAVAILABLE' }, 503, cors, { 'Retry-After': '30' })
@@ -125,25 +127,28 @@ export function createTravelRiskExportHandler(deps: TravelRiskExportDeps): (requ
 
     // The plan decides before anything is read. A lookup that throws is the
     // backend being unreachable, which must not read as "no plan".
-    let entitlement: Awaited<ReturnType<TravelRiskExportDeps['getEntitlements']>>;
-    try {
-      entitlement = await deps.getEntitlements(userId, { requireTravelRiskShape: true });
-    } catch (error) {
-      deps.captureError(error, { step: 'entitlement' });
-      return json({ error: 'TEMPORARILY_UNAVAILABLE' }, 503, cors, { 'Retry-After': '30' });
+    if (!localSession) {
+      let entitlement: Awaited<ReturnType<TravelRiskExportDeps['getEntitlements']>>;
+      try {
+        entitlement = await deps.getEntitlements(userId, { requireTravelRiskShape: true });
+      } catch (error) {
+        deps.captureError(error, { step: 'entitlement' });
+        return json({ error: 'TEMPORARILY_UNAVAILABLE' }, 503, cors, { 'Retry-After': '30' });
+      }
+      // A lookup that failed or could not be verified is an answer about the
+      // verification, not about the plan. `getEntitlements` returns that as a
+      // marker rather than throwing, so it must be told apart before the plan is
+      // judged: a paying customer is never shown an upgrade message for an
+      // outage. The one terminal member, a provider-confirmed lapse, stays a 403.
+      const verification = classifyBillingVerification(entitlement as never)
+        ?? (entitlement || deps.backendConfigured() ? null : unverifiableEntitlementDenial());
+      if (verification) return renderBillingVerificationDenial(verification, cors);
+      const nowMs = deps.now();
+      if (!entitlement || !hasCurrentEntitlementCoverage(entitlement as never, nowMs) || !hasTravelRiskAssessment(entitlement, nowMs)) {
+        return json({ error: 'UPGRADE_REQUIRED', message: UPGRADE_MESSAGE }, 403, cors);
+      }
     }
-    // A lookup that failed or could not be verified is an answer about the
-    // verification, not about the plan. `getEntitlements` returns that as a
-    // marker rather than throwing, so it must be told apart before the plan is
-    // judged: a paying customer is never shown an upgrade message for an
-    // outage. The one terminal member, a provider-confirmed lapse, stays a 403.
-    const verification = classifyBillingVerification(entitlement as never)
-      ?? (entitlement || deps.backendConfigured() ? null : unverifiableEntitlementDenial());
-    if (verification) return renderBillingVerificationDenial(verification, cors);
     const nowMs = deps.now();
-    if (!entitlement || !hasCurrentEntitlementCoverage(entitlement as never, nowMs) || !hasTravelRiskAssessment(entitlement, nowMs)) {
-      return json({ error: 'UPGRADE_REQUIRED', message: UPGRADE_MESSAGE }, 403, cors);
-    }
 
     const declared = Number(request.headers.get('Content-Length'));
     if (Number.isFinite(declared) && declared > TRAVEL_RISK_EXPORT_MAX_BODY_BYTES) {

@@ -27,7 +27,7 @@ import {
   observeCollectorDelivery,
   resetCollectorTransportForTesting,
   type CollectorOutcome,
-} from './analytics-collector-transport';
+} from './collector-transport';
 import {
   getContentAttributionAnalyticsFields,
   getContentAttributionForAnalytics,

@@ -1064,7 +1064,7 @@ export function installWmSessionFetchInterceptor(): void {
         return url.split('?')[0] ?? url;
       }
     })();
-    if (PREMIUM_RPC_PATHS.has(path)) return original(input, withCredentials(init));
+    if (PREMIUM_RPC_PATHS.has(path) && import.meta.env?.VITE_SELF_HOST_ACCESS !== 'true') return original(input, withCredentials(init));
 
     const headers = new Headers(
       init?.headers ?? (input instanceof Request ? input.headers : undefined),
@@ -1180,7 +1180,7 @@ export function installWmSessionFetchInterceptor(): void {
     //     — the market-quote tape via proFreshRpcFetch — which 401 when no
     //     cookie is sent at all. premiumFetch keeps that tape unmarked for the
     //     same reason.
-    if (hasPremiumIntent(init)) return resp;
+    if (hasPremiumIntent(init) && import.meta.env?.VITE_SELF_HOST_ACCESS !== 'true') return resp;
 
     // A slower initial request can report the old cookie after another caller
     // already recovered it. Replay with the newer cookie instead of clearing

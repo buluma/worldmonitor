@@ -43,7 +43,7 @@ const {
   configureCollectorTransport,
   installCollectorFetchGate,
   resetCollectorTransportForTesting,
-} = await import('../src/services/analytics-collector-transport.ts');
+} = await import('../src/services/collector-transport.ts');
 
 const COLLECTOR_ENDPOINT = 'https://abacus.worldmonitor.app/api/send';
 

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const TRANSPORT_HREF = new URL('../src/services/analytics-collector-transport.ts', import.meta.url).href;
+const TRANSPORT_HREF = new URL('../src/services/collector-transport.ts', import.meta.url).href;
 
 const _store = new Map<string, string>();
 before(() => {
@@ -24,7 +24,7 @@ before(() => {
 const {
   CollectorTransportError,
   collectorFailureFromError,
-} = await import('../src/services/analytics-collector-transport.ts');
+} = await import('../src/services/collector-transport.ts');
 
 function constructUnderNonExtensibleError(): { status: number | null; stdout: string; stderr: string } {
   const code = `

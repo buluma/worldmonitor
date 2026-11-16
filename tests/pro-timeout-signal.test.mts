@@ -84,7 +84,7 @@ describe('createTimeoutSignal', () => {
 
   it('reports the native TimeoutError reason on the fallback path', () => {
     // A bare controller.abort() yields AbortError instead. That distinction is
-    // load-bearing: analytics-collector-transport.ts branches on
+    // load-bearing: collector-transport.ts branches on
     // `name === 'TimeoutError'` to tell a timeout from a caller cancellation,
     // so an AbortError-shaped fallback would silently reclassify every
     // old-engine timeout.
@@ -141,7 +141,7 @@ describe('createTimeoutSignal', () => {
           globalThis.DOMException = NativeDOMException;
         }
         assert.ok(reason instanceof NativeDOMException);
-        assert.equal(reason.name, 'TimeoutError', 'analytics-collector-transport branches on the name');
+        assert.equal(reason.name, 'TimeoutError', 'collector-transport branches on the name');
         assert.equal(reason.message, 'signal timed out');
         assert.equal(reason.stack, 'TimeoutError: signal timed out');
       });

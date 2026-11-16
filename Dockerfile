@@ -53,6 +53,10 @@ RUN npm run build:pro
 
 # Build the Vite frontend (outputs to dist/)
 # Skip blog build — blog-site has its own deps not installed here
+ARG VITE_ENABLE_ORBITAL_WATCH=false
+ENV VITE_ENABLE_ORBITAL_WATCH=${VITE_ENABLE_ORBITAL_WATCH}
+ARG VITE_SELF_HOST_ACCESS=false
+ENV VITE_SELF_HOST_ACCESS=${VITE_SELF_HOST_ACCESS}
 RUN npx tsc && npx vite build
 # Assert the /pro pages survived the public/ -> dist/ copy (#6898). build:pro
 # succeeding proves public/pro/ exists; it does NOT prove Vite copied it, and

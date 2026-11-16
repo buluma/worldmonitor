@@ -101,7 +101,7 @@ export function reportServerError(
     // `status` is a tag, not just an `extra`: `extra` is not indexed, so a
     // status that is only there can be read one event at a time but never
     // aggregated. Both sibling fingerprint sites mirror every grouping
-    // dimension into tags for that reason — analytics-collector-transport.ts
+    // dimension into tags for that reason — collector-transport.ts
     // tags `status` beside its fingerprint, and api/user-prefs.ts promotes
     // fields out of `extra` explicitly to make them searchable. Without it
     // `kind:api_cf_5xx` is queryable but `status:503` is not, so triage cannot
@@ -126,7 +126,7 @@ export function reportServerError(
     // origin 5xx for the path.
     //
     // `path` and the status are the two grouping axes. The leading token is a
-    // readable class label in the style of analytics-collector-transport.ts's
+    // readable class label in the style of collector-transport.ts's
     // fingerprint namespace, but it is derived from the status, so it splits
     // nothing on its own — do not read it as a third axis.
     // Cardinality stays bounded at the RPC path set x the 5xx status set —

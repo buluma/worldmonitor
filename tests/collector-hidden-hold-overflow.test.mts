@@ -68,7 +68,7 @@ const {
   _setCollectorOutcomeObserverForTesting,
   _setCollectorSentryEnqueueForTesting,
   _setCollectorHealthReporterForTesting,
-} = await import('../src/services/analytics-collector-transport.ts');
+} = await import('../src/services/collector-transport.ts');
 
 type CapturedSentryEvent = { message: string; context: Record<string, unknown> };
 

@@ -283,6 +283,7 @@ export function isProWidgetEnabled(): boolean {
 
 export function isProUser(): boolean {
   return (
+    import.meta.env?.VITE_SELF_HOST_ACCESS === 'true' ||
     isWidgetFeatureEnabled() ||
     isProWidgetEnabled() ||
     getAuthState().user?.role === 'pro' ||
