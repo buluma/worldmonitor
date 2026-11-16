@@ -65,7 +65,7 @@ RUN test -s dist/500.html
 
 
 # Stage 2: Serve the built assets from nginx.
-FROM nginx:alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3 AS runtime
+FROM nginx:alpine@sha256:fed7e14be83cbd2661a75cdc5b872d936cf155d46c327084d30b8df19ae88d72 AS runtime
 
 WORKDIR /usr/share/nginx/html
 
