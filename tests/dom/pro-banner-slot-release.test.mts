@@ -87,6 +87,18 @@ function mountContainer(): HTMLElement {
 
 const reserved = (): boolean => document.documentElement.classList.contains('wm-pro-banner-reserved');
 
+it('hides the upgrade banner and releases its slot in self-hosted builds', () => {
+  vi.stubEnv('VITE_SELF_HOST_ACCESS', 'true');
+  try {
+    const container = mountContainer();
+    showProBanner(container);
+    expect(container.querySelector('.pro-banner')).toBeNull();
+    expect(reserved()).toBe(false);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 describe('Pro banner slot for a signed-in user whose plan has not loaded', () => {
   it('keeps the slot reserved while the plan is still loading', () => {
     const container = mountContainer();

@@ -214,6 +214,10 @@ function resolveEffectiveBannerPremium(): EffectiveBannerPremium {
 }
 
 export function showProBanner(container: HTMLElement): void {
+  if (import.meta.env?.VITE_SELF_HOST_ACCESS === 'true') {
+    setReservation(false);
+    return;
+  }
   // Cache container even on early-return paths so the entitlement-change
   // listener can re-mount on a downgrade. App.ts calls this once at init
   // regardless of premium state, so caching here covers both "initially
@@ -332,6 +336,10 @@ export function showProBanner(container: HTMLElement): void {
 //     → re-mount via showProBanner. Same gate set as the initial mount path,
 //       so we can never surface a banner the user has already ✕'d this week.
 function syncProBanner(): void {
+  if (import.meta.env?.VITE_SELF_HOST_ACCESS === 'true') {
+    setReservation(false);
+    return;
+  }
   const {
     premium,
     accountBacked,
