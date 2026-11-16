@@ -1409,7 +1409,7 @@ describe('CI workflow coverage', () => {
     );
   });
 
-  it('runs the proto breaking check against the full main history (#6114)', () => {
+  it('runs the proto breaking check against the full PR base history (#6114)', () => {
     const breakingJob = workflowJobBlock(protoCheckWorkflow, 'proto-breaking');
     assert.match(breakingJob, /^\s+needs: changes\s*$/m);
     assert.match(
@@ -1426,8 +1426,8 @@ describe('CI workflow coverage', () => {
     const breakingStep = workflowStepBlock(protoCheckWorkflow, 'Check for breaking proto changes');
     assert.match(
       breakingStep,
-      /^\s+run: make breaking\s*$/m,
-      'proto-check.yml must run the canonical buf breaking target against the fetched origin/main proto baseline',
+      /^\s+run: cd proto && buf breaking --against "\.\.\/\.git#branch=origin\/\$BASE_REF,subdir=proto"\s*$/m,
+      'proto-check.yml must run buf breaking against the fetched PR base branch',
     );
     assert.doesNotMatch(breakingStep, /^\s+continue-on-error:/m);
 
