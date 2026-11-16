@@ -743,8 +743,8 @@ describe('proto codegen workflow trust boundaries (#3340)', () => {
     assert.equal(breaking.steps?.[0]?.with?.['persist-credentials'], false);
 
     const restore = stepByName('proto-breaking', 'Restore the trusted main Makefile').run ?? '';
-    assert.equal(restore, 'git show origin/main:Makefile > Makefile');
-    assert.equal(stepByName('proto-breaking', 'Check for breaking proto changes').run, 'make breaking');
+    assert.equal(restore, 'git show "$BASE_SHA:Makefile" > Makefile');
+    assert.equal(stepByName('proto-breaking', 'Check for breaking proto changes').run, 'cd proto && buf breaking --against "../.git#branch=origin/$BASE_REF,subdir=proto"');
   });
 
   it('runs trusted-fork generation read-only while keeping the writer internal-only', () => {

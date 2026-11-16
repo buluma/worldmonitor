@@ -267,7 +267,9 @@ jobs:
       # untrusted. Replace it with the reviewed main copy before invoking any
       # make target; buf then treats the PR's proto files as data only.
       - name: Restore the trusted main Makefile
-        run: git show origin/main:Makefile > Makefile
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git show "$BASE_SHA:Makefile" > Makefile
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
@@ -290,7 +292,9 @@ jobs:
           GOPROXY: 'https://proxy.golang.org,direct'
 
       - name: Check for breaking proto changes
-        run: make breaking
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: cd proto && buf breaking --against "../.git#branch=origin/$BASE_REF,subdir=proto"
 
   fork-artifact-check:
     needs: changes
