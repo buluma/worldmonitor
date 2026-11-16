@@ -184,6 +184,7 @@ jobs:
           fi
 
           if [ "$EXPECTED_FILE_COUNT" -gt 3000 ]; then
+            set -o pipefail
             git cat-file -e "$EVENT_BASE_SHA^{commit}" && git cat-file -e "$EVENT_HEAD_SHA^{commit}" || {
               echo "ERROR: Exact PR base or head commit is unavailable for local classification."
               exit 1
