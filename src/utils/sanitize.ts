@@ -6,12 +6,6 @@ const HTML_ESCAPE_MAP: Record<string, string> = {
   "'": '&#39;',
 };
 
-// ---------------------------------------------------------------------------
-// SafeHtml — type-tagged HTML strings that have been audited as safe.
-// Use escapeHtml() for user content, safeHtml`` for template literals, and
-// unsafeRawHtml() with a mandatory audit reason for pre-rendered markup.
-// ---------------------------------------------------------------------------
-
 declare const safeHtmlBrand: unique symbol;
 
 export interface SafeHtml {
@@ -35,16 +29,23 @@ function isSafeHtml(value: unknown): value is SafeHtml {
   return value instanceof SafeHtmlValue;
 }
 
+export function escapeHtml(str: string): string {
+  if (!str) return '';
+  return String(str).replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char] || char);
+}
+
 export function safeHtml(
   strings: TemplateStringsArray,
   ...values: SafeHtmlInterpolation[]
 ): SafeHtml {
   let html = strings[0] ?? '';
+
   for (let i = 0; i < values.length; i += 1) {
     const value = values[i];
     html += isSafeHtml(value) ? value.toString() : escapeHtml(String(value ?? ''));
     html += strings[i + 1] ?? '';
   }
+
   return new SafeHtmlValue(html);
 }
 
@@ -55,21 +56,25 @@ export function unsafeRawHtml(html: string, reason: string): SafeHtml {
   return new SafeHtmlValue(String(html));
 }
 
-export function safeHtmlToString(html: SafeHtml): string {
-  return html.toString();
-}
-
+/**
+ * Joins already-safe HTML fragments. String separators are treated as text and
+ * escaped; pass safeHtml`<br>` or unsafeRawHtml('<br>', reason) for markup.
+ */
 export function joinSafeHtml(parts: SafeHtml[], separator: SafeHtml | string = ''): SafeHtml {
   const safeSeparator = isSafeHtml(separator) ? separator.toString() : escapeHtml(separator);
   return new SafeHtmlValue(parts.map(safeHtmlToString).join(safeSeparator));
 }
 
-export function escapeHtml(str: string): string {
-  if (!str) return '';
-  return String(str).replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char] || char);
+export function safeHtmlToString(html: SafeHtml): string {
+  return html.toString();
 }
 
 export function sanitizeUrl(url: string): string {
+  return escapeAttr(validateUrl(url));
+}
+
+/** Validate a URL for DOM properties without HTML attribute encoding. */
+export function validateUrl(url: string): string {
   if (!url) return '';
   const trimmed = String(url).trim();
   if (!trimmed) return '';
@@ -79,7 +84,7 @@ export function sanitizeUrl(url: string): string {
   try {
     const parsed = new URL(trimmed);
     if (isAllowedProtocol(parsed.protocol)) {
-      return escapeAttr(parsed.toString());
+      return parsed.toString();
     }
   } catch {
     // Not an absolute URL, continue and validate as relative.
@@ -95,7 +100,7 @@ export function sanitizeUrl(url: string): string {
     if (!isAllowedProtocol(resolved.protocol)) {
       return '';
     }
-    return escapeAttr(trimmed);
+    return trimmed;
   } catch {
     return '';
   }
@@ -103,4 +108,9 @@ export function sanitizeUrl(url: string): string {
 
 export function escapeAttr(str: string): string {
   return escapeHtml(str);
+}
+
+export function safeUrlAttr(url: string): SafeHtml {
+  // sanitizeUrl() returns an attribute-escaped URL or an empty string.
+  return unsafeRawHtml(sanitizeUrl(url), 'URL passed through sanitizeUrl() for HTML attribute interpolation');
 }

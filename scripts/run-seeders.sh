@@ -1,81 +1,95 @@
-#!/usr/bin/env bash
-# Run all seed scripts against configured Redis, falling back to the local
-# Redis REST proxy when no explicit credentials are available.
+#!/bin/sh
+# Run all seed scripts against the local Redis REST proxy.
 # Usage: ./scripts/run-seeders.sh
 #
-# If the local worldmonitor stack is running, the Redis REST proxy listens on
-# localhost:8079 by default.
+# Requires the worldmonitor stack to be running (uvx podman-compose up -d).
+# The Redis REST proxy listens on localhost:8079 by default.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_LOCAL="$PROJECT_DIR/.env.local"
-LOCKFILE="/tmp/wm-seeders.lock"
 
-if [ -f "$LOCKFILE" ]; then
-  pid=$(cat "$LOCKFILE" 2>/dev/null)
-  if kill -0 "$pid" 2>/dev/null; then
-    echo "Seeder already running (pid $pid) — skipping"
-    exit 0
-  fi
-  rm -f "$LOCKFILE"
-fi
-echo $$ > "$LOCKFILE"
-trap 'rm -f "$LOCKFILE"' EXIT INT TERM
-
-# Prefer real repo credentials when present so host-run seeders can write to the
-# same backend the app uses. Only populate keys that are currently unset.
-if [ -f "$ENV_LOCAL" ]; then
-  while IFS='=' read -r key value; do
-    case "$key" in
-      UPSTASH_REDIS_REST_URL|UPSTASH_REDIS_REST_TOKEN)
-        eval "current=\${$key}"
-        if [ -z "$current" ]; then
-          value=$(printf '%s' "$value" | sed "s/^['\"]//; s/['\"]$//")
-          export "$key=$value"
-        fi
-        ;;
-    esac
-  done < "$ENV_LOCAL"
-fi
-
-UPSTASH_REDIS_REST_URL="${UPSTASH_REDIS_REST_URL:-http://localhost:8079}"
-UPSTASH_REDIS_REST_TOKEN="${UPSTASH_REDIS_REST_TOKEN:-wm-local-token}"
-export UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
-
-# Source API keys: prefer .env.seeders (clean key=value), fall back to
-# parsing docker-compose.override.yml (fragile with special chars).
-ENV_SEEDERS="$PROJECT_DIR/.env.seeders"
-if [ -f "$ENV_SEEDERS" ]; then
+# Load REDIS_TOKEN (and any seeder API keys present) from .env so the
+# host-side seeders can talk to the REST proxy with the same bearer the
+# compose stack is using. Defaults removed in #3804 — the seeders fail-loud
+# if REDIS_TOKEN is not in the environment or .env.
+if [ -f "$PROJECT_DIR/.env" ]; then
   set -a
-  . "$ENV_SEEDERS"
+  # shellcheck disable=SC1091
+  . "$PROJECT_DIR/.env"
   set +a
 fi
 
+UPSTASH_REDIS_REST_URL="${UPSTASH_REDIS_REST_URL:-http://localhost:8079}"
+# This script targets the LOCAL Docker REST proxy, so REDIS_TOKEN always
+# wins if set — even when UPSTASH_REDIS_REST_TOKEN also appears in .env
+# (e.g. a contributor who also works on the Vercel/Upstash side and keeps
+# the production token in the same file). Otherwise we'd silently send a
+# Vercel-Upstash bearer to localhost:8079 and the proxy would 401 the
+# request with no hint about why. Reviewer caught this on PR #3829.
+if [ -n "${REDIS_TOKEN:-}" ]; then
+  UPSTASH_REDIS_REST_TOKEN="$REDIS_TOKEN"
+fi
+if [ -z "${UPSTASH_REDIS_REST_TOKEN:-}" ]; then
+  echo "ERROR: REDIS_TOKEN (or UPSTASH_REDIS_REST_TOKEN) is required." >&2
+  echo "       Generate with: openssl rand -hex 32, then add to .env" >&2
+  echo "       See SELF_HOSTING.md → Required Environment Variables." >&2
+  exit 1
+fi
+export UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
+
+# Source API keys from docker-compose.override.yml if present (values in .env
+# are already loaded above). These keys are configured for the container but
+# seeders run on the host.
 OVERRIDE="$PROJECT_DIR/docker-compose.override.yml"
-if [ -f "$OVERRIDE" ] && [ ! -f "$ENV_SEEDERS" ]; then
+if [ -f "$OVERRIDE" ]; then
   _env_tmp=$(mktemp)
-  grep -E '^\s+[A-Z_]+:' "$OVERRIDE" \
-    | grep -v '#' \
-    | sed 's/^\s*//' \
-    | sed 's/: */=/' \
-    | sed "s/[\"']//g" \
-    | grep -E '^(NASA_FIRMS|GROQ|AISSTREAM|FRED|FINNHUB|EIA|ACLED_ACCESS_TOKEN|ACLED_EMAIL|ACLED_PASSWORD|CLOUDFLARE|AVIATIONSTACK|OPENROUTER_API_KEY|LLM_API_URL|LLM_API_KEY|LLM_MODEL|OLLAMA_API_URL|OLLAMA_MODEL|WTO_API_KEY|WM_API_BASE_URL)' \
-    | sed 's/^/export /' > "$_env_tmp"
+  # POSIX character classes: BSD sed (macOS) has no \s. A quoted value is
+  # taken verbatim from between its quotes, so a "#" or " #" inside it is kept;
+  # an unquoted value loses a trailing "  # comment" (the SELF_HOSTING.md
+  # template once wrote one on every key). Empty values are skipped so a blank
+  # override line never clobbers a key already set in .env. Every value is
+  # single-quoted on export, so "$", "#" and spaces reach the seeder unchanged.
+  # The indentation strip runs in its own sed: "t" branches on any earlier
+  # successful substitution in the same script, including that one.
+  grep -E '^[[:space:]]+[A-Z_][A-Z0-9_]*:' "$OVERRIDE" \
+    | sed -e 's/^[[:space:]]*//' \
+    | sed -e 's/^\([A-Z_][A-Z0-9_]*\):[[:space:]]*"\([^"]*\)".*$/\1=\2/' -e t \
+          -e "s/^\([A-Z_][A-Z0-9_]*\):[[:space:]]*'\([^']*\)'.*\$/\1=\2/" -e t \
+          -e 's/[[:space:]]#.*$//' \
+          -e 's/[[:space:]]*$//' \
+          -e 's/:[[:space:]]*/=/' \
+    | grep -E '^[A-Z_][A-Z0-9_]*=.' \
+    | grep -E '^(NASA_FIRMS|AISSTREAM|FRED|FINNHUB|EIA|ALPHA_VANTAGE_API_KEY|ACLED_ACCESS_TOKEN|ACLED_EMAIL|ACLED_PASSWORD|CLOUDFLARE|AVIATIONSTACK|OPENSKY_CLIENT_ID|OPENSKY_CLIENT_SECRET|UCDP_ACCESS_TOKEN|OPENAQ_API_KEY|WAQI_API_KEY|OPENROUTER_API_KEY|LLM_API_URL|LLM_API_KEY|LLM_MODEL|OLLAMA_API_URL|OLLAMA_MODEL)' \
+    | sed -e "s/'/'\\\\''/g" -e "s/=/='/" -e "s/\$/'/" -e 's/^/export /' > "$_env_tmp"
   . "$_env_tmp"
   rm -f "$_env_tmp"
 fi
-# Default warm-ping target to local API when running against local Redis
-if [ "$UPSTASH_REDIS_REST_URL" = "http://localhost:8079" ] && [ -z "$WM_API_BASE_URL" ]; then
-  export WM_API_BASE_URL="http://localhost:4000"
-fi
+# Per-seeder wall-clock cap for STANDALONE seeders. They run sequentially, so a
+# single upstream that hangs (e.g. a slow NOAA/NSIDC fetch that doesn't honour its
+# own AbortSignal and keeps the node process alive for an hour) would burn the rest
+# of the window and starve every later seeder — under a wrapping systemd/cron job
+# timeout it drops everything after the hung one. Capping each seeder bounds that
+# blast radius. Default 1800s (30min): above any standalone seeder's real runtime
+# yet below the pathological hangs (60min+), so it kills only runaway runs.
+# Override with SEED_TIMEOUT=<seconds>, or SEED_TIMEOUT=0 to disable.
+#
+# Bundle seeders (seed-bundle-*.mjs) are EXEMPT from this cap: scripts/_bundle-runner.mjs
+# already hard-caps every section with its own wall-clock timer (SIGTERM→SIGKILL on
+# the section's child PID — immune to the DNS-hang blind spot) and runs sections
+# sequentially, so a bundle's *legitimate* total can exceed SEED_TIMEOUT (e.g.
+# resilience-recovery's Import-HHI section alone budgets 30min). Wrapping a bundle in
+# the outer cap would false-kill it mid-run and orphan the in-flight section child.
 SEED_TIMEOUT="${SEED_TIMEOUT:-1800}"
 
+# Resolve once whether the outer cap is usable (timeout(1) present and a positive
+# numeric budget). Non-numeric/empty SEED_TIMEOUT → test errors → disabled (plain node).
 if command -v timeout >/dev/null 2>&1 && [ "${SEED_TIMEOUT:-0}" -gt 0 ] 2>/dev/null; then
   timeout_enabled=true
 else
   timeout_enabled=false
 fi
 
+# Bundle seeders self-bound per section — never wrap them in the outer cap.
 is_bundle() {
   case "$1" in
     *seed-bundle-*) return 0 ;;
@@ -83,108 +97,53 @@ is_bundle() {
   esac
 }
 
+# Whether THIS seeder is wrapped by the outer timeout.
 caps_seed() {
   [ "$timeout_enabled" = true ] && ! is_bundle "$1"
 }
 
 run_seed() {
+  node_file="$1"
+  # Native Windows Node does not understand MSYS paths such as /c/Users/...
+  # and resolves them as C:\c\Users\.... Convert only when cygpath is present.
+  if command -v cygpath >/dev/null 2>&1; then
+    node_file="$(cygpath -w "$node_file")"
+  fi
+
   if caps_seed "$1"; then
-    timeout -k 30 "$SEED_TIMEOUT" node "$1" 2>&1
+    # -k: if it ignores SIGTERM, SIGKILL it 30s later so the run can move on.
+    timeout -k 30 "$SEED_TIMEOUT" node "$node_file" 2>&1
   else
-    node "$1" 2>&1
+    node "$node_file" 2>&1
   fi
 }
 
-SEED_PARALLEL="${SEED_PARALLEL:-1}"
-RESULTS_DIR=$(mktemp -d)
-trap "rm -rf '$RESULTS_DIR'; rm -f '$LOCKFILE'" EXIT INT TERM
+ok=0 fail=0 skip=0 timedout=0
 
-run_and_record() {
-  f="$1"
+for f in "$SCRIPT_DIR"/seed-*.mjs; do
   name="$(basename "$f")"
+  printf "→ %s ... " "$name"
   output=$(run_seed "$f")
   rc=$?
   last=$(echo "$output" | tail -1)
 
+  # timeout(1) exits 124 when it had to terminate the child, or 128+signal
+  # (137 = SIGKILL after the -k grace) when SIGTERM was ignored. Only trust this
+  # classification for seeders we actually wrapped (bundles run unwrapped).
   if caps_seed "$f" && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; }; then
-    printf "→ %s ... TIMEOUT (killed after %ss)\n" "$name" "$SEED_TIMEOUT"
-    echo "TIMEOUT $f" > "$RESULTS_DIR/$name"
+    printf "TIMEOUT (killed after %ss)\n" "$SEED_TIMEOUT"
+    timedout=$((timedout + 1))
+  elif [ "$rc" -ne 0 ]; then
+    printf "FAIL (%s)\n" "$last"
+    fail=$((fail + 1))
   elif echo "$last" | grep -qi "skip\|not set\|missing.*key\|not found"; then
-    printf "→ %s ... SKIP (%s)\n" "$name" "$last"
-    echo "SKIP" > "$RESULTS_DIR/$name"
-  elif [ $rc -eq 0 ]; then
-    printf "→ %s ... OK\n" "$name"
-    echo "OK" > "$RESULTS_DIR/$name"
+    printf "SKIP (%s)\n" "$last"
+    skip=$((skip + 1))
   else
-    printf "→ %s ... FAIL (%s)\n" "$name" "$last"
-    echo "FAIL $f" > "$RESULTS_DIR/$name"
-  fi
-}
-
-running=0
-for f in "$SCRIPT_DIR"/seed-*.mjs; do
-  if [ "$SEED_PARALLEL" -le 1 ] 2>/dev/null; then
-    run_and_record "$f"
-  else
-    run_and_record "$f" &
-    running=$((running + 1))
-    if [ "$running" -ge "$SEED_PARALLEL" ]; then
-      wait -n
-      running=$((running - 1))
-    fi
+    printf "OK\n"
+    ok=$((ok + 1))
   fi
 done
-wait
-
-ok=0 fail=0 skip=0 timedout=0
-failed_files=""
-for r in "$RESULTS_DIR"/*; do
-  [ -f "$r" ] || continue
-  line=$(cat "$r")
-  result=$(echo "$line" | cut -d' ' -f1)
-  fpath=$(echo "$line" | cut -d' ' -f2-)
-  case "$result" in
-    OK) ok=$((ok + 1)) ;;
-    SKIP) skip=$((skip + 1)) ;;
-    TIMEOUT) timedout=$((timedout + 1)); failed_files="$failed_files $fpath" ;;
-    FAIL) fail=$((fail + 1)); failed_files="$failed_files $fpath" ;;
-  esac
-done
-
-# Retry failed seeders once
-if [ -n "$failed_files" ]; then
-  echo ""
-  echo "Retrying $(echo "$failed_files" | wc -w | tr -d ' ') failed seeder(s)..."
-  for f in $failed_files; do
-    name="$(basename "$f")"
-    printf "  ↻ %s ... " "$name"
-    output=$(run_seed "$f")
-    rc=$?
-    last=$(echo "$output" | tail -1)
-    if [ $rc -eq 0 ] && ! echo "$last" | grep -qi "skip\|not set\|missing"; then
-      printf "OK (recovered)\n"
-      fail=$((fail - 1))
-      ok=$((ok + 1))
-    else
-      printf "FAIL again\n"
-    fi
-  done
-fi
 
 echo ""
-SUMMARY="Done: $ok ok, $skip skipped, $fail failed, $timedout timed out"
-echo "$SUMMARY"
-
-# Send summary to Telegram if configured
-ALERT_TOKEN="${ALERT_TELEGRAM_BOT_TOKEN:-}"
-ALERT_CHAT="${ALERT_TELEGRAM_CHAT_ID:-}"
-if [ -n "$ALERT_TOKEN" ] && [ -n "$ALERT_CHAT" ]; then
-  if [ "$fail" -gt 0 ] || [ "$timedout" -gt 0 ]; then
-    MSG="🌍 *Seeder Run*: $SUMMARY"
-    curl -s -X POST "https://api.telegram.org/bot${ALERT_TOKEN}/sendMessage" \
-      -d chat_id="$ALERT_CHAT" \
-      -d text="$MSG" \
-      -d parse_mode="Markdown" \
-      > /dev/null 2>&1
-  fi
-fi
+echo "Done: $ok ok, $skip skipped, $fail failed, $timedout timed out"

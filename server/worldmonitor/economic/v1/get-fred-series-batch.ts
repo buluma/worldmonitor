@@ -10,14 +10,9 @@ import type {
   FredSeries,
 } from '../../../../src/generated/server/worldmonitor/economic/v1/service_server';
 
-import { getCachedJson } from '../../../_shared/redis';
+import { getCachedJsonBatch } from '../../../_shared/redis';
 import { toUniqueSortedLimited } from '../../../_shared/normalize-list';
-import { applyFredObservationLimit, fredSeedKey, normalizeFredLimit } from './_fred-shared';
-
-const ALLOWED_SERIES = new Set<string>([
-  'WALCL', 'FEDFUNDS', 'T10Y2Y', 'UNRATE', 'CPIAUCSL', 'DGS10', 'VIXCLS',
-  'GDP', 'M2SL', 'DCOILWTICO', 'BAMLH0A0HYM2', 'ICSA', 'MORTGAGE30US', 'GSCPI',
-]);
+import { ALLOWED_FRED_SERIES, applyFredObservationLimit, fredSeedKey, normalizeFredLimit } from './_fred-shared';
 
 export async function getFredSeriesBatch(
   _ctx: ServerContext,
@@ -26,20 +21,16 @@ export async function getFredSeriesBatch(
   try {
     const normalized = req.seriesIds
       .map((id) => id.trim().toUpperCase())
-      .filter((id) => ALLOWED_SERIES.has(id));
+      .filter((id) => ALLOWED_FRED_SERIES.has(id));
     const limitedList = toUniqueSortedLimited(normalized, 20);
     const limit = normalizeFredLimit(req.limit);
 
-    const settled = await Promise.allSettled(
-      limitedList.map((id) => getCachedJson(fredSeedKey(id), true)),
-    );
+    const keysById = new Map(limitedList.map((id) => [id, fredSeedKey(id)]));
+    const cachedByKey = await getCachedJsonBatch([...keysById.values()], true);
 
     const results: Record<string, FredSeries> = {};
-    for (let i = 0; i < limitedList.length; i++) {
-      const id = limitedList[i]!;
-      const entry = settled[i];
-      if (entry?.status !== 'fulfilled' || !entry.value) continue;
-      const cached = entry.value as { series?: FredSeries };
+    for (const id of limitedList) {
+      const cached = cachedByKey.get(keysById.get(id)!) as { series?: FredSeries } | undefined;
       if (cached?.series) results[id] = applyFredObservationLimit(cached.series, limit);
     }
 

@@ -24,9 +24,9 @@ export async function loadTickerSet(redisUrl, redisToken) {
     // market:stocks-bootstrap:v1 is written in contract mode ({_seed, data}) by
     // both seed-market-quotes.mjs (runSeed declareRecords) and the AIS relay
     // (envelopeWrite). Reading `.quotes` off the raw parse returned undefined —
-    // the quotes live under `.data.quotes` — so this set was empty on every run.
-    // unwrapEnvelope strips _seed and passes legacy bare shapes through unchanged,
-    // so `.quotes` resolves for both.
+    // the quotes live under `.data.quotes` — so this set was empty on every run
+    // (Railway log 2026-07-01). unwrapEnvelope strips _seed and passes legacy
+    // bare shapes through unchanged, so `.quotes` resolves for both.
     /** @type {{ quotes?: StockSymbol[] } | null} */
     const payload = unwrapEnvelope(data.result).data;
     if (!Array.isArray(payload?.quotes)) return new Set();

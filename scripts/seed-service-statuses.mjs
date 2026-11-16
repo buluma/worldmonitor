@@ -53,8 +53,7 @@ async function warmPing() {
   } catch (err) {
     console.error(`  FETCH FAILED: ${err.message || err}`);
     await extendExistingTtl([CANONICAL_KEY, 'seed-meta:infra:service-statuses'], 7200);
-    console.log(`
-=== Failed gracefully (${Math.round(Date.now() - startMs)}ms) ===`);
+    console.log(`\n=== Failed gracefully (${Math.round(Date.now() - startMs)}ms) ===`);
     process.exit(0);
   }
 
@@ -75,8 +74,7 @@ async function warmPing() {
 
   const durationMs = Date.now() - startMs;
   logSeedResult('infra', count, durationMs, { mode: 'warm-ping' });
-  console.log(`
-=== Done (${Math.round(durationMs)}ms) ===`);
+  console.log(`\n=== Done (${Math.round(durationMs)}ms) ===`);
 }
 
 warmPing().then(() => {

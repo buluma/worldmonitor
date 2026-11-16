@@ -5,9 +5,6 @@ const EVENT_NAME = 'wm-font-changed';
 
 const ALLOWED: FontFamily[] = ['mono', 'system'];
 
-const SYSTEM_FONT_STACK =
-  "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
-
 export function getFontFamily(): FontFamily {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -32,17 +29,8 @@ export function setFontFamily(font: FontFamily): void {
 export function applyFont(font?: FontFamily): void {
   const resolved = font ?? getFontFamily();
   if (resolved === 'system') {
-    document.documentElement.style.setProperty('--font-body-base', SYSTEM_FONT_STACK);
+    document.documentElement.dataset.font = 'system';
   } else {
-    document.documentElement.style.removeProperty('--font-body-base');
+    delete document.documentElement.dataset.font;
   }
-}
-
-export function subscribeFontChange(cb: (font: FontFamily) => void): () => void {
-  const handler = (e: Event) => {
-    const detail = (e as CustomEvent).detail as { font?: FontFamily } | undefined;
-    cb(detail?.font ?? getFontFamily());
-  };
-  window.addEventListener(EVENT_NAME, handler);
-  return () => window.removeEventListener(EVENT_NAME, handler);
 }

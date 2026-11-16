@@ -1,15 +1,20 @@
 import { Panel } from './Panel';
-import { escapeHtml } from '@/utils/sanitize';
+import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
 import { t } from '@/services/i18n';
 import type { SecurityAdvisory } from '@/services/security-advisories';
+import type { ResolvedScope } from '@/services/tab-focus';
+import { PanelScopeFilter, focusedEmptyHtml, scopeTagHtml, type ScopeRow } from './panel-scope-filter';
 
-type AdvisoryFilter = 'all' | 'critical' | 'US' | 'AU' | 'UK' | 'NZ' | 'health';
+type AdvisoryFilter = 'all' | 'critical' | 'US' | 'AU' | 'UK' | 'health';
 
 export class SecurityAdvisoriesPanel extends Panel {
   private advisories: SecurityAdvisory[] = [];
   private activeFilter: AdvisoryFilter = 'all';
   private refreshInterval: ReturnType<typeof setInterval> | null = null;
   private onRefreshRequest?: () => void;
+  // Dashboard focus (#10453): advisories carry the ISO code of the country they cover.
+  private readonly scopeFilter: PanelScopeFilter;
+  private hasData = false;
 
   constructor() {
     super({
@@ -20,6 +25,7 @@ export class SecurityAdvisoriesPanel extends Panel {
       infoTooltip: t('components.securityAdvisories.infoTooltip'),
       defaultRowSpan: 2,
     });
+    this.scopeFilter = new PanelScopeFilter({ content: this.content, onChange: () => this.render() });
     this.showLoading(t('components.securityAdvisories.loading'));
 
     this.content.addEventListener('click', (e) => {
@@ -37,10 +43,33 @@ export class SecurityAdvisoriesPanel extends Panel {
     });
   }
 
+  public override applyScope(scope: ResolvedScope | null): void {
+    if (!this.scopeFilter.setScope(scope)) return;
+    // The next successful setData draws with the new focus; redrawing now
+    // would erase a load failure.
+    if (this.hasData && !this.showingLoadFailure && !this.refreshing) this.render();
+  }
+
+  /** A refresh is in flight: the loading indicator must stay until setData lands. */
+  private refreshing = false;
+
+  public override showError(message?: string, onRetry?: () => void, autoRetrySeconds?: number): void {
+    this.refreshing = false;
+    this.scopeFilter.hideStrip();
+    super.showError(message, onRetry, autoRetrySeconds);
+  }
+
+  public override showLoading(message?: string): void {
+    this.refreshing = true;
+    this.scopeFilter?.hideStrip();
+    super.showLoading(message);
+  }
+
   public setData(advisories: SecurityAdvisory[]): void {
     const prevCount = this.advisories.length;
     this.advisories = advisories;
-    this.setCount(advisories.length);
+    this.hasData = true;
+    this.refreshing = false;
 
     if (prevCount > 0 && advisories.length > prevCount) {
       this.setNewBadge(advisories.length - prevCount);
@@ -49,19 +78,18 @@ export class SecurityAdvisoriesPanel extends Panel {
     this.render();
   }
 
-  private getFiltered(): SecurityAdvisory[] {
+  private getFiltered(advisories: SecurityAdvisory[]): SecurityAdvisory[] {
     switch (this.activeFilter) {
       case 'critical':
-        return this.advisories.filter(a => a.level === 'do-not-travel' || a.level === 'reconsider');
+        return advisories.filter(a => a.level === 'do-not-travel' || a.level === 'reconsider');
       case 'health':
-        return this.advisories.filter(a => a.sourceCountry === 'EU' || a.sourceCountry === 'INT');
+        return advisories.filter(a => a.sourceCountry === 'EU' || a.sourceCountry === 'INT');
       case 'US':
       case 'AU':
       case 'UK':
-      case 'NZ':
-        return this.advisories.filter(a => a.sourceCountry === this.activeFilter);
+        return advisories.filter(a => a.sourceCountry === this.activeFilter);
       default:
-        return this.advisories;
+        return advisories;
     }
   }
 
@@ -90,7 +118,6 @@ export class SecurityAdvisoriesPanel extends Panel {
       case 'US': return '\u{1F1FA}\u{1F1F8}';
       case 'AU': return '\u{1F1E6}\u{1F1FA}';
       case 'UK': return '\u{1F1EC}\u{1F1E7}';
-      case 'NZ': return '\u{1F1F3}\u{1F1FF}';
       case 'EU': return '\u{1F1EA}\u{1F1FA}';
       case 'INT': return '\u{1F3E5}';
       default: return '\u{1F310}';
@@ -113,15 +140,29 @@ export class SecurityAdvisoriesPanel extends Panel {
 
   private render(): void {
     if (this.advisories.length === 0) {
-      this.setContent(`<div class="panel-empty">${t('common.noDataAvailable')}</div>`);
+      this.scopeFilter.hideStrip();
+      this.setCount(0);
+      this.setSafeContent(unsafeRawHtml(`<div class="panel-empty">${t('common.noDataAvailable')}</div>`, 'legacy Panel.setContent() migration'));
       return;
     }
 
-    const filtered = this.getFiltered();
+    // The focus narrows first (chosen countries, then neighbours); the
+    // panel's own source filter then works within it.
+    const view = this.scopeFilter.view(this.advisories, (a) => a.country || null);
+    this.scopeFilter.renderStrip(view);
+    const scoped = view.rows.map((row) => row.item);
+    const rowFor = new Map<SecurityAdvisory, ScopeRow<SecurityAdvisory>>(view.rows.map((row) => [row.item, row]));
+    this.setCount(scoped.length);
+    if (view.emptyByFocus) {
+      this.setSafeContent(unsafeRawHtml(focusedEmptyHtml(t('focus.filter.emptyAdvisories')), 'focus empty state: escaped by focusedEmptyHtml'));
+      return;
+    }
 
-    const dntCount = this.advisories.filter(a => a.level === 'do-not-travel').length;
-    const reconsiderCount = this.advisories.filter(a => a.level === 'reconsider').length;
-    const cautionCount = this.advisories.filter(a => a.level === 'caution').length;
+    const filtered = this.getFiltered(scoped);
+
+    const dntCount = scoped.filter(a => a.level === 'do-not-travel').length;
+    const reconsiderCount = scoped.filter(a => a.level === 'reconsider').length;
+    const cautionCount = scoped.filter(a => a.level === 'caution').length;
 
     const summaryHtml = `
       <div class="sa-summary">
@@ -147,12 +188,11 @@ export class SecurityAdvisoriesPanel extends Panel {
         <button class="sa-filter ${this.activeFilter === 'US' ? 'sa-filter-active' : ''}" data-filter="US">\u{1F1FA}\u{1F1F8} US</button>
         <button class="sa-filter ${this.activeFilter === 'AU' ? 'sa-filter-active' : ''}" data-filter="AU">\u{1F1E6}\u{1F1FA} AU</button>
         <button class="sa-filter ${this.activeFilter === 'UK' ? 'sa-filter-active' : ''}" data-filter="UK">\u{1F1EC}\u{1F1E7} UK</button>
-        <button class="sa-filter ${this.activeFilter === 'NZ' ? 'sa-filter-active' : ''}" data-filter="NZ">\u{1F1F3}\u{1F1FF} NZ</button>
         <button class="sa-filter ${this.activeFilter === 'health' ? 'sa-filter-active' : ''}" data-filter="health">\u{1F3E5} ${t('components.securityAdvisories.health')}</button>
       </div>
     `;
 
-    const displayed = filtered.slice(0, 30);
+    const displayed = view.partition ? filtered : filtered.slice(0, 30);
     let itemsHtml: string;
 
     if (displayed.length === 0) {
@@ -167,9 +207,12 @@ export class SecurityAdvisoriesPanel extends Panel {
           <div class="sa-item-header">
             <span class="sa-badge ${levelCls}">${levelLabel}</span>
             <span class="sa-source">${flag} ${escapeHtml(a.source)}</span>
+            ${scopeTagHtml(rowFor.get(a))}
           </div>
-          <a href="${escapeHtml(a.link)}" target="_blank" rel="noopener" class="sa-title">${escapeHtml(a.title)}</a>
-          <div class="sa-time">${this.formatTime(a.pubDate)}</div>
+          <div class="sa-body">
+            <a href="${escapeHtml(a.link)}" target="_blank" rel="noopener" class="sa-title">${escapeHtml(a.title)}</a>
+            <span class="sa-time">${this.formatTime(a.pubDate)}</span>
+          </div>
         </div>`;
       }).join('');
     }
@@ -181,14 +224,14 @@ export class SecurityAdvisoriesPanel extends Panel {
       </div>
     `;
 
-    this.setContent(`
+    this.setSafeContent(unsafeRawHtml(`
       <div class="sa-panel-content">
         ${summaryHtml}
         ${filtersHtml}
         <div class="sa-list">${itemsHtml}</div>
         ${footerHtml}
       </div>
-    `);
+    `, 'legacy Panel.setContent() migration'));
   }
 
   public setRefreshHandler(handler: () => void): void {

@@ -1,18 +1,35 @@
-import type { CountryBriefSignals } from '@/types';
+import type { EffectiveTariffRate } from '@/generated/client/worldmonitor/trade/v1/service_client';
+import type { CountrySignalCounts } from '@/types';
 import type { CountryScore } from '@/services/country-instability';
+import type { GetDefenseIndustrialBaseResponse } from '@/generated/client/worldmonitor/military/v1/service_client';
+import type { ImageryChangeContext, RegionalEnergyFeed } from '@/generated/client/worldmonitor/intelligence/v1/service_client';
 import type { PredictionMarket } from '@/services/prediction';
 import type { NewsItem } from '@/types';
+import type { GetCountryChokepointIndexResponse, GetCountryVulnerabilitiesResponse, SectorExposureSummary, CountryProductsResponse, MultiSectorShockResponse } from '@/services/supply-chain';
+import type { BriefSource } from '@/utils/brief-sources';
+import type { IntelBriefEvidence } from '@/utils/format-intel-brief';
+import type { DecisionSignalProvenance } from '../../shared/decision-signal-provenance-contract';
+import type { ChinaDecisionSignalGroupId } from '../../shared/china-decision-signals';
 
 export interface CountryIntelData {
   brief: string;
   country: string;
   code: string;
   cached?: boolean;
-  generatedAt?: string;
+  generatedAt?: string | number;
   error?: string;
   skipped?: boolean;
   reason?: string;
   fallback?: boolean;
+  sources?: BriefSource[];
+  evidence?: IntelBriefEvidence[];
+}
+
+export interface CountryTariffTrendsData {
+  currentRate: number;
+  trend: string;
+  datapoints: Array<{ year: number; tariffRate: number }>;
+  effectiveTariffRate?: EffectiveTariffRate;
 }
 
 export interface StockIndexData {
@@ -33,7 +50,8 @@ export interface CountryDeepDiveSignalItem {
   type: 'MILITARY' | 'PROTEST' | 'CYBER' | 'DISASTER' | 'OUTAGE' | 'OTHER';
   severity: ThreatLevel;
   description: string;
-  timestamp: Date;
+  timestamp: Date | null;
+  source?: string;
 }
 
 export interface CountryDeepDiveSignalDetails {
@@ -52,11 +70,13 @@ export interface CountryDeepDiveBaseSummary {
 }
 
 export interface CountryDeepDiveMilitarySummary {
-  ownFlights: number;
-  foreignFlights: number;
-  nearbyVessels: number;
+  ownFlights: number | null;
+  foreignFlights: number | null;
+  nearbyVessels: number | null;
   nearestBases: CountryDeepDiveBaseSummary[];
-  foreignPresence: boolean;
+  foreignPresence: boolean | null;
+  coverageNotes?: string[];
+  coverage?: 'complete' | 'partial';
 }
 
 export interface CountryDeepDiveEconomicIndicator {
@@ -64,6 +84,39 @@ export interface CountryDeepDiveEconomicIndicator {
   value: string;
   trend: TrendDirection;
   source?: string;
+}
+
+export type ChinaCountrySummaryGroupId = ChinaDecisionSignalGroupId;
+export type ChinaCountrySummaryState = 'loading' | 'available' | 'partial' | 'stale' | 'unavailable';
+
+export interface ChinaCountrySummarySignal {
+  label: string;
+  value: string;
+  source: string;
+  sourceUrl?: string;
+  observedAt?: string;
+  publishedAt?: string;
+  effectiveAt?: string;
+  action?: string;
+  status?: string;
+  sectors?: string[];
+  entities?: string[];
+  translationState?: string;
+  publisherType?: string;
+  lineageId?: string;
+  provenance?: DecisionSignalProvenance;
+  stale: boolean;
+}
+
+export interface ChinaCountrySummaryGroup {
+  id: ChinaCountrySummaryGroupId;
+  state: ChinaCountrySummaryState;
+  signals: ChinaCountrySummarySignal[];
+  unavailableReason?: string;
+}
+
+export interface ChinaCountrySummaryData {
+  groups: ChinaCountrySummaryGroup[];
 }
 
 export interface CountryFactsData {
@@ -79,46 +132,95 @@ export interface CountryFactsData {
   countryName: string;
 }
 
-export interface CountryDeepDiveDebtEntry {
-  debtToGdp: number;
-  debtUsd: number;
-  annualGrowth: number;
-  source: string;
+export interface CountryEnergyProfileData {
+  mixAvailable: boolean;
+  mixYear: number;
+  coalShare: number;
+  gasShare: number;
+  oilShare: number;
+  nuclearShare: number;
+  renewShare: number;
+  windShare: number;
+  solarShare: number;
+  hydroShare: number;
+  importShare: number;
+  importShareAvailable: boolean;
+  importShareYear: number;
+  importShareSource: string;
+  gasStorageAvailable: boolean;
+  gasStorageFillPct: number;
+  gasStorageChange1d: number;
+  gasStorageTrend: string;
+  gasStorageDate: string;
+  electricityAvailable: boolean;
+  electricityPriceMwh: number;
+  electricitySource: string;
+  electricityDate: string;
+  jodiOilAvailable: boolean;
+  jodiOilDataMonth: string;
+  jodiOilObservedMeasurements?: string[];
+  gasolineDemandKbd: number;
+  gasolineImportsKbd: number;
+  dieselDemandKbd: number;
+  dieselImportsKbd: number;
+  jetDemandKbd: number;
+  jetImportsKbd: number;
+  lpgDemandKbd: number;
+  lpgImportsKbd: number;
+  crudeImportsKbd: number;
+  jodiGasAvailable: boolean;
+  jodiGasDataMonth: string;
+  gasTotalDemandTj: number;
+  gasLngImportsTj: number;
+  gasPipeImportsTj: number;
+  gasLngShare: number;
+  ieaStocksAvailable: boolean;
+  ieaStocksDataMonth: string;
+  ieaDaysOfCover: number;
+  ieaNetExporter: boolean;
+  ieaBelowObligation: boolean;
+  emberFossilShare: number;
+  emberRenewShare: number;
+  emberNuclearShare: number;
+  emberCoalShare: number;
+  emberGasShare: number;
+  emberDemandTwh: number;
+  emberDataMonth: string;
+  emberAvailable: boolean;
+  sprRegime: string;
+  sprCapacityMb: number;
+  sprOperator: string;
+  sprIeaMember: boolean;
+  sprStockholdingModel: string;
+  sprNote: string;
+  sprSource: string;
+  sprAsOf: string;
+  sprAvailable: boolean;
+  regionalEnergyFeeds?: RegionalEnergyFeed[];
 }
 
-export interface CountryDeepDiveSanctionsPressure {
-  entryCount: number;
-  sanctionsActive: boolean;
-}
-
-export interface CountryDeepDiveTradeFlow {
-  partnerName: string;
-  sector: string;
-  tradeValueUsd: number;
-  yoyChange: number;
-}
-
-export interface CountryDeepDiveTariffTrends {
-  currentRate: number;
-  trend: 'rising' | 'falling';
-  datapoints: Array<{ year: number; tariffRate: number }>;
-}
-
-export interface CountryDeepDiveProductExporter {
-  partnerIso2: string;
-  share: number;
-  value: number;
-}
-
-export interface CountryDeepDiveProduct {
-  hs4: string;
-  description: string;
-  totalValue: number;
-  topExporters: CountryDeepDiveProductExporter[];
+export interface CountryPortActivityData {
+  available: boolean;
+  ports: {
+    portId: string;
+    portName: string;
+    lat: number;
+    lon: number;
+    tankerCalls30d: number;
+    trendDeltaPct: number;
+    importTankerDwt: number;
+    exportTankerDwt: number;
+    anomalySignal: boolean;
+  }[];
+  fetchedAt: string;
+  // The API's last data for a country PortWatch has not refreshed in 7+ days.
+  stale?: boolean;
 }
 
 export interface CountryBriefPanel {
-  show(country: string, code: string, score: CountryScore | null, signals: CountryBriefSignals): void;
+  setSectionFailure?(id: import('../../shared/country-brief-sections').BriefSectionId, state: 'locked' | 'unavailable', reason: string): void;
+  setSectionCoverage?(id: import('../../shared/country-brief-sections').BriefSectionId, missing: string[]): void;
+  show(country: string, code: string, score: CountryScore | null, signals: CountrySignalCounts): void;
   hide(): void;
   showLoading(): void;
   getCode(): string | null;
@@ -127,26 +229,45 @@ export interface CountryBriefPanel {
   getTimelineMount(): HTMLElement | null;
   readonly signal: AbortSignal;
   onClose(cb: () => void): void;
-  setShareStoryHandler(handler: (code: string, name: string) => void): void;
-  setExportImageHandler(handler: (code: string, name: string) => void): void;
   updateBrief(data: CountryIntelData): void;
   updateNews(headlines: NewsItem[]): void;
-  updateMarkets(markets: PredictionMarket[]): void;
+  updateMarkets(markets: PredictionMarket[], metadata?: { fetchedAt?: number }): void;
   updateStock(data: StockIndexData): void;
   updateInfrastructure(code: string): void;
   showGeoError?(onRetry: () => void): void;
-  updateScore?(score: CountryScore | null, signals: CountryBriefSignals): void;
+  updateScore?(score: CountryScore | null, signals: CountrySignalCounts): void;
+  isFallbackBrief?(): boolean;
+  updateSignals?(signals: CountrySignalCounts, notes?: readonly string[]): void;
+  getSignalCounts?(): CountrySignalCounts | null;
   updateSignalDetails?(details: CountryDeepDiveSignalDetails): void;
-  updateMilitaryActivity?(summary: CountryDeepDiveMilitarySummary): void;
+  updateQualifiedCountrySignals?(value: import('../../shared/country-signal-observations').QualifiedCountrySignals): void;
+  clearQualifiedCountrySignals?(): void;
+  updateMilitaryActivity?(summary: CountryDeepDiveMilitarySummary | null): void;
+  updateDefenseIndustrialBase?(data: GetDefenseIndustrialBaseResponse | null): void;
+  syncCountryPremiumSectionsAccess?(hasAccess: boolean): void;
   updateEconomicIndicators?(indicators: CountryDeepDiveEconomicIndicator[]): void;
+  updateChinaCountrySummary?(data: ChinaCountrySummaryData): void;
   updateCountryFacts?(data: CountryFactsData): void;
-  updateNationalDebt?(entry: CountryDeepDiveDebtEntry | null): void;
-  updateSanctionsPressure?(data: CountryDeepDiveSanctionsPressure | null): void;
-  updateTradeFlows?(flows: CountryDeepDiveTradeFlow[] | null): void;
-  updateTariffTrends?(data: CountryDeepDiveTariffTrends | null): void;
-  updateProductImports?(products: CountryDeepDiveProduct[] | null): void;
+  updateEnergyProfile?(data: CountryEnergyProfileData): void;
+  updateReservoirContext?(code: string, reservoirs: import('@/services/climate').ReservoirLevel[]): void;
+  updateMaritimeActivity?(data: CountryPortActivityData): void;
+  updateTradeExposure?(data: GetCountryChokepointIndexResponse | null, sectors?: SectorExposureSummary[]): void;
   maximize?(): void;
   minimize?(): void;
   getIsMaximized?(): boolean;
   onStateChange?(cb: (state: { visible: boolean; maximized: boolean }) => void): void;
+  updateNationalDebt?(entry: { debtToGdp: number; debtUsd: number; annualGrowth: number; source: string } | null): void;
+  updateSanctionsPressure?(data: { entryCount: number; sanctionsActive?: boolean } | null): void;
+  updateImageryChange?(context: ImageryChangeContext | null): void;
+  updateNo2Activity?(reading: import('@/services/economic/no2-activity').No2CountryReading): void;
+  updateComtradeFlows?(flows: Array<{ partnerName: string; cmdDesc: string; tradeValueUsd: number; yoyChange: number }> | null): void;
+  updateTariffTrends?(data: CountryTariffTrendsData | null): void;
+  updateMultiSectorCostShock?(data: MultiSectorShockResponse | null): void;
+  updateProductImports?(data: CountryProductsResponse | null): void;
+  updateCommodityVulnerabilities?(data: GetCountryVulnerabilitiesResponse | null): void;
+  updateHousingCycle?(data: {
+    residential?: { indexValue: number; qoqChange: number | null; yoyChange: number | null; period: string } | null;
+    commercial?: { indexValue: number; qoqChange: number | null; yoyChange: number | null; period: string } | null;
+    dsr?: { dsrPct: number; change: number | null; period: string } | null;
+  } | null): void;
 }

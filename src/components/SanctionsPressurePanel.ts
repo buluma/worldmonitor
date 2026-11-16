@@ -1,6 +1,7 @@
 import { Panel } from './Panel';
-import type { CountrySanctionsPressure, ProgramSanctionsPressure, SanctionsEntry, SanctionsPressureResult } from '@/services/sanctions-pressure';
-import { escapeHtml } from '@/utils/sanitize';
+import { t } from '@/services/i18n';
+import type { CountrySanctionsPressure, FlagRegistrySanctionsPressure, ProgramSanctionsPressure, SanctionsEntry, SanctionsPressureResult } from '@/services/sanctions-pressure';
+import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
 
 export class SanctionsPressurePanel extends Panel {
   private data: SanctionsPressureResult | null = null;
@@ -8,13 +9,13 @@ export class SanctionsPressurePanel extends Panel {
   constructor() {
     super({
       id: 'sanctions-pressure',
-      title: 'Sanctions & Designations',
+      title: t('components.sanctionsPressure.title'),
       showCount: true,
       trackActivity: true,
       defaultRowSpan: 2,
-      infoTooltip: 'OFAC sanctions designations from the SDN and Consolidated Lists. Shows which countries face the highest designation pressure, what programs are driving it, and what has been newly added since the last update.',
+      infoTooltip: t('components.sanctionsPressure.infoTooltip'),
     });
-    this.showLoading('Loading sanctions data...');
+    this.showLoading(t('components.sanctionsPressure.loading'));
   }
 
   public setData(data: SanctionsPressureResult): void {
@@ -25,7 +26,7 @@ export class SanctionsPressurePanel extends Panel {
 
   private render(): void {
     if (!this.data || this.data.totalCount === 0) {
-      this.setContent('<div class="economic-empty">Sanctions data unavailable.</div>');
+      this.setSafeContent(unsafeRawHtml(`<div class="economic-empty">${escapeHtml(t('components.sanctionsPressure.unavailable'))}</div>`, 'legacy Panel.setContent() migration'));
       return;
     }
 
@@ -33,50 +34,84 @@ export class SanctionsPressurePanel extends Panel {
 
     const summaryHtml = `
       <div class="sanctions-summary">
-        ${this.renderSummaryCard('New', data.newEntryCount, data.newEntryCount > 0 ? 'highlight' : '')}
-        ${this.renderSummaryCard('Vessels', data.vesselCount)}
-        ${this.renderSummaryCard('Aircraft', data.aircraftCount)}
+        ${this.renderSummaryCard(t('components.sanctionsPressure.summary.new'), data.newEntryCount, data.newEntryCount > 0 ? 'highlight' : '')}
+        ${this.renderSummaryCard(
+          t('components.sanctionsPressure.summary.sema'),
+          data.semaError ? `${data.semaCount} · ${data.semaError}` : data.semaCount,
+          data.semaError ? 'highlight' : '',
+        )}
+        ${this.renderSummaryCard(t('components.sanctionsPressure.summary.vessels'), data.vesselCount)}
+        ${this.renderSummaryCard(t('components.sanctionsPressure.summary.aircraft'), data.aircraftCount)}
       </div>
     `;
 
     const countriesHtml = data.countries.length > 0
       ? data.countries.slice(0, 8).map((country) => this.renderCountryRow(country)).join('')
-      : '<div class="economic-empty">No country attribution available.</div>';
+      : `<div class="economic-empty">${escapeHtml(t('components.sanctionsPressure.empty.countries'))}</div>`;
+
+    const flagRegistriesHtml = data.flagRegistries.length > 0
+      ? `<div class="sanctions-section">
+          <div class="sanctions-section-title">${escapeHtml(t('components.sanctionsPressure.sections.flagRegistries'))}</div>
+          <div class="sanctions-list">${data.flagRegistries.slice(0, 6).map((registry) => this.renderFlagRegistryRow(registry)).join('')}</div>
+        </div>`
+      : '';
+
+    const targetsHtml = data.regulationTargets?.length
+      ? `<div class="sanctions-section">
+          <div class="sanctions-section-title">${escapeHtml(t('components.sanctionsPressure.sections.regulationTargets'))}</div>
+          <div class="sanctions-row-meta">${escapeHtml(t('components.sanctionsPressure.targetExplanation'))}</div>
+          <div class="sanctions-list">${data.regulationTargets.slice(0, 6).map(target => this.renderCountryRow(target)).join('')}</div>
+        </div>`
+      : '';
+
+    const unattributed = data.unattributed;
+    const unattributedHtml = unattributed && unattributed.entryCount > 0
+      ? `<div class="sanctions-row">
+          <div class="sanctions-row-main">
+            <div class="sanctions-row-title">${escapeHtml(t('components.sanctionsPressure.fallbacks.unattributed'))}</div>
+            <div class="sanctions-row-meta">${escapeHtml(t('components.sanctionsPressure.designations', { count: unattributed.entryCount }))}</div>
+          </div>
+          <div class="sanctions-row-flags">${this.renderAssetCounts(unattributed)}</div>
+        </div>`
+      : '';
 
     const entriesHtml = data.entries.length > 0
       ? data.entries.slice(0, 10).map((entry) => this.renderEntryRow(entry)).join('')
-      : '<div class="economic-empty">No recent designations.</div>';
+      : `<div class="economic-empty">${escapeHtml(t('components.sanctionsPressure.empty.entries'))}</div>`;
 
     const programsHtml = data.programs.length > 0
       ? data.programs.slice(0, 6).map((program) => this.renderProgramRow(program)).join('')
-      : '<div class="economic-empty">No program breakdown.</div>';
+      : `<div class="economic-empty">${escapeHtml(t('components.sanctionsPressure.empty.programs'))}</div>`;
 
     const footer = [
-      `Updated ${data.fetchedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-      data.datasetDate ? `dataset ${data.datasetDate.toISOString().slice(0, 10)}` : '',
-      'Source: OFAC',
+      t('components.sanctionsPressure.footer.updated', { time: data.fetchedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }),
+      data.datasetDate ? t('components.sanctionsPressure.footer.dataset', { date: data.datasetDate.toISOString().slice(0, 10) }) : '',
+      t('components.sanctionsPressure.footer.source'),
     ].filter(Boolean).join(' · ');
 
-    this.setContent(`
+    this.setSafeContent(unsafeRawHtml(`
       <div class="sanctions-panel-content">
         ${summaryHtml}
+        ${unattributedHtml}
         <div class="sanctions-sections">
           <div class="sanctions-section">
-            <div class="sanctions-section-title">Sanctioned countries</div>
+            <div class="sanctions-section-title">${escapeHtml(t('components.sanctionsPressure.sections.countries'))}</div>
             <div class="sanctions-list">${countriesHtml}</div>
           </div>
+          ${flagRegistriesHtml}
+          ${targetsHtml}
           <div class="sanctions-section">
-            <div class="sanctions-section-title">Recent designations</div>
+            <div class="sanctions-section-title">${escapeHtml(t('components.sanctionsPressure.sections.entries'))}</div>
             <div class="sanctions-list">${entriesHtml}</div>
           </div>
           <div class="sanctions-section">
-            <div class="sanctions-section-title">Programs</div>
+            <div class="sanctions-section-title">${escapeHtml(t('components.sanctionsPressure.sections.programs'))}</div>
             <div class="sanctions-list">${programsHtml}</div>
           </div>
         </div>
         <div class="economic-footer">${escapeHtml(footer)}</div>
       </div>
-    `);
+    `, 'legacy Panel.setContent() migration'));
   }
 
   private renderSummaryCard(label: string, value: string | number, tone = ''): string {
@@ -89,20 +124,41 @@ export class SanctionsPressurePanel extends Panel {
   }
 
   private renderCountryRow(country: CountrySanctionsPressure): string {
-    const flags: string[] = [];
-    if (country.newEntryCount > 0) flags.push(`<span class="sanctions-pill sanctions-pill-new">+${country.newEntryCount} new</span>`);
-    if (country.vesselCount > 0) flags.push(`<span class="sanctions-pill">🚢 ${country.vesselCount}</span>`);
-    if (country.aircraftCount > 0) flags.push(`<span class="sanctions-pill">✈ ${country.aircraftCount}</span>`);
+    const newFlag = country.newEntryCount > 0
+      ? `<span class="sanctions-pill sanctions-pill-new">${escapeHtml(t('components.sanctionsPressure.pills.newCount', { count: country.newEntryCount }))}</span>`
+      : '';
 
     return `
       <div class="sanctions-row">
         <div class="sanctions-row-main">
           <div class="sanctions-row-title">${escapeHtml(country.countryName)}</div>
-          <div class="sanctions-row-meta">${escapeHtml(country.countryCode)} · ${country.entryCount} designations</div>
+          <div class="sanctions-row-meta">${escapeHtml(country.countryCode)} · ${escapeHtml(t('components.sanctionsPressure.designations', { count: country.entryCount }))}</div>
         </div>
-        <div class="sanctions-row-flags">${flags.join('')}</div>
+        <div class="sanctions-row-flags">${newFlag}${this.renderAssetCounts(country)}</div>
       </div>
     `;
+  }
+
+  private renderFlagRegistryRow(registry: FlagRegistrySanctionsPressure): string {
+    const newCount = registry.newVesselCount + registry.newAircraftCount;
+    const newFlag = newCount > 0
+      ? `<span class="sanctions-pill sanctions-pill-new">${escapeHtml(t('components.sanctionsPressure.pills.newCount', { count: newCount }))}</span>`
+      : '';
+    return `
+      <div class="sanctions-row">
+        <div class="sanctions-row-main">
+          <div class="sanctions-row-title">${escapeHtml(registry.countryName)}</div>
+          <div class="sanctions-row-meta">${escapeHtml(registry.countryCode)}</div>
+        </div>
+        <div class="sanctions-row-flags">${newFlag}${this.renderAssetCounts(registry)}</div>
+      </div>
+    `;
+  }
+
+  private renderAssetCounts({ vesselCount, aircraftCount }: Pick<CountrySanctionsPressure, 'vesselCount' | 'aircraftCount'>): string {
+    const vessels = vesselCount > 0 ? `<span class="sanctions-pill">🚢 ${vesselCount}</span>` : '';
+    const aircraft = aircraftCount > 0 ? `<span class="sanctions-pill">✈ ${aircraftCount}</span>` : '';
+    return vessels + aircraft;
   }
 
   private renderProgramRow(program: ProgramSanctionsPressure): string {
@@ -110,29 +166,33 @@ export class SanctionsPressurePanel extends Panel {
       <div class="sanctions-row">
         <div class="sanctions-row-main">
           <div class="sanctions-row-title">${escapeHtml(program.program)}</div>
-          <div class="sanctions-row-meta">${program.entryCount} designations</div>
+          <div class="sanctions-row-meta">${escapeHtml(t('components.sanctionsPressure.designations', { count: program.entryCount }))}</div>
         </div>
         <div class="sanctions-row-flags">
-          ${program.newEntryCount > 0 ? `<span class="sanctions-pill sanctions-pill-new">+${program.newEntryCount} new</span>` : ''}
+          ${program.newEntryCount > 0 ? `<span class="sanctions-pill sanctions-pill-new">${escapeHtml(t('components.sanctionsPressure.pills.newCount', { count: program.newEntryCount }))}</span>` : ''}
         </div>
       </div>
     `;
   }
 
   private renderEntryRow(entry: SanctionsEntry): string {
-    const location = entry.countryNames[0] || entry.countryCodes[0] || 'Unattributed';
-    const program = entry.programs[0] || 'Program';
+    const jurisdiction = entry.countryNames[0] || entry.countryCodes[0] || entry.note.split(' · ')[0] || t('components.sanctionsPressure.fallbacks.unattributed');
+    const program = entry.programs[0] || t('components.sanctionsPressure.fallbacks.program');
     const note = entry.note ? `<div class="sanctions-entry-note">${escapeHtml(entry.note)}</div>` : '';
-    const effective = entry.effectiveAt ? entry.effectiveAt.toISOString().slice(0, 10) : 'undated';
+    const effective = entry.effectiveAt ? entry.effectiveAt.toISOString().slice(0, 10) : t('components.sanctionsPressure.fallbacks.undated');
+    const sources = (entry.sourceLists || []).map((source) => (
+      `<span class="sanctions-pill">${escapeHtml(source)}</span>`
+    )).join('');
 
     return `
       <div class="sanctions-entry">
         <div class="sanctions-entry-top">
           <span class="sanctions-entry-name">${escapeHtml(entry.name)}</span>
           <span class="sanctions-pill sanctions-pill-type">${escapeHtml(entry.entityType)}</span>
-          ${entry.isNew ? '<span class="sanctions-pill sanctions-pill-new">new</span>' : ''}
+          ${entry.isNew ? `<span class="sanctions-pill sanctions-pill-new">${escapeHtml(t('components.sanctionsPressure.pills.new'))}</span>` : ''}
+          ${sources}
         </div>
-        <div class="sanctions-entry-meta">${escapeHtml(location)} · ${escapeHtml(program)} · ${escapeHtml(effective)}</div>
+        <div class="sanctions-entry-meta">${escapeHtml(jurisdiction)} · ${escapeHtml(program)} · ${escapeHtml(effective)}</div>
         ${note}
       </div>
     `;

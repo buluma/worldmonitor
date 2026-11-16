@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
 import { loadEnvFile, runSeed, getRedisCredentials, loadSharedConfig } from './_seed-utils.mjs';
+import { unwrapEnvelope } from './_seed-envelope-source.mjs';
 import { resolveIso2, normalizeCountryToken } from './_country-resolver.mjs';
+import {
+  CORRELATION_RUNTIME_MODE_KEY,
+  resolveCorrelationRuntimeMode,
+} from './shared/correlation-runtime-mode.js';
 
 loadEnvFile(import.meta.url);
 
@@ -10,19 +15,56 @@ const CACHE_TTL = 1200; // 20min — outlives maxStaleMin:15 with buffer (cron r
 const MIN_CORRELATION_CARDS = 1;
 const CORRELATION_CARD_DOMAINS = ['military', 'escalation', 'economic', 'disaster'];
 
-const INPUT_KEYS = [
-  'military:flights:v1',
-  'military:flights:stale:v1',
-  'unrest:events:v1',
-  'infra:outages:v1',
-  'seismology:earthquakes:v1',
-  'market:stocks-bootstrap:v1',
-  'market:commodities-bootstrap:v1',
-  'market:crypto:v1',
-  'news:insights:v1',
-];
+// Reject preserved contract envelopes past the age each source seeder itself
+// declares. runSeed extends a last-good key on an upstream failure without
+// advancing `_seed.fetchedAt` (scripts/_seed-utils.mjs), so unwrapping without
+// this gate would revive stale observations and stamp them into cards dated
+// `computedAt: Date.now()`. Every value here is that source's own
+// `maxStaleMin`, not a number chosen at this call site; the five keys shared
+// with seed-cross-source-signals.mjs carry the same budgets it uses.
+//
+const INPUT_POLICIES = Object.freeze([
+  { key: 'military:flights:v1', arrayField: 'flights', maxAgeMin: 30, allowLegacyArray: true, usePayloadFetchedAt: true },
+  { key: 'military:flights:stale:v1', arrayField: 'flights', maxAgeMin: 30, allowLegacyArray: true, usePayloadFetchedAt: true },
+  { key: 'unrest:events:v1', arrayField: 'events', maxAgeMin: 120, allowLegacyArray: true },
+  { key: 'infra:outages:v1', arrayField: 'outages', maxAgeMin: 30, allowLegacyArray: true },
+  { key: 'seismology:earthquakes:v1', arrayField: 'earthquakes', maxAgeMin: 30, allowLegacyArray: true },
+  { key: 'market:stocks-bootstrap:v1', arrayField: 'quotes', maxAgeMin: 30 },
+  { key: 'market:commodities-bootstrap:v1', arrayField: 'quotes', maxAgeMin: 30 },
+  { key: 'market:crypto:v1', arrayField: 'quotes', maxAgeMin: 30 },
+  { key: 'news:insights:v1', arrayField: 'topStories', maxAgeMin: 30 },
+]);
 
-async function fetchInputData() {
+export const INPUT_KEYS = INPUT_POLICIES.map(({ key }) => key);
+
+function hasExpectedInputShape(policy, payload) {
+  let records;
+  if (Array.isArray(payload)) {
+    if (!policy.allowLegacyArray) return false;
+    records = payload;
+  } else {
+    if (payload == null || typeof payload !== 'object') return false;
+    records = payload[policy.arrayField];
+    if (!Array.isArray(records)) return false;
+  }
+  return records.every(record => (
+    record != null && typeof record === 'object' && !Array.isArray(record)
+  ));
+}
+
+function summarizeDiscardedInputs(discarded) {
+  const byReason = {};
+  for (const { reason } of discarded) {
+    byReason[reason] = (byReason[reason] ?? 0) + 1;
+  }
+  return {
+    total: discarded.length,
+    byReason,
+    inputs: discarded,
+  };
+}
+
+export async function fetchInputData() {
   const { url, token } = getRedisCredentials();
   const pipeline = INPUT_KEYS.map(k => ['GET', k]);
   const resp = await fetch(`${url}/pipeline`, {
@@ -34,13 +76,130 @@ async function fetchInputData() {
   if (!resp.ok) throw new Error(`Redis pipeline: HTTP ${resp.status}`);
   const results = await resp.json();
   const data = {};
-  for (let i = 0; i < INPUT_KEYS.length; i++) {
-    const raw = results[i]?.result;
-    if (raw) {
-      try { data[INPUT_KEYS[i]] = JSON.parse(raw); } catch { /* skip */ }
+  const discarded = [];
+  const discard = (key, reason) => discarded.push({ key, reason });
+  if (!Array.isArray(results)) {
+    for (const key of INPUT_KEYS) discard(key, 'invalid_pipeline_shape');
+    console.warn('  [Correlation] discarded Redis inputs', summarizeDiscardedInputs(discarded));
+    return data;
+  }
+  for (let i = 0; i < INPUT_POLICIES.length; i++) {
+    const policy = INPUT_POLICIES[i];
+    const { key } = policy;
+    const result = results[i];
+    if (result?.error != null) {
+      discard(key, 'pipeline_error');
+      continue;
+    }
+    const raw = result?.result;
+    if (raw == null) {
+      discard(key, 'missing');
+      continue;
+    }
+    try {
+      // Seven of these nine keys are written by contract-mode seeders, which
+      // store `{ _seed, data }` (scripts/_seed-utils.mjs). Parsing without
+      // unwrapping handed computeCorrelation the envelope, so every
+      // `payload.<field>` read below was undefined and three of the four
+      // domains silently produced no signals at all — #5870 is the same defect
+      // one seeder over. unwrapEnvelope only unwraps when `_seed.fetchedAt` is
+      // a number, so the bare `military:flights` keys pass through unchanged.
+      //
+      // JSON.parse stays outside unwrapEnvelope on purpose: it accepts a raw
+      // string, but on a parse failure it returns that string as `data`, which
+      // would register a malformed value as a found key and defeat the
+      // "no input data" tripwire in computeCorrelation.
+      const { _seed, data: payload } = unwrapEnvelope(JSON.parse(raw));
+      if (payload == null) {
+        discard(key, 'null_payload');
+        continue;
+      }
+      if (!hasExpectedInputShape(policy, payload)) {
+        discard(key, 'invalid_shape');
+        continue;
+      }
+      // Contract envelopes carry `_seed.fetchedAt`. The military flight
+      // producer still writes a bare object, so object-shaped military
+      // payloads must carry their equivalent top-level timestamp. Explicitly
+      // supported legacy arrays remain timestamp-free.
+      const now = Date.now();
+      let fetchedAt = _seed?.fetchedAt;
+      if (policy.usePayloadFetchedAt && !Array.isArray(payload)) {
+        if (!Number.isFinite(payload.fetchedAt) || payload.fetchedAt > now) {
+          discard(key, 'invalid_fetched_at');
+          continue;
+        }
+        fetchedAt = payload.fetchedAt;
+      }
+      if (
+        typeof fetchedAt === 'number' &&
+        now - fetchedAt > policy.maxAgeMin * 60_000
+      ) {
+        discard(key, 'stale');
+        continue;
+      }
+      data[key] = payload;
+    } catch {
+      discard(key, 'malformed_json');
     }
   }
+  if (discarded.length > 0) {
+    // Do not include raw values or parse errors here. Redis payloads can carry
+    // sensitive source data, and keys plus bounded reason codes are enough to
+    // diagnose a partial correlation cycle.
+    console.warn('  [Correlation] discarded Redis inputs', summarizeDiscardedInputs(discarded));
+  }
   return data;
+}
+
+/**
+ * Read the staged runtime control for one correlation compute cycle.
+ *
+ * This intentionally uses the raw Redis key rather than a cached input
+ * pipeline: an operator rollback must be visible to the next cycle. Any
+ * missing credentials, transport failure, malformed Redis response, or
+ * malformed value resolves to the existing legacy behavior.
+ */
+export async function readCorrelationRuntimeMode({
+  fetchImpl = (...args) => globalThis.fetch(...args),
+  env = process.env,
+  timeoutMs = 3_000,
+} = {}) {
+  const url = env.UPSTASH_REDIS_REST_URL;
+  const token = env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return 'legacy';
+
+  try {
+    const response = await fetchImpl(`${url}/get/${encodeURIComponent(CORRELATION_RUNTIME_MODE_KEY)}`, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'worldmonitor-seeder/1.0',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      console.warn(`  [Correlation] control plane returned HTTP ${response.status}; using legacy`);
+      return 'legacy';
+    }
+
+    const payload = await response.json();
+    if (
+      !payload
+      || typeof payload !== 'object'
+      || Array.isArray(payload)
+      || !Object.prototype.hasOwnProperty.call(payload, 'result')
+      || payload.result == null
+    ) return 'legacy';
+
+    const raw = typeof payload.result === 'string'
+      ? JSON.parse(payload.result)
+      : payload.result;
+    return resolveCorrelationRuntimeMode(raw);
+  } catch (error) {
+    console.warn('  [Correlation] control-plane read failed; using legacy:', error?.message || error);
+    return 'legacy';
+  }
 }
 
 // ── Haversine ───────────────────────────────────────────────
@@ -134,13 +293,26 @@ export function matchCountryNamesInText(text) {
 const STRIKE_TYPES = new Set(['fighter', 'bomber', 'attack']);
 const SUPPORT_TYPES = new Set(['tanker', 'awacs', 'surveillance', 'electronic_warfare']);
 
-function collectMilitarySignals(flights) {
+export function collectMilitarySignals(flights) {
   const signals = [];
   const now = Date.now();
   const windowMs = 24 * 60 * 60 * 1000;
   for (const f of flights) {
-    const ts = typeof f.lastSeen === 'number' ? f.lastSeen : (f.lastSeen ? new Date(f.lastSeen).getTime() : now);
-    if (now - ts > windowMs) continue;
+    let ts = now;
+    if (Object.hasOwn(f, 'lastSeenMs')) {
+      const raw = f.lastSeenMs;
+      const parsed = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw;
+      if (!Number.isFinite(parsed)) continue;
+      ts = parsed;
+    } else if (Object.hasOwn(f, 'lastSeen')) {
+      const raw = f.lastSeen;
+      const parsed = typeof raw === 'number'
+        ? raw
+        : (typeof raw === 'string' && raw.trim() !== '' ? new Date(raw).getTime() : NaN);
+      if (!Number.isFinite(parsed)) continue;
+      ts = parsed;
+    }
+    if (ts > now || now - ts > windowMs) continue;
     const isStrike = STRIKE_TYPES.has(f.aircraftType);
     const isSupport = SUPPORT_TYPES.has(f.aircraftType);
     const severity = isStrike ? 80 : isSupport ? 60 : 55;
@@ -168,9 +340,9 @@ function generateMilitaryTitle(cluster) {
   );
   const hasStrikePackage = [...STRIKE_TYPES].some(t => flightTypes.has(t)) &&
                            [...SUPPORT_TYPES].some(t => flightTypes.has(t));
-  if (hasStrikePackage) return `Strike packaging detected — ${countryLabel}`;
-  if (types.has('military_flight')) return `Military flight cluster — ${countryLabel}`;
-  return `Military activity convergence — ${countryLabel}`;
+  if (hasStrikePackage) return `Strike packaging detected \u2014 ${countryLabel}`;
+  if (types.has('military_flight')) return `Military flight cluster \u2014 ${countryLabel}`;
+  return `Military activity convergence \u2014 ${countryLabel}`;
 }
 
 // ── Adapter: Escalation ─────────────────────────────────────
@@ -258,8 +430,8 @@ function generateEscalationTitle(cluster) {
   if (types.has('escalation_outage')) parts.push('comms disruption');
   if (types.has('news_severity')) parts.push('news escalation');
   return parts.length > 0
-    ? `${parts.join(' + ')} — ${countryLabel}`
-    : `Escalation signals — ${countryLabel}`;
+    ? `${parts.join(' + ')} \u2014 ${countryLabel}`
+    : `Escalation signals \u2014 ${countryLabel}`;
 }
 
 // ── Adapter: Economic ───────────────────────────────────────
@@ -267,13 +439,13 @@ const SANCTIONS_KEYWORDS = /\b(sanction|tariff|embargo|trade\s+war|ban|restrict|
 const COMMODITY_SYMBOLS = new Set(['CL=F', 'GC=F', 'NG=F', 'SI=F', 'HG=F', 'ZW=F', 'BTC-USD', 'BZ=F', 'ETH-USD', 'KC=F', 'SB=F', 'CT=F', 'CC=F']);
 const SIGNIFICANT_CHANGE_PCT = 1.5;
 
-function collectEconomicSignals(markets, newsClusters) {
+export function collectEconomicSignals(markets, newsClusters) {
   const signals = [];
   const now = Date.now();
   const windowMs = 24 * 60 * 60 * 1000;
 
   for (const m of markets) {
-    if (m.change == null || m.price == null) continue;
+    if (!Number.isFinite(m.price) || !Number.isFinite(m.change)) continue;
     const absPct = Math.abs(m.change);
     if (absPct < SIGNIFICANT_CHANGE_PCT) continue;
     const isCommodity = COMMODITY_SYMBOLS.has(m.symbol);
@@ -363,18 +535,20 @@ function collectDisasterSignals(earthquakes, outages, protests) {
   const windowMs = 96 * 60 * 60 * 1000;
 
   for (const q of earthquakes) {
+    const qLat = q.location?.latitude;
+    const qLon = q.location?.longitude;
+    if (!Number.isFinite(q.magnitude) || !Number.isFinite(qLat) || !Number.isFinite(qLon)) continue;
     const ts = q.occurredAt ?? now;
     if (now - ts > windowMs) continue;
-    if (q.location?.latitude == null || q.location?.longitude == null) continue;
     const severity = Math.min(100, Math.max(10, (q.magnitude - 1.5) * 17));
     signals.push({
       type: 'earthquake',
       source: 'usgs',
       severity,
-      lat: q.location.latitude,
-      lon: q.location.longitude,
+      lat: qLat,
+      lon: qLon,
       timestamp: ts,
-      label: `M${q.magnitude.toFixed(1)} — ${q.place}`,
+      label: `M${q.magnitude.toFixed(1)} \u2014 ${q.place}`,
       magnitude: q.magnitude,
     });
   }
@@ -395,7 +569,7 @@ function collectDisasterSignals(earthquakes, outages, protests) {
     if (o.country && conflictCountries.has(o.country)) continue;
     const oLat = o.location?.latitude ?? o.lat;
     const oLon = o.location?.longitude ?? o.lon;
-    if (oLat == null || oLon == null || (oLat === 0 && oLon === 0)) continue;
+    if (!Number.isFinite(oLat) || !Number.isFinite(oLon) || (oLat === 0 && oLon === 0)) continue;
     const severityMap = { OUTAGE_SEVERITY_TOTAL: 90, OUTAGE_SEVERITY_MAJOR: 70, OUTAGE_SEVERITY_PARTIAL: 40, total: 90, major: 70, partial: 40 };
     signals.push({
       type: 'infra_outage',
@@ -420,17 +594,36 @@ function generateDisasterTitle(cluster) {
     parts.push(`M${maxMag.toFixed(1)} seismic`);
   }
   if (types.has('infra_outage')) parts.push('infra disruption');
-  const quakePlace = cluster.find(s => s.type === 'earthquake')?.label?.split('—')[1]?.trim();
+  const quakePlace = cluster.find(s => s.type === 'earthquake')?.label?.split('\u2014')[1]?.trim();
   return parts.length > 0
-    ? `Disaster cascade: ${parts.join(' + ')}${quakePlace ? ` — ${quakePlace}` : ''}`
+    ? `Disaster cascade: ${parts.join(' + ')}${quakePlace ? ` \u2014 ${quakePlace}` : ''}`
     : 'Disaster convergence detected';
 }
 
 // ── Clustering ──────────────────────────────────────────────
-function clusterByProximity(signals, radiusKm) {
-  if (signals.length === 0) return [];
+// Same grid as CorrelationEngine.clusterByProximity (src/services/correlation-engine/engine.ts):
+// cells are cellSizeDeg wide in both axes, and the column scan widens per row because a degree
+// of longitude shrinks toward the poles.
+export function clusterByProximity(signals, radiusKm) {
+  // A non-positive radius would make the column span infinite.
+  if (signals.length === 0 || !(radiusKm > 0)) return [];
   const DEG_PER_KM_LAT = 1 / 111;
-  const cellSizeLat = radiusKm * DEG_PER_KM_LAT;
+  const EARTH_RADIUS_KM = 6371; // the radius haversineKm uses
+  const cellSizeDeg = radiusKm * DEG_PER_KM_LAT;
+  const maxColSpan = Math.ceil(360 / cellSizeDeg);
+  const sinHalfRadius = Math.sin(radiusKm / EARTH_RADIUS_KM / 2);
+  // Neighbours lie in rows row-1..row+1; for two points at |lat| <= maxAbsLat within radiusKm,
+  // haversine gives sin(dLon / 2) <= sin(radiusKm / 2R) / cos(maxAbsLat).
+  const colSpanForRow = (row) => {
+    const maxAbsLat = Math.min(90, Math.max(
+      Math.abs((row - 1) * cellSizeDeg),
+      Math.abs((row + 2) * cellSizeDeg),
+    ));
+    const ratio = sinHalfRadius / Math.cos(maxAbsLat * Math.PI / 180);
+    if (!(ratio < 1)) return maxColSpan;
+    const maxDeltaLonDeg = 2 * Math.asin(ratio) * 180 / Math.PI;
+    return Math.min(maxColSpan, Math.ceil(maxDeltaLonDeg / cellSizeDeg + 1e-9));
+  };
   const parent = signals.map((_, i) => i);
   const find = (i) => {
     while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; }
@@ -446,10 +639,8 @@ function clusterByProximity(signals, radiusKm) {
     const s = signals[i];
     if (s.lat == null || s.lon == null) continue;
     validIndices.push(i);
-    const cellRow = Math.floor(s.lat / cellSizeLat);
-    const cosLat = Math.cos(s.lat * Math.PI / 180);
-    const cellSizeLon = cosLat > 0.01 ? cellSizeLat / cosLat : cellSizeLat;
-    const cellCol = Math.floor(s.lon / cellSizeLon);
+    const cellRow = Math.floor(s.lat / cellSizeDeg);
+    const cellCol = Math.floor(s.lon / cellSizeDeg);
     const key = `${cellRow}:${cellCol}`;
     const list = grid.get(key);
     if (list) list.push(i); else grid.set(key, [i]);
@@ -458,8 +649,9 @@ function clusterByProximity(signals, radiusKm) {
     const sep = key.indexOf(':');
     const row = Number(key.slice(0, sep));
     const col = Number(key.slice(sep + 1));
+    const colSpan = colSpanForRow(row);
     for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) {
+      for (let dc = -colSpan; dc <= colSpan; dc++) {
         const neighbors = grid.get(`${row + dr}:${col + dc}`);
         if (!neighbors) continue;
         for (const i of indices) {
@@ -637,6 +829,9 @@ const DOMAINS = {
 
 // ── Main ────────────────────────────────────────────────────
 async function computeCorrelation() {
+  const runtimeMode = await readCorrelationRuntimeMode();
+  console.log(`  [Correlation] runtime mode=${runtimeMode}`);
+
   const data = await fetchInputData();
 
   const hasAnyData = INPUT_KEYS.some(k => data[k] != null);

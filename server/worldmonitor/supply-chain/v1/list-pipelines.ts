@@ -1,82 +1,150 @@
+import { getCachedJson } from '../../../_shared/redis';
+import { PIPELINES_GAS_KEY, PIPELINES_OIL_KEY } from '../../../_shared/cache-keys';
 import type {
-  ServerContext,
   ListPipelinesRequest,
   ListPipelinesResponse,
   PipelineEntry,
 } from '../../../../src/generated/server/worldmonitor/supply_chain/v1/service_server';
-import { getCachedJson } from '../../../_shared/redis';
-import { derivePipelinePublicBadge } from '../../../../src/shared/pipeline-evidence';
+import { ValidationError } from '../../../../src/generated/server/worldmonitor/supply_chain/v1/service_server';
+import { derivePublicBadge } from './_pipeline-evidence';
+import { pickNewerClassifierVersion, pickNewerIsoTimestamp } from '../../../../src/shared/pipeline-evidence';
 
-const GAS_KEY = 'energy:pipelines:gas:v1';
-const OIL_KEY = 'energy:pipelines:oil:v1';
-
+/**
+ * Shape of the JSON emitted by scripts/seed-pipelines-{gas,oil}.mjs.
+ * Kept loose (`unknown`) at the seam because Upstash returns `unknown`;
+ * the projection function below narrows it to the proto shape.
+ */
 interface RawRegistry {
-  pipelines?: Record<string, unknown>;
   classifierVersion?: string;
-  fetchedAt?: string;
+  updatedAt?: string;
+  pipelines?: Record<string, unknown>;
 }
 
-function projectRawPipeline(raw: Record<string, unknown>): PipelineEntry {
-  const evidence = raw.evidence as Record<string, unknown> | undefined;
+function coerceString(v: unknown, fallback = ''): string {
+  return typeof v === 'string' ? v : fallback;
+}
+
+function coerceNumber(v: unknown, fallback = 0): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+function coerceLatLon(v: unknown): { lat: number; lon: number } {
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    const obj = v as Record<string, unknown>;
+    return { lat: coerceNumber(obj.lat), lon: coerceNumber(obj.lon) };
+  }
+  return { lat: 0, lon: 0 };
+}
+
+export function projectPipeline(raw: unknown): PipelineEntry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || r.id.length === 0) return null;
+
+  const evidence = (r.evidence ?? null) as Record<string, unknown> | null;
+  const operatorStatement =
+    evidence && typeof evidence.operatorStatement === 'object' && evidence.operatorStatement
+      ? {
+          text: coerceString((evidence.operatorStatement as Record<string, unknown>).text),
+          url: coerceString((evidence.operatorStatement as Record<string, unknown>).url),
+          date: coerceString((evidence.operatorStatement as Record<string, unknown>).date),
+        }
+      : undefined;
+  const sanctionRefs = Array.isArray(evidence?.sanctionRefs)
+    ? (evidence.sanctionRefs as unknown[]).map(s => {
+        const ref = (s ?? {}) as Record<string, unknown>;
+        return {
+          authority: coerceString(ref.authority),
+          listId: coerceString(ref.listId),
+          date: coerceString(ref.date),
+          url: coerceString(ref.url),
+        };
+      })
+    : [];
+
+  const ev = evidence
+    ? {
+        physicalState: coerceString(evidence.physicalState, 'unknown'),
+        physicalStateSource: coerceString(evidence.physicalStateSource, 'operator'),
+        operatorStatement,
+        commercialState: coerceString(evidence.commercialState, 'unknown'),
+        sanctionRefs,
+        lastEvidenceUpdate: coerceString(evidence.lastEvidenceUpdate),
+        classifierVersion: coerceString(evidence.classifierVersion, 'v1'),
+        classifierConfidence: coerceNumber(evidence.classifierConfidence, 0),
+      }
+    : undefined;
+
+  const publicBadge = derivePublicBadge(ev);
+
+  const waypoints = Array.isArray(r.waypoints)
+    ? (r.waypoints as unknown[]).map(coerceLatLon)
+    : [];
+
   return {
-    id: String(raw.id ?? ''),
-    name: String(raw.name ?? ''),
-    operator: String(raw.operator ?? ''),
-    commodityType: String(raw.commodityType ?? ''),
-    fromCountry: String(raw.fromCountry ?? ''),
-    toCountry: String(raw.toCountry ?? ''),
-    transitCountries: Array.isArray(raw.transitCountries) ? raw.transitCountries.map(String) : [],
-    capacityBcmYr: Number(raw.capacityBcmYr ?? 0),
-    capacityMbd: Number(raw.capacityMbd ?? 0),
-    lengthKm: Number(raw.lengthKm ?? 0),
-    inService: Number(raw.inService ?? 0),
-    startPoint: raw.startPoint ? { lat: Number((raw.startPoint as any).lat), lon: Number((raw.startPoint as any).lon) } : undefined,
-    endPoint: raw.endPoint ? { lat: Number((raw.endPoint as any).lat), lon: Number((raw.endPoint as any).lon) } : undefined,
-    waypoints: Array.isArray(raw.waypoints) ? raw.waypoints.map((w: any) => ({ lat: Number(w.lat), lon: Number(w.lon) })) : [],
-    evidence: evidence ? {
-      physicalState: String(evidence.physicalState ?? ''),
-      physicalStateSource: String(evidence.physicalStateSource ?? ''),
-      operatorStatement: evidence.operatorStatement ? {
-        text: String((evidence.operatorStatement as any).text ?? ''),
-        url: String((evidence.operatorStatement as any).url ?? ''),
-        date: String((evidence.operatorStatement as any).date ?? ''),
-      } : undefined,
-      commercialState: String(evidence.commercialState ?? ''),
-      sanctionRefs: Array.isArray(evidence.sanctionRefs) ? evidence.sanctionRefs.map((s: any) => ({
-        authority: String(s?.authority ?? ''),
-        listId: String(s?.listId ?? ''),
-        date: String(s?.date ?? ''),
-        url: String(s?.url ?? ''),
-      })) : [],
-      lastEvidenceUpdate: String(evidence.lastEvidenceUpdate ?? ''),
-      classifierVersion: String(evidence.classifierVersion ?? ''),
-      classifierConfidence: Number(evidence.classifierConfidence ?? 0),
-    } : undefined,
-    publicBadge: derivePipelinePublicBadge(evidence ?? null),
+    id: coerceString(r.id),
+    name: coerceString(r.name),
+    operator: coerceString(r.operator),
+    commodityType: coerceString(r.commodityType),
+    fromCountry: coerceString(r.fromCountry),
+    toCountry: coerceString(r.toCountry),
+    transitCountries: Array.isArray(r.transitCountries)
+      ? (r.transitCountries as unknown[]).map(t => coerceString(t))
+      : [],
+    capacityBcmYr: coerceNumber(r.capacityBcmYr),
+    capacityMbd: coerceNumber(r.capacityMbd),
+    lengthKm: coerceNumber(r.lengthKm),
+    inService: coerceNumber(r.inService),
+    startPoint: coerceLatLon(r.startPoint),
+    endPoint: coerceLatLon(r.endPoint),
+    waypoints,
+    evidence: ev,
+    publicBadge,
   };
 }
 
+function collect(raw: RawRegistry | null): PipelineEntry[] {
+  if (!raw?.pipelines) return [];
+  return Object.values(raw.pipelines)
+    .map(projectPipeline)
+    .filter((p): p is PipelineEntry => p != null);
+}
+
 export async function listPipelines(
-  _ctx: ServerContext,
+  _ctx: unknown,
   req: ListPipelinesRequest,
 ): Promise<ListPipelinesResponse> {
-  try {
-    const [gasRaw, oilRaw] = await Promise.all([
-      getCachedJson(GAS_KEY, true) as Promise<RawRegistry | null>,
-      getCachedJson(OIL_KEY, true) as Promise<RawRegistry | null>,
-    ]);
-
-    const gasPipelines = gasRaw?.pipelines ? Object.values(gasRaw.pipelines).map(e => projectRawPipeline(e as Record<string, unknown>)) : [];
-    const oilPipelines = oilRaw?.pipelines ? Object.values(oilRaw.pipelines).map(e => projectRawPipeline(e as Record<string, unknown>)) : [];
-
-    let pipelines = [...gasPipelines, ...oilPipelines];
-    if (req.commodityType) pipelines = pipelines.filter(p => p.commodityType === req.commodityType);
-
-    const fetchedAt = gasRaw?.fetchedAt ?? oilRaw?.fetchedAt ?? '';
-    const classifierVersion = gasRaw?.classifierVersion ?? oilRaw?.classifierVersion ?? '';
-
-    return { pipelines, fetchedAt, classifierVersion, upstreamUnavailable: pipelines.length === 0 };
-  } catch {
-    return { pipelines: [], fetchedAt: '', classifierVersion: '', upstreamUnavailable: true };
+  const commodity = (req.commodityType || '').toLowerCase();
+  if (commodity !== '' && commodity !== 'gas' && commodity !== 'oil') {
+    throw new ValidationError([{ field: 'commodityType', description: 'Expected gas, oil, or an empty filter' }]);
   }
+  const wantGas = !commodity || commodity === 'gas';
+  const wantOil = !commodity || commodity === 'oil';
+
+  // Seeder writes via raw key (no env-prefix) — match it on read.
+  const [gasRaw, oilRaw] = await Promise.all([
+    wantGas ? getCachedJson(PIPELINES_GAS_KEY, true) as Promise<RawRegistry | null> : Promise.resolve(null),
+    wantOil ? getCachedJson(PIPELINES_OIL_KEY, true) as Promise<RawRegistry | null> : Promise.resolve(null),
+  ]);
+
+  const pipelines = [...collect(gasRaw), ...collect(oilRaw)];
+
+  // Pick the newest classifier version present across the registries. Gas
+  // and oil are now seeded by separate Railway cron processes, so a
+  // mixed-version window (gas=v2, oil=v1) during rollouts is a real expected
+  // state — must actually compare, not prefer one side. Same logic for
+  // fetchedAt: the newer seeder cycle is the accurate "last refresh" signal.
+  const classifierVersion = pickNewerClassifierVersion(
+    gasRaw?.classifierVersion,
+    oilRaw?.classifierVersion,
+  );
+  const fetchedAt = pickNewerIsoTimestamp(gasRaw?.updatedAt, oilRaw?.updatedAt)
+    || '';
+
+  return {
+    pipelines,
+    fetchedAt,
+    classifierVersion,
+    upstreamUnavailable: (wantGas && !gasRaw) || (wantOil && !oilRaw),
+  };
 }

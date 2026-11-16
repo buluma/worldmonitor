@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { pathToFileURL } from 'node:url';
 import {
   acquireLockSafely,
   CHROME_UA,
@@ -8,6 +9,8 @@ import {
   getRedisCredentials,
   loadEnvFile,
   logSeedResult,
+  parseRetryAfterMs,
+  PERMANENT_4XX_STATUSES,
   releaseLock,
   verifySeedKey,
   withRetry,
@@ -26,7 +29,7 @@ export const OPENAQ_SOURCE_VERSION = 'openaq-v3-pm25-waqi-optional-v2';
 const OPENAQ_LOCATIONS_URL = 'https://api.openaq.org/v3/locations';
 const OPENAQ_PM25_LATEST_URL = 'https://api.openaq.org/v3/parameters/2/latest';
 const OPENAQ_PAGE_LIMIT = 1000;
-const OPENAQ_MAX_PAGES = Number(process.env.OPENAQ_MAX_PAGES) || 20;
+const OPENAQ_MAX_PAGES = 20;
 // Worst case: 2 OpenAQ calls × 20 pages × (30s timeout × 3 attempts) ≈ 3600s
 const AIR_QUALITY_LOCK_TTL_MS = 3_600_000;
 
@@ -461,17 +464,33 @@ export function buildMirrorWriteCommands(payload, ttlSeconds, fetchedAt = Date.n
 
 async function redisPipeline(commands) {
   const { url, token } = getRedisCredentials();
-  const response = await fetch(`${url}/pipeline`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(commands),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Redis pipeline failed: HTTP ${response.status} — ${body.slice(0, 200)}`);
-  }
-  return response.json();
+  const body = JSON.stringify(commands);
+  // Retry transient publish failures (Upstash timeouts, 5xx, network resets) so
+  // a single latency spike after a successful fetch doesn't fail the whole
+  // bundle — the fetch already retries, the publish did not. Mirrors
+  // redisCommand()'s tagging: permanent 4xx won't recover (fail fast), 429
+  // honours Retry-After, timeouts/5xx fall through to withRetry's backoff.
+  return withRetry(async () => {
+    const response = await fetch(`${url}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      const error = new Error(`Redis pipeline failed: HTTP ${response.status} — ${text.slice(0, 200)}`);
+      error.httpStatus = response.status;
+      if (PERMANENT_4XX_STATUSES.has(response.status)) {
+        error.nonRetryable = true;
+      } else if (response.status === 429) {
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+        if (retryAfterMs != null) error.retryAfterMs = retryAfterMs;
+      }
+      throw error;
+    }
+    return response.json();
+  }, 2, 1_000);
 }
 
 async function publishMirroredPayload(payload) {
@@ -589,7 +608,7 @@ async function main() {
   }
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''));
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   main().catch((error) => {
     const cause = error?.cause ? ` (cause: ${error.cause.message || error.cause.code || error.cause})` : '';

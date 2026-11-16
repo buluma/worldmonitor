@@ -29,6 +29,8 @@ interface RawQuote {
   price: number | null;
   change: number | null;
   sparkline?: number[];
+  sparklineIntervalSeconds?: number;
+  sparklineStartAt?: number;
 }
 
 interface RawCotCategory {
@@ -83,6 +85,8 @@ interface GoldCbHolderRaw { iso3: string; name: string; tonnes: number; pctOfRes
 interface GoldCbMoverRaw { iso3: string; name: string; deltaTonnes12m: number }
 interface GoldCbReservesPayload {
   updatedAt: string;
+  indicator?: string;
+  valueIsOunces?: boolean;
   asOfMonth: string;
   totalTonnes: number;
   topHolders: GoldCbHolderRaw[];
@@ -111,7 +115,7 @@ const XAU_FX = [
   { symbol: 'USDJPY=X', label: 'JPY', flag: '\u{1F1EF}\u{1F1F5}', multiply: true },
   { symbol: 'USDCNY=X', label: 'CNY', flag: '\u{1F1E8}\u{1F1F3}', multiply: true },
   { symbol: 'USDINR=X', label: 'INR', flag: '\u{1F1EE}\u{1F1F3}', multiply: true },
-  { symbol: 'USDCHF=X', label: 'CHF', flag: '\u{1F1E8}\u{1F1ED}', multiply: false },
+  { symbol: 'USDCHF=X', label: 'CHF', flag: '\u{1F1E8}\u{1F1ED}', multiply: true },
 ];
 
 function emptyResponse(): GetGoldIntelligenceResponse {
@@ -132,11 +136,11 @@ function emptyResponse(): GetGoldIntelligenceResponse {
 function mapCategory(c: RawCotCategory | undefined): GoldCotCategory | undefined {
   if (!c) return undefined;
   return {
-    longPositions: Math.round(c.longPositions ?? 0),
-    shortPositions: Math.round(c.shortPositions ?? 0),
+    longPositions: String(Math.round(c.longPositions ?? 0)),
+    shortPositions: String(Math.round(c.shortPositions ?? 0)),
     netPct: Number(c.netPct ?? 0),
     oiSharePct: Number(c.oiSharePct ?? 0),
-    wowNetDelta: Math.round(c.wowNetDelta ?? 0),
+    wowNetDelta: String(Math.round(c.wowNetDelta ?? 0)),
   };
 }
 
@@ -175,7 +179,7 @@ function mapCot(raw: RawCotInstrument | undefined): GoldCotPositioning | undefin
   return {
     reportDate: String(raw.reportDate ?? ''),
     nextReleaseDate: String(raw.nextReleaseDate ?? ''),
-    openInterest: Math.round(raw.openInterest ?? 0),
+    openInterest: String(Math.round(raw.openInterest ?? 0)),
     managedMoney,
     producerSwap,
   };
@@ -245,14 +249,18 @@ export async function getGoldIntelligence(
     const cbReserves: GoldCbReserves | undefined = rawCbReserves && Array.isArray(rawCbReserves.topHolders) && rawCbReserves.topHolders.length >= 5
       ? {
         asOfMonth: rawCbReserves.asOfMonth,
-        totalTonnes: rawCbReserves.totalTonnes,
+        indicator: rawCbReserves.indicator ?? '',
+        valueIsOunces: rawCbReserves.valueIsOunces,
+        totalTonnes: rawCbReserves.valueIsOunces === true ? rawCbReserves.totalTonnes : 0,
         topHolders: rawCbReserves.topHolders.map<GoldCbHolder>(h => ({
-          iso3: h.iso3, name: h.name, tonnes: h.tonnes, pctOfReserves: h.pctOfReserves,
+          iso3: h.iso3, name: h.name,
+          tonnes: rawCbReserves.valueIsOunces === true ? h.tonnes : 0,
+          pctOfReserves: h.pctOfReserves,
         })),
-        topBuyers12m: (rawCbReserves.topBuyers12m ?? []).map<GoldCbMover>(m => ({
+        topBuyers12m: (rawCbReserves.valueIsOunces === true ? rawCbReserves.topBuyers12m ?? [] : []).map<GoldCbMover>(m => ({
           iso3: m.iso3, name: m.name, deltaTonnes12m: m.deltaTonnes12m,
         })),
-        topSellers12m: (rawCbReserves.topSellers12m ?? []).map<GoldCbMover>(m => ({
+        topSellers12m: (rawCbReserves.valueIsOunces === true ? rawCbReserves.topSellers12m ?? [] : []).map<GoldCbMover>(m => ({
           iso3: m.iso3, name: m.name, deltaTonnes12m: m.deltaTonnes12m,
         })),
       }
@@ -278,6 +286,8 @@ export async function getGoldIntelligence(
       goldPrice,
       goldChangePct: gold?.change ?? 0,
       goldSparkline: gold?.sparkline ?? [],
+      goldSparklineIntervalSeconds: gold?.sparklineIntervalSeconds,
+      goldSparklineStartAt: gold?.sparklineStartAt,
       silverPrice,
       platinumPrice,
       palladiumPrice,

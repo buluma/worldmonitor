@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { PREMIUM_RPC_PATHS } from '../src/shared/premium-paths';
 import {
   LAYER_REGISTRY,
   getAllowedLayerKeys,
+  sanitizeResilienceScoreForRenderer,
 } from '../src/config/map-layer-definitions';
 import {
   RESILIENCE_CHOROPLETH_COLORS,
@@ -13,19 +15,20 @@ import {
   normalizeExclusiveChoropleths,
 } from '../src/components/resilience-choropleth-utils';
 
-// Adapted from koala73/main's version of this suite. Dropped: the
-// PREMIUM_RPC_PATHS / `premium: 'locked'` / `deckGLOnly` assertions — this
-// fork has no premium gating (see [[koala73-ports]]) and no deckGLOnly
-// concept; flat-only layers are gated purely by their `renderers` array +
-// per-setter guards in MapContainer.ts, matching storageFacilities/
-// diseaseOutbreaks. Also narrowed the "every variant" check to 'full' only —
-// this fork only offers ciiChoropleth (resilienceScore's structural sibling)
-// in the full variant, not tech/finance/happy/commodity.
 describe('resilience map layer contracts', () => {
-  it('registers resilienceScore as a flat-only layer, alongside ciiChoropleth in the full variant', () => {
-    assert.equal(LAYER_REGISTRY.resilienceScore.renderers.join(','), 'flat');
-    assert.ok(getAllowedLayerKeys('full').has('resilienceScore'));
-    assert.ok(getAllowedLayerKeys('full').has('ciiChoropleth'));
+  it('registers resilience RPCs as premium paths', () => {
+    assert.ok(PREMIUM_RPC_PATHS.has('/api/resilience/v1/get-resilience-score'));
+    assert.ok(PREMIUM_RPC_PATHS.has('/api/resilience/v1/get-resilience-ranking'));
+  });
+
+  it('registers resilienceScore as a locked deck-only layer in every variant', () => {
+    assert.equal(LAYER_REGISTRY.resilienceScore.renderers.join(','), 'deck');
+    assert.equal(LAYER_REGISTRY.resilienceScore.premium, 'locked');
+    assert.equal('deckGLOnly' in LAYER_REGISTRY.resilienceScore, false);
+
+    for (const variant of ['full', 'tech', 'finance', 'happy', 'commodity', 'energy'] as const) {
+      assert.ok(getAllowedLayerKeys(variant).has('resilienceScore'));
+    }
   });
 });
 
@@ -71,7 +74,15 @@ describe('resilience choropleth thresholds', () => {
 
   it('preserves scored greyedOut countries that are outside the headline ranking', () => {
     const scores = buildResilienceChoroplethMap([], [
-      { countryCode: 'TV', overallScore: 70, level: 'medium', lowConfidence: false },
+      {
+        countryCode: 'TV',
+        overallScore: 70,
+        level: 'medium',
+        lowConfidence: false,
+        overallCoverage: 0.7,
+        rankStable: false,
+        headlineEligible: false,
+      },
     ]);
 
     assert.deepEqual(scores.get('TV'), {
@@ -85,7 +96,15 @@ describe('resilience choropleth thresholds', () => {
 
   it('renders true greyedOut no-score sentinels as insufficient data', () => {
     const scores = buildResilienceChoroplethMap([], [
-      { countryCode: 'AQ', overallScore: 0, level: 'insufficient', lowConfidence: true },
+      {
+        countryCode: 'AQ',
+        overallScore: 0,
+        level: 'insufficient',
+        lowConfidence: true,
+        overallCoverage: 0,
+        rankStable: false,
+        headlineEligible: false,
+      },
     ]);
 
     assert.deepEqual(scores.get('AQ'), {
@@ -99,15 +118,31 @@ describe('resilience choropleth thresholds', () => {
 
   it('renders true items no-score sentinels as insufficient data', () => {
     const scores = buildResilienceChoroplethMap([
-      { countryCode: 'ZZ', overallScore: 0, level: 'unknown', lowConfidence: false },
-      { countryCode: 'YE', overallScore: -1, level: 'medium', lowConfidence: true },
+      {
+        countryCode: 'ZZ',
+        overallScore: 0,
+        level: 'unknown',
+        lowConfidence: false,
+        overallCoverage: 0,
+        rankStable: false,
+        headlineEligible: true,
+      },
+      {
+        countryCode: 'YE',
+        overallScore: -1,
+        level: 'medium',
+        lowConfidence: true,
+        overallCoverage: 0.4,
+        rankStable: false,
+        headlineEligible: false,
+      },
     ]);
 
     assert.deepEqual(scores.get('ZZ'), {
       overallScore: 0,
       level: 'insufficient_data',
       serverLevel: 'unknown',
-      lowConfidence: false,
+      lowConfidence: true,
       outsideHeadlineRanking: false,
     });
     assert.deepEqual(scores.get('YE'), {
@@ -120,38 +155,161 @@ describe('resilience choropleth thresholds', () => {
   });
 });
 
+describe('resilience non-DeckGL sanitization', () => {
+  it('strips resilienceScore from layer state when DeckGL is not active', () => {
+    const layers = { ...baseLayers(), resilienceScore: true };
+    const result = sanitizeResilienceScoreForRenderer(layers, false);
+    assert.equal(result.resilienceScore, false);
+  });
+
+  it('preserves resilienceScore when DeckGL is active', () => {
+    const layers = { ...baseLayers(), resilienceScore: true };
+    const result = sanitizeResilienceScoreForRenderer(layers, true);
+    assert.equal(result.resilienceScore, true);
+  });
+
+  it('does not affect other layers when stripping resilienceScore', () => {
+    const layers = { ...baseLayers(), resilienceScore: true, ciiChoropleth: true, flights: true };
+    const result = sanitizeResilienceScoreForRenderer(layers, false);
+    assert.equal(result.resilienceScore, false);
+    assert.equal(result.ciiChoropleth, true);
+    assert.equal(result.flights, true);
+  });
+
+  it('URL restore with resilienceScore=true on non-DeckGL produces false in sanitized state', () => {
+    const urlLayers = { ...baseLayers(), resilienceScore: true };
+    const normalized = normalizeExclusiveChoropleths(urlLayers, null);
+    const sanitized = sanitizeResilienceScoreForRenderer(normalized, false);
+    assert.equal(sanitized.resilienceScore, false);
+  });
+
+  it('mode switch from DeckGL to globe strips resilienceScore', () => {
+    const deckGlState = { ...baseLayers(), resilienceScore: true };
+    const afterSwitch = sanitizeResilienceScoreForRenderer(deckGlState, false);
+    assert.equal(afterSwitch.resilienceScore, false);
+  });
+
+  function baseLayers() {
+    return {
+      conflicts: false, bases: false, cables: false, pipelines: false,
+      hotspots: false, ais: false, nuclear: false, irradiators: false,
+      radiationWatch: false, sanctions: false, weather: false, economic: false,
+      waterways: false, outages: false, cyberThreats: false, datacenters: false,
+      protests: false, flights: false, military: false, natural: false,
+      spaceports: false, minerals: false, fires: false, ucdpEvents: false,
+      displacement: false, climate: false, startupHubs: false, cloudRegions: false,
+      accelerators: false, techHQs: false, techEvents: false, stockExchanges: false,
+      financialCenters: false, centralBanks: false, commodityHubs: false,
+      gulfInvestments: false, positiveEvents: false, kindness: false,
+      happiness: false, speciesRecovery: false, renewableInstallations: false,
+      tradeRoutes: false, iranAttacks: false, gpsJamming: false, satellites: false,
+      ciiChoropleth: false, resilienceScore: false, dayNight: false,
+      miningSites: false, processingPlants: false, commodityPorts: false,
+      webcams: false, weatherRadar: false, diseaseOutbreaks: false,
+    };
+  }
+});
+
 describe('resilience choropleth exclusivity', () => {
-  const baseLayers = () => ({ ciiChoropleth: false, resilienceScore: false });
+  function baseLayers() {
+    return {
+      conflicts: false,
+      bases: false,
+      cables: false,
+      pipelines: false,
+      hotspots: false,
+      ais: false,
+      nuclear: false,
+      irradiators: false,
+      radiationWatch: false,
+      sanctions: false,
+      weather: false,
+      economic: false,
+      waterways: false,
+      outages: false,
+      cyberThreats: false,
+      datacenters: false,
+      protests: false,
+      flights: false,
+      military: false,
+      natural: false,
+      spaceports: false,
+      minerals: false,
+      fires: false,
+      ucdpEvents: false,
+      displacement: false,
+      climate: false,
+      startupHubs: false,
+      cloudRegions: false,
+      accelerators: false,
+      techHQs: false,
+      techEvents: false,
+      stockExchanges: false,
+      financialCenters: false,
+      centralBanks: false,
+      commodityHubs: false,
+      gulfInvestments: false,
+      positiveEvents: false,
+      kindness: false,
+      happiness: false,
+      speciesRecovery: false,
+      renewableInstallations: false,
+      tradeRoutes: false,
+      iranAttacks: false,
+      gpsJamming: false,
+      satellites: false,
+      ciiChoropleth: false,
+      resilienceScore: false,
+      dayNight: false,
+      miningSites: false,
+      processingPlants: false,
+      commodityPorts: false,
+      webcams: false,
+      weatherRadar: false,
+      diseaseOutbreaks: false,
+    };
+  }
 
   it('keeps ciiChoropleth as the fallback when both choropleths arrive enabled without previous state', () => {
-    const layers = normalizeExclusiveChoropleths({ ...baseLayers(), ciiChoropleth: true, resilienceScore: true });
+    const layers = normalizeExclusiveChoropleths({
+      ...baseLayers(),
+      ciiChoropleth: true,
+      resilienceScore: true,
+    });
+
     assert.equal(layers.resilienceScore, false);
     assert.equal(layers.ciiChoropleth, true);
   });
 
   it('preserves resilienceScore when it is the newly enabled choropleth', () => {
-    const previousLayers = { ...baseLayers(), ciiChoropleth: true, resilienceScore: false };
-    const layers = normalizeExclusiveChoropleths(
-      { ...baseLayers(), ciiChoropleth: true, resilienceScore: true },
-      previousLayers,
-    );
+    const previousLayers = {
+      ...baseLayers(),
+      ciiChoropleth: true,
+      resilienceScore: false,
+    };
+    const layers = normalizeExclusiveChoropleths({
+      ...baseLayers(),
+      ciiChoropleth: true,
+      resilienceScore: true,
+    }, previousLayers);
+
     assert.equal(layers.resilienceScore, true);
     assert.equal(layers.ciiChoropleth, false);
   });
 
   it('preserves ciiChoropleth when it is the newly enabled choropleth', () => {
-    const previousLayers = { ...baseLayers(), ciiChoropleth: false, resilienceScore: true };
-    const layers = normalizeExclusiveChoropleths(
-      { ...baseLayers(), ciiChoropleth: true, resilienceScore: true },
-      previousLayers,
-    );
+    const previousLayers = {
+      ...baseLayers(),
+      ciiChoropleth: false,
+      resilienceScore: true,
+    };
+    const layers = normalizeExclusiveChoropleths({
+      ...baseLayers(),
+      ciiChoropleth: true,
+      resilienceScore: true,
+    }, previousLayers);
+
     assert.equal(layers.resilienceScore, false);
     assert.equal(layers.ciiChoropleth, true);
-  });
-
-  it('is a no-op when only one choropleth is enabled', () => {
-    const layers = normalizeExclusiveChoropleths({ ...baseLayers(), resilienceScore: true });
-    assert.equal(layers.resilienceScore, true);
-    assert.equal(layers.ciiChoropleth, false);
   });
 });

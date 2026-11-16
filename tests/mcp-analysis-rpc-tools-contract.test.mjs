@@ -1,0 +1,235 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { readToolsReference } from './helpers/mcp-tools-reference-docs.mjs';
+
+import { TOOL_DESCRIPTION_MAX_BYTES } from '../api/mcp/constants.ts';
+import { TOOL_LIST_RESPONSE, TOOL_REGISTRY } from '../api/mcp/registry/index.ts';
+
+const findTool = (name) => TOOL_REGISTRY.find((tool) => tool.name === name);
+// ---------------------------------------------------------------------------
+// Registry contract
+// ---------------------------------------------------------------------------
+
+it('publishes population event fields including folded eventCount', () => {
+  const tool = findTool('get_population_exposure');
+  const fields = tool.outputSchema.properties.data.properties.events.items.properties;
+  for (const field of ['eventCount', 'name', 'country', 'nearestCountry', 'exposedPopulation', 'exposureRadiusKm', 'densityPerKm2']) {
+    assert.ok(fields?.[field]?.description, field);
+  }
+  assert.equal(fields.eventCount.type, 'integer');
+});
+
+describe('wave-2a analysis tools registry contract', () => {
+  const expected = {
+    get_signal_convergence: {
+      budget: 65536,
+      coverage: ['unrest:events:v1', 'military:flights:v1', 'seismology:earthquakes:v1', 'usni-fleet:sebuf:v1'],
+    },
+    get_focal_points: {
+      budget: 65536,
+      coverage: ['news:insights:v1', 'intelligence:cross-source-signals:v1', 'risk:scores:sebuf:v14'],
+    },
+    simulate_infrastructure_cascade: {
+      budget: 131072,
+      coverage: ['infrastructure:submarine-cables:v1'],
+    },
+    get_military_surge: {
+      budget: 65536,
+      coverage: ['military:flights:v1', 'theater-posture:sebuf:v1', 'military:surges:v1', 'risk:scores:sebuf:v14'],
+    },
+  };
+
+  for (const [name, spec] of Object.entries(expected)) {
+    it(`${name} declares the full hybrid tool contract`, () => {
+      const tool = findTool(name);
+      assert.ok(tool, `${name} must be registered in the tool registry`);
+      assert.equal(tool._cacheKeys, undefined, `${name} is a hybrid _execute tool, not a cache tool`);
+      assert.equal(typeof tool.description, 'string');
+      assert.ok(tool.description.length > 200, 'descriptions are long-form; tools/list ships them whole');
+      assert.equal(tool._outputBudgetBytes, spec.budget);
+      assert.deepEqual(tool.annotations, {
+        readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false,
+      });
+      assert.deepEqual(tool._apiPaths, []);
+      assert.equal(typeof tool._execute, 'function');
+      assert.deepEqual(tool.inputSchema.required, [], 'every wave-2a tool is callable with no arguments');
+      assert.equal(tool.inputSchema.type, 'object');
+      assert.equal(typeof tool.outputSchema, 'object');
+      for (const key of spec.coverage) {
+        assert.ok(tool._coverageKeys.includes(key), `${name} must declare coverage of ${key}`);
+      }
+    });
+  }
+
+  it('descriptions stay inside the tools/list per-tool budget and ship whole', () => {
+    // tools/list carries the full description; the cap in constants.ts is the
+    // only thing that could still cut it (tests/mcp-tools-list-description-budget.test.mjs).
+    for (const name of Object.keys(expected)) {
+      const tool = findTool(name);
+      const bytes = Buffer.byteLength(tool.description, 'utf8');
+      assert.ok(bytes <= TOOL_DESCRIPTION_MAX_BYTES, `${name}: description is ${bytes} bytes (max ${TOOL_DESCRIPTION_MAX_BYTES})`);
+      assert.equal(TOOL_LIST_RESPONSE.find((entry) => entry.name === name)?.description, tool.description);
+    }
+  });
+
+  it('documents every parameter it reads', () => {
+    const params = {
+      get_signal_convergence: ['lat', 'lon', 'radius_km', 'min_domains'],
+      get_focal_points: ['country_code', 'limit'],
+      simulate_infrastructure_cascade: ['source_id', 'source_ids', 'cut_cables_through', 'disruption_level', 'countries'],
+      get_military_surge: ['theater'],
+    };
+    for (const [name, keys] of Object.entries(params)) {
+      const tool = findTool(name);
+      assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), [...keys].sort());
+      for (const key of keys) {
+        assert.equal(typeof tool.inputSchema.properties[key].description, 'string', `${name}.${key} needs a description`);
+      }
+    }
+  });
+
+  it('advertises convergence bounds that the runtime can honor', () => {
+    const schema = findTool('get_signal_convergence').inputSchema.properties;
+    assert.equal(schema.min_domains.maximum, 5);
+    assert.equal(schema.lat.minimum, -90);
+    assert.equal(schema.lat.maximum, 90);
+    assert.equal(schema.lon.minimum, -180);
+    assert.equal(schema.lon.maximum, 180);
+    assert.equal(schema.radius_km.exclusiveMinimum, 0);
+  });
+
+  it('documents the focal-point response field with its actual wire name', () => {
+    const english = readToolsReference('en');
+    const chinese = readToolsReference('zh');
+    for (const docs of [english, chinese]) {
+      const section = docs.match(/### `get_focal_points`[\s\S]*?(?=\n### `)/)?.[0] ?? '';
+      assert.match(section, /`ai_context`/);
+      assert.doesNotMatch(section, /`aiContext`/);
+    }
+  });
+
+  it('publishes a valid cascade source id in the English example', () => {
+    const english = readToolsReference('en');
+    const section = english.match(/### `simulate_infrastructure_cascade`[\s\S]*?(?=\n### `)/)?.[0] ?? '';
+    assert.match(section, /"source_id":"chokepoint:hormuz_strait"/);
+    assert.doesNotMatch(section, /"source_id":"hormuz"/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error-path envelope conformance
+//
+// The hybrid tools return whatever `_execute` produces — dispatch injects no
+// envelope — so a result-level `{error}` return must STILL carry the keys the
+// tool's own outputSchema marks required. tests/mcp-tool-output-contracts.test.mjs
+// cannot catch this: it monkey-patches `_execute` for RPC tools, so no error
+// path is ever validated against the schema.
+// ---------------------------------------------------------------------------
+
+describe('wave-2 analysis tools: user-input error returns honour the declared envelope', () => {
+  // Each entry drives a tool down its user-input fault branch WITHOUT any cache
+  // read (every guard short-circuits before Upstash), so these run offline.
+  const errorCases = [
+    ['get_signal_convergence', { lat: 32 }],                       // partial lat/lon/radius triple
+    ['get_population_exposure', { mode: 'point' }],                // point mode without coordinates
+    ['get_hotspot_escalation', { hotspot_id: 'does-not-exist' }],  // unknown curated id
+  ];
+
+  for (const [name, args] of errorCases) {
+    it(`${name} returns cached_at/stale/data alongside error`, async () => {
+      const tool = findTool(name);
+      const result = await tool._execute(args, '', {}, {});
+      assert.equal(typeof result.error, 'string', 'error message present');
+      assert.ok(result.error.length > 0);
+      for (const key of tool.outputSchema.required) {
+        assert.ok(key in result, `${name} error return must include required key "${key}"`);
+      }
+      assert.equal(typeof result.stale, 'boolean');
+      assert.equal(typeof result.data, 'object');
+      assert.notEqual(result.data, null);
+    });
+  }
+
+  it('every analysis tool that can return an error declares it in outputSchema', () => {
+    for (const name of ['get_signal_convergence', 'simulate_infrastructure_cascade', 'get_population_exposure', 'get_hotspot_escalation']) {
+      const tool = findTool(name);
+      assert.ok(
+        tool.outputSchema.properties.error,
+        `${name} returns {error} on user-input faults, so outputSchema must declare it`,
+      );
+    }
+  });
+});
+
+describe('wave-2 analysis tools: user-input bounds', () => {
+  it('rejects invalid convergence coordinates and radii before reading caches', async () => {
+    const tool = findTool('get_signal_convergence');
+    for (const args of [
+      { lat: 91, lon: 0, radius_km: 10 },
+      { lat: 0, lon: 181, radius_km: 10 },
+      { lat: 0, lon: 0, radius_km: -1 },
+      { lat: 0, lon: 0, radius_km: 20001 },
+    ]) {
+      const result = await tool._execute(args, '', {}, {});
+      assert.match(result.error, /lat.*lon.*radius_km/i);
+      assert.deepEqual(result.data.alerts, []);
+    }
+  });
+
+  it('get_population_exposure rejects out-of-range coordinates', () => {
+    const tool = findTool('get_population_exposure');
+    return tool._execute({ mode: 'point', lat: 999, lon: -999 }, '', {}, {}).then((result) => {
+      assert.match(result.error, /lat must be within/);
+      for (const key of tool.outputSchema.required) {
+        assert.ok(key in result, `error return must include required key "${key}"`);
+      }
+    });
+  });
+
+  it('accepts coordinates exactly on the range boundary', async () => {
+    const tool = findTool('get_population_exposure');
+    for (const [lat, lon] of [[90, 180], [-90, -180], [0, 0]]) {
+      const result = await tool._execute({ mode: 'point', lat, lon, radius_km: 10 }, '', {}, {});
+      assert.equal(result.error, undefined, `lat=${lat} lon=${lon} must be accepted`);
+      assert.equal(result.data.exposure, null, 'no density-table country there');
+    }
+  });
+
+  it('get_population_exposure point mode uses the country under the point, or returns null', async () => {
+    const tool = findTool('get_population_exposure');
+    for (const [lat, lon, country] of [[50.45, 30.52, 'UKR'], [6.45, 3.39, 'NGA'], [31.52, 34.45, 'PSE'], [-33.45, -70.67, null], [30.27, -97.74, null], [52.52, 13.405, null]]) {
+      const result = await tool._execute({ mode: 'point', lat, lon }, '', {}, {});
+      assert.equal(result.error, undefined);
+      assert.equal(result.data.exposure?.country ?? null, country, `lat=${lat} lon=${lon}`);
+      assert.equal(result.data.exposure?.nearestCountry ?? null, country);
+    }
+  });
+
+  for (const [name, lat, lon, country] of [
+    ['Eilat centre', 29.55, 34.95, 'ISR'],
+    ['Eilat south', 29.54, 34.94, 'ISR'],
+    ['Eilat north (atlas Jordan)', 29.57, 34.96, null],
+    ['Teknaf', 20.86, 92.30, null],
+    ['Aqaba', 29.649, 35.033, null],
+    ['Moldova', 48.40742803917716, 27.510716032731192, null],
+    ['Laos', 21.261407681930056, 100.77073645052123, null],
+    ['Cameroon', 8.846732292626287, 12.8475151779719, null],
+    ['offshore Lagos', 6.30, 3.39, null],
+    ['Haifa', 32.82, 34.99, 'ISR'],
+  ]) {
+    it(`MCP point regression: ${name}`, async () => {
+      const result = await findTool('get_population_exposure')._execute({ mode: 'point', lat, lon }, '', {}, {});
+      assert.equal(result.error, undefined);
+      assert.equal(result.data.exposure?.country ?? null, country);
+      assert.equal(result.data.exposure?.nearestCountry ?? null, country);
+      if (country === 'ISR') assert.equal(result.data.exposure.densityPerKm2, 444);
+    });
+  }
+
+  it('clamps a runaway radius and reports the radius actually used', async () => {
+    const tool = findTool('get_population_exposure');
+    const result = await tool._execute({ mode: 'point', lat: 31, lon: 34.8, radius_km: 20000 }, '', {}, {});
+    assert.equal(result.data.exposure.exposureRadiusKm, 1000);
+    assert.ok(result.data.exposure.exposedPopulation < 8.1e10);
+  });
+});

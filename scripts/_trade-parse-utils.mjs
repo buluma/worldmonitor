@@ -15,8 +15,8 @@ const MONTH_MAP = {
 
 export function htmlToPlainText(html) {
   const stripped = String(html ?? '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script(?:[\t\n\f\r ][^>]*|\/[^>]*)?>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style(?:[\t\n\f\r ][^>]*|\/[^>]*)?>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<\/?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?>/g, ' ');
   // Single-pass decode: chained &amp;-first replaces would decode two levels
@@ -58,6 +58,7 @@ export function parseBudgetLabEffectiveTariffHtml(html) {
 
   const updatedAt = toIsoDate(text.match(/\bUpdated:\s*([A-Za-z]+\s+\d{1,2},\s+\d{4})/i)?.[1] ?? '');
   const patterns = [
+    /effective tariff rate (?:stood at|was|is)\s+(\d+(?:\.\d+)?)%/i,
     /effective tariff rate reaching\s+(\d+(?:\.\d+)?)%\s+in\s+([A-Za-z]+\s+\d{4})/i,
     /average effective (?:u\.s\.\s*)?tariff rate[^.]{0,180}?\bto\s+(\d+(?:\.\d+)?)%[^.]{0,180}?\b(?:in|by)\s+([A-Za-z]+\s+\d{4})/i,
     /average effective (?:u\.s\.\s*)?tariff rate[^.]{0,180}?\bto\s+(\d+(?:\.\d+)?)%/i,

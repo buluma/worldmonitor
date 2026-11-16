@@ -1,158 +1,31 @@
-// api/_json-response.js
-function sanitizeJsonValue(value, depth = 0) {
-  if (depth > 20) return "[truncated]";
-  if (value instanceof Error) {
-    return { error: value.message };
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeJsonValue(item, depth + 1));
-  }
-  if (value && typeof value === "object") {
-    const clone = {};
-    for (const [key, nested] of Object.entries(value)) {
-      if (key === "stack" || key === "stackTrace" || key === "cause") continue;
-      clone[key] = sanitizeJsonValue(nested, depth + 1);
-    }
-    return clone;
-  }
-  return value;
-}
-function jsonResponse(body, status, headers = {}) {
-  return new Response(JSON.stringify(sanitizeJsonValue(body)), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      ...headers
-    }
-  });
-}
+import { jsonResponse } from './_json-response.js';
 
-// api/_observability.js
-var EDGE_FLUSH_TIMEOUT_MS = 1500;
-function cleanEnv(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-function parseSampleRate(rawValue, fallback) {
-  const parsed = Number.parseFloat(String(rawValue ?? ""));
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(1, Math.max(0, parsed));
-}
-function getEdgeDsn() {
-  return cleanEnv(process.env.SENTRY_EDGE_DSN || process.env.SENTRY_DSN);
-}
-function getGlobalSentry() {
-  const sentry = globalThis.Sentry;
-  return sentry && typeof sentry === "object" ? sentry : null;
-}
-function ensureEdgeSentryInitialized() {
-  const sentry = getGlobalSentry();
-  if (!sentry || typeof sentry.init !== "function") return null;
-  const dsn = getEdgeDsn();
-  sentry.init({
-    dsn: dsn || void 0,
-    enabled: Boolean(dsn),
-    release: cleanEnv(process.env.SENTRY_RELEASE) || "worldmonitor@edge",
-    environment: cleanEnv(process.env.SENTRY_ENVIRONMENT) || cleanEnv(process.env.VERCEL_ENV) || cleanEnv(process.env.NODE_ENV) || "development",
-    sendDefaultPii: true,
-    tracesSampleRate: parseSampleRate(process.env.SENTRY_EDGE_TRACES_SAMPLE_RATE, 0.1),
-    initialScope: {
-      tags: {
-        runtime: "vercel-edge"
-      }
-    }
-  });
-  return sentry;
-}
-async function captureEdgeFailure(handlerName, request, status, error) {
-  const sentry = getGlobalSentry();
-  const url = new URL(request.url);
-  if (sentry && typeof sentry.withScope === "function") {
-    sentry.withScope((scope) => {
-      scope?.setTag?.("handler", handlerName);
-      scope?.setTag?.("runtime", "vercel-edge");
-      scope?.setTag?.("http.status_code", String(status));
-      scope?.setContext?.("request", {
-        method: request.method,
-        url: request.url,
-        path: url.pathname,
-        query: url.search
-      });
-      if (error) {
-        sentry.captureException?.(error);
-        return;
-      }
-      sentry.captureMessage?.(`Edge handler returned HTTP ${status}: ${handlerName}`, "error");
-    });
-    try {
-      await sentry.flush?.(EDGE_FLUSH_TIMEOUT_MS);
-    } catch {
-    }
-    return;
-  }
-  if (error) {
-    console.error(`[edge:${handlerName}]`, error);
-  } else {
-    console.error(`[edge:${handlerName}] HTTP ${status} ${url.pathname}`);
-  }
-}
-function withEdgeObservability(handlerName, handler2, options = {}) {
-  const captureStatusFailures = options.captureStatusFailures !== false;
-  const captureThrownFailures = options.captureThrownFailures !== false;
-  return async function observedHandler(request) {
-    const sentry = ensureEdgeSentryInitialized();
-    const url = new URL(request.url);
-    const runHandler = async () => {
-      try {
-        const response = await handler2(request);
-        sentry?.setHttpStatus?.(null, response.status);
-        if (captureStatusFailures && response.status >= 500) {
-          await captureEdgeFailure(handlerName, request, response.status, null);
-        }
-        return response;
-      } catch (error) {
-        sentry?.setHttpStatus?.(null, 500);
-        if (captureThrownFailures) {
-          await captureEdgeFailure(handlerName, request, 500, error);
-        }
-        throw error;
-      }
-    };
-    if (sentry?.continueTrace && sentry?.startSpan) {
-      return sentry.continueTrace(
-        {
-          sentryTrace: request.headers.get("sentry-trace"),
-          baggage: request.headers.get("baggage")
-        },
-        () => sentry.startSpan(
-          {
-            name: `${request.method} ${url.pathname}`,
-            op: "http.server",
-            attributes: {
-              "http.request.method": request.method,
-              "url.path": url.pathname,
-              "wm.handler": handlerName
-            }
-          },
-          runHandler
-        )
-      );
-    }
-    return runHandler();
-  };
-}
+export const config = { runtime: 'edge' };
 
-// api/geo.js
-var config = { runtime: "edge" };
-function handler(req) {
-  const cfCountry = req.headers.get("cf-ipcountry");
-  const country = (cfCountry && cfCountry !== "T1" ? cfCountry : null) || req.headers.get("x-vercel-ip-country") || "XX";
+export default function handler(req) {
+  // cf-ipcountry is real client geography only on requests that actually transited
+  // the Cloudflare zone; on a direct-to-origin hit it is a plain client-supplied
+  // header, and Vercel rewrites only its own x-vercel-* names. The read is left
+  // ungated here (unlike api/_usage-telemetry.js deriveCountry, which gates it on
+  // hasCloudflareTransitProof) because the answer only geo-filters the caller's OWN
+  // live-channel list, so spoofing it changes nothing but the spoofer's UI. Never
+  // consume this endpoint for an authorization, entitlement, or pricing decision
+  // without adding that gate first.
+  const cfCountry = req.headers.get('cf-ipcountry');
+  const country = (cfCountry && cfCountry !== 'T1' ? cfCountry : null) || req.headers.get('x-vercel-ip-country') || 'XX';
+  // no-store: the body IS the caller's IP-geo, so the answer depends entirely on
+  // the request -- the same rule api/bootstrap.js applies to its origin-dependent
+  // responses. A `Vary` on the geo headers is not an option here: the Cloudflare
+  // zone in front of api.worldmonitor.app ignores Vary (see TIER_CACHE in
+  // api/bootstrap.js), so a shared-cacheable response pins the FIRST visitor's
+  // country onto every later caller at that PoP for the whole s-maxage window.
+  // The client trusts any non-'XX' value (src/utils/user-location.ts) to
+  // geo-filter the live-channel list, so the mismatch is silent. Losing the cache
+  // costs nothing: resolveUserCountryCode memoizes into a module-level promise and
+  // its only caller is the channel-management panel, never the page-load path, so
+  // this is at most one edge invocation per page load.
   return jsonResponse({ country }, 200, {
-    "Cache-Control": "public, max-age=300, s-maxage=3600, stale-if-error=3600",
-    "Access-Control-Allow-Origin": "*"
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*',
   });
 }
-var geo_default = withEdgeObservability("/api/geo", handler);
-export {
-  config,
-  geo_default as default
-};

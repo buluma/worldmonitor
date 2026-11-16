@@ -1,5 +1,9 @@
-// Pure state-building logic for EnergyRiskOverviewPanel. Dep-free so it
-// can be tested under node:test without Vite-only module graph.
+import type { OilTapeObservation } from './_oil-tape-observation';
+
+// Pure state-building logic for EnergyRiskOverviewPanel. Extracted from the
+// panel class so it can be imported under node:test without pulling in the
+// Vite-only modules the panel transitively depends on (i18n's import.meta.glob,
+// etc). Keep this file dep-free apart from generated types.
 
 export interface TileState<T> {
   status: 'fulfilled' | 'rejected' | 'pending';
@@ -10,18 +14,27 @@ export interface TileState<T> {
 export interface OverviewState {
   hormuz: TileState<{ status: string }>;
   euGas: TileState<{ fillPct: number; fillPctChange1d: number }>;
-  brent: TileState<{ price: number; change: number }>;
+  brent: TileState<{ price: number; change: number } & OilTapeObservation>;
   activeDisruptions: TileState<{ count: number }>;
 }
 
+// Minimal shapes — only the fields the state builder reads. Loose enough that
+// tests can pass plain objects without importing the full generated types.
 interface HormuzMin { status?: string }
 interface EuGasMin { unavailable?: boolean; fillPct?: number; fillPctChange1d?: number }
-interface BrentResultMin { data?: Array<{ price: number | null; change?: number | null }> }
+interface BrentResultMin { data?: Array<{ price: number | null; change?: number | null } & OilTapeObservation> }
 interface DisruptionsMin {
   upstreamUnavailable?: boolean;
   events?: Array<{ endAt?: string | null }>;
 }
 
+/**
+ * Build an OverviewState from the four allSettled results. Pure: no I/O,
+ * no Date.now() unless the caller passes a clock. Each tile resolves to
+ * 'fulfilled' or 'rejected' independently — one source failing CANNOT
+ * cascade into the others. This is the core degraded-mode contract the
+ * panel guarantees.
+ */
 export function buildOverviewState(
   hormuz: PromiseSettledResult<HormuzMin | null | undefined>,
   euGas: PromiseSettledResult<EuGasMin | null | undefined>,
@@ -51,7 +64,13 @@ export function buildOverviewState(
       if (!q || q.price === null) return { status: 'rejected' as const };
       return {
         status: 'fulfilled' as const,
-        value: { price: q.price, change: q.change ?? 0 },
+        value: {
+          price: q.price,
+          change: q.change ?? 0,
+          ...(q.priceSource ? { priceSource: q.priceSource } : {}),
+          ...(q.priceBasis ? { priceBasis: q.priceBasis } : {}),
+          ...(q.priceAt ? { priceAt: q.priceAt } : {}),
+        },
         fetchedAt: now,
       };
     })(),
@@ -63,8 +82,4 @@ export function buildOverviewState(
         }
       : { status: 'rejected' },
   };
-}
-
-export function countDegradedTiles(state: OverviewState): number {
-  return Object.values(state).filter((t) => t.status === 'rejected').length;
 }

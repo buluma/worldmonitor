@@ -1,0 +1,18 @@
+retailer:
+  slug: adcoop_ae
+  name: ADCOOP UAE
+  marketCode: ae
+  currencyCode: AED
+  adapter: search
+  baseUrl: https://www.adcoop.com
+  enabled: false  # adcoop.com product pages indexed by Exa but prices not extractable (JS-rendered/login-gated)
+
+  rateLimit:
+    requestsPerMinute: 15
+    maxConcurrency: 1
+    delayBetweenRequestsMs: 4000
+
+  discovery:
+    mode: search
+    maxPages: 20
+    seeds: []

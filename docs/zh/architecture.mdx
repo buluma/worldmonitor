@@ -1,0 +1,88 @@
+---
+title: "设计哲学"
+description: "World Monitor 背后的设计原则、情报工艺与算法决策深度解读：全面介绍以地图为先的实时仪表盘是如何工程化实现的、为何选择这种技术架构，涵盖前端渲染管道、边缘缓存策略、Cloudflare Workers 数据采集流水线、评分引擎、实时推送与容灾降级机制等核心模块。"
+---
+
+> **在找系统参考？** 请参阅 [`ARCHITECTURE.md`](https://github.com/koala73/worldmonitor/blob/main/ARCHITECTURE.md)，了解部署拓扑、目录结构、缓存层、CI/CD 以及贡献者操作指南。
+
+## 主题
+
+本指南拆分为多个聚焦页面，使每一页都能放进智能体的上下文窗口。设计原则、设计哲学与新闻接地管道保留在本页。
+
+| 页面 | 内容 |
+|---|---|
+| [国际化与搜索索引](/zh/architecture-topics/i18n-search-indexing) | World Monitor 如何区分应用本地化与可索引的本地化文档：lang 参数、规范链接、hreflang 集群、站点地图替代链接以及预渲染的欢迎落地页，说明各类页面可被搜索引擎索引的语言范围与约定。 |
+| [情报分析工艺与前端设计](/zh/architecture-topics/analysis-and-frontend-design) | World Monitor 仪表盘背后的情报分析工艺、算法设计决策与原生 TypeScript 架构，包括可辨识联合标记系统与面板事件委托模式，说明为何选择这些工程取舍以及它们如何降低复杂度。 |
+| [API 契约、引导与轮询](/zh/architecture-topics/api-contracts-and-bootstrap) | World Monitor 如何以 Proto 优先定义 API 契约，通过一次引导载荷完成仪表盘水合，并使用自适应的 SmartPollLoop 刷新数据，涵盖生成客户端、缓存键与降级行为的关键约定与实现细节。 |
+| [种子管道与边缘函数](/zh/architecture-topics/seed-pipeline-and-edge) | World Monitor 的 Railway 种子数据管道、按领域拆分的边缘函数架构、冷启动优化以及单一部署变体合并，说明数据如何写入 Redis 并经由边缘函数提供给仪表盘，以及各环节的失败处理方式。 |
+| [实时系统、地图与性能](/zh/architecture-topics/realtime-maps-and-performance) | AIS 中继背压、ONNX 能力检测、地图叠加层、条件数据加载、Web Worker 分析、虚拟滚动、跨模块数据流以及 World Monitor 使用的刷新间隔，说明实时数据如何在浏览器中保持流畅且不过载。 |
+| [缓存与带宽](/zh/architecture-topics/caching-and-bandwidth) | World Monitor 的 Vercel CDN 头、客户端熔断器、Brotli 预压缩、中继压缩、请求去重、轮询间隔以及多层缓存架构，说明各层缓存如何协同降低带宽与上游负载，并在上游故障时继续提供数据。 |
+| [可靠性、健康与新鲜度](/zh/architecture-topics/reliability-and-health) | World Monitor 的错误追踪、熔断器、优雅降级、系统健康指示器、数据新鲜度等级与服务状态监控，说明仪表盘如何向用户明确展示数据缺口、过期来源与降级状态，而不是默默显示陈旧数据。 |
+
+---
+
+## 设计原则
+
+| 原则 | 实现 |
+|---|---|
+| **速度优先于完美** | 关键词分类器即时响应；LLM 异步细化。用户无需等待。 |
+| **假设会失败** | 每个数据源配备独立熔断器，5 分钟冷却期。AI 回退链：Ollama（本地）→ OpenRouter → 浏览器端 T5。Redis 缓存失败时降级为内存回退并返回过期数据。负缓存（上游失败后 5 分钟退避）防止对宕机 API 的反复轰炸。每个边缘函数在上游 API 不可用时返回过期的缓存数据。**缓存击穿预防** — `cachedFetchJson` 使用一个进行中的 Promise 映射，将并发的缓存未命中合并为单次上游抓取：第一个请求创建并注册一个 Promise，所有对相同 key 的并发请求 await 同一个 Promise，而不是各自独立命中上游。对速率敏感的 API（Yahoo Finance）使用错峰顺序请求，请求间隔 150ms，避免 429 限流。UCDP 冲突数据使用自动版本发现（并行探测多个 API 版本）、已发现版本缓存（1 小时 TTL）以及出错时返回过期数据的回退策略。 |
+| **展示你无法看到的内容** | 情报缺口追踪器显式报告数据源中断，而不是静默隐藏。 |
+| **适当时浏览器优先计算** | 聚类、本地 ML、地理定位、激增检测和离线回退在客户端运行。服务端权威 API 发布 CII/CRI 评分、简报、预测、MCP 工具，以及带记录方法论与来源溯源的缓存运营数据。 |
+| **本地优先地理定位** | 国家检测使用浏览器端对 GeoJSON 多边形的射线投射，而非网络反向地理编码。亚毫秒级响应，零 API 依赖，离线可用。网络地理编码作为回退，而非主路径。 |
+| **多信号关联** | 不单独信任任何单一数据源。焦点事件需要新闻 + 军事 + 市场 + 抗议活动相互收敛后才会升级为关键级别。 |
+| **地缘政治锚定** | 硬编码的冲突区、基线国家风险和战略咽喉点，防止统计噪声在低数据地区产生误报。 |
+| **纵深防御** | CORS 来源白名单、域名白名单 RSS 代理、服务端 API 密钥隔离、令牌认证的桌面 sidecar、输入净化与输出编码、AI 端点的 IP 限流。 |
+| **缓存一切，不信任任何** | 三层缓存（内存 → Redis → 上游），带版本化缓存键和出错时返回过期数据的回退。每个 API 响应包含 `X-Cache` 头用于调试。CDN 层（`s-maxage`）在请求到达边缘函数之前吸收重复请求。 |
+| **带宽效率** | 所有中继响应启用 Gzip 压缩（减少 80%）。内容哈希静态资源配 1 年不可变缓存。错峰轮询间隔防止同步 API 风暴。动画和轮询在隐藏标签页时暂停。 |
+| **基线感知告警** | 趋势关键词检测使用 2 小时滚动窗口对比 7 天基线，配合每词激增倍率、冷却期和来源多样性要求 — 突出真实激增同时抑制噪声。 |
+| **契约优先 API** | 每个领域情报端点都以 `.proto` 定义开始，包含字段校验、HTTP 注解和示例。代码生成产出带类型的 TypeScript 客户端和服务端，消除 schema 漂移。运维端点（认证、计费、MCP、健康、引导、通知、用户工作流）保留手写于 `api/` 下。契约 API 的破坏性变更在 CI 时被自动捕获。 |
+| **随处运行** | 同一代码库从单一 Vercel 部署产出六个专用变体（地缘政治、科技、金融、大宗商品、正能量、能源），并部署到 Vercel（Web）、Railway（中继）、Tauri（桌面）和 PWA（可安装）。桌面 sidecar 在本地镜像所有云端 API 处理器。Service worker 缓存地图瓦片以供离线使用，同时保持情报数据始终新鲜（NetworkOnly）。 |
+| **优雅降级** | 每个功能在依赖不可用时都能优雅降级。缺失的 API 密钥会跳过相关数据源 — 不会导致应用崩溃。上游 API 失败时提供过期缓存数据。浏览器端 ML 无需任何服务器即可工作。仪表盘在未配置任何 API 密钥时仍可使用（静态图层、地图、ML 模型均可离线工作）。 |
+| **多源佐证** | 复合情报产品组合多个独立来源以减少单一来源偏差。抗议数据合并 ACLED + GDELT 并进行 Haversine 去重。国家风险融合新闻速率 + 军事活动 + 动荡事件 + 基线风险。灾害数据在 0.1° 地理网格上合并 USGS + GDACS + NASA EONET。 |
+| **无框架开销** | 原生 TypeScript，直接操作 DOM，事件委托，自定义 `Panel` 和 `WindowedList` 类。无虚拟 DOM diff，无框架运行时，无适配器库。整个应用外壳的体积小于 React 的运行时。浏览器标准（Web Workers、IndexedDB、Intersection Observer、ResizeObserver、CustomEvent）充当响应式和组件模型。 |
+| **类型安全数据流** | 可辨识联合标记（`_kind` 字段）、proto 生成的带类型客户端/服务端，以及穷尽式 `switch` 匹配，为标记类型、服务目录和共享地图图层注册表提供编译时安全。添加新数据类型会在每个未处理位置产生编译错误。 |
+
+---
+
+## 设计哲学
+
+**信息密度优先于美学。** 每个像素都应传递信号。深色界面在长时间监控会话中最小化眼疲劳。面板可折叠、可拖动、可隐藏 — 自定义以仅显示重要内容。
+
+**权威性很重要。** 来源并非平等。通讯社和官方政府渠道优先于聚合器和博客。当多个来源报道同一故事时，最具权威性的来源作为主要来源显示。
+
+**关联优先于累积。** 原始新闻流是噪声。价值在于聚类相关故事、检测速率变化和识别跨来源模式。单个"Broadcom +2.5% 由 AI 芯片新闻解释"信号比单独显示两个数据点更有价值。
+
+**信号而非噪声。** 去重是激进的。同一市场走势不会产生重复告警。信号包含置信度评分以便你优先关注。告警疲劳是态势感知的敌人。
+
+**知识优先匹配。** 简单关键词匹配产生误报。实体知识库理解 AVGO 是 Broadcom，Broadcom 与 Nvidia 竞争，两者都在半导体领域。此语义层将朴素字符串匹配转化为智能关联。
+
+**优雅失败。** 外部 API 不可靠。熔断器防止级联故障。中断期间显示缓存数据。状态面板准确显示什么在工作、什么不工作 — 无静默失败。
+
+**本地优先。** 无账户、无云同步。所有偏好和历史本地存储。唯一网络流量是抓取公开数据。你的监控配置只属于你。
+
+**在关键处计算。** CPU 密集操作（聚类、关联）在 Web Workers 中运行以保持 UI 响应。主线程仅处理渲染和用户交互。
+
+---
+
+## 新闻接地管道
+
+每个消费新闻的 LLM 相邻界面（简短杂志描述卡、简短 whyMatters 分析师解说、仪表盘新闻摘要、邮件摘要、通知中继、MCP world-brief 工具）都接地于文章清洗后的 RSS 描述，使模型转述文章实际内容而非从其参数先验中填充标题角色标签。
+
+```
+RSS <description>/<content:encoded>/<summary>/<content>
+  └─► parser (list-feed-digest.ts): strip HTML, decode entities, clip 400,
+      reject <40 chars / dup-of-headline
+      └─► story:track:v1.description  (HSET additive, empty → absent)
+          └─► NewsItem.snippet        (proto field 12)
+              ├─► brief adapter → buildStoryDescriptionPrompt `Context: <body>`
+              ├─► brief whyMatters → buildWhyMattersUserPrompt `description` field
+              ├─► SummarizeArticleRequest.bodies → buildArticlePrompts `    Context:`
+              ├─► client NewsItem.snippet → NewsPanel render + summarizeHeadlines bodies
+              ├─► BreakingAlert.description → /api/notify payload.description
+              │     └─► relay formatMessage (NOTIFY_RELAY_INCLUDE_SNIPPET-gated)
+              ├─► email digest: snippet line under each headline
+              └─► MCP world-brief: bodies[] paired with headlines[]
+```
+
+到处都是回退规则：空描述 → 消费者行为与仅标题字节级一致。无回归路径。通知中继审计（`tests/notification-relay-payload-audit.test.mjs`）强制 RSS 来源生产者设置 `payload.description`，而域名来源生产者不设置。

@@ -4,10 +4,20 @@ import type {
   SummarizeArticleResponse,
 } from '../../../../src/generated/server/worldmonitor/news/v1/service_server';
 
+import filterParamContracts from '../../../../shared/openapi-filter-param-contracts.json';
+import { CACHE_VERSION } from '../../../../src/utils/summary-cache-key';
 import { getCachedJson } from '../../../_shared/redis';
 import { markNoCacheResponse } from '../../../_shared/response-headers';
+import { aiRoutingCacheSuffix, resolveAiRouting } from '../../../_shared/ai-routing-policy';
 
-const CACHE_KEY_PATTERN = /^summary:v\d+:[a-z0-9:_-]{3,120}$/;
+const CACHE_KEY_PATTERN = new RegExp(filterParamContracts.newsSummarizeArticleCacheKeyPattern);
+// #5969: the shared pattern is version-agnostic (`summary:v\d+:`), so a stale
+// browser bundle still minting keys for a retired version would be served rows
+// from that version — defeating the point of a CACHE_VERSION bump, which
+// exists precisely because old rows were built under different semantics.
+// Serve only the current namespace; anything else is a clean miss and the
+// caller falls through to the RPC path, which regenerates under current rules.
+const CURRENT_NAMESPACE = `summary:${CACHE_VERSION}:`;
 const NEG_SENTINEL = '__WM_NEG__';
 
 const EMPTY_MISS: SummarizeArticleResponse = {
@@ -33,8 +43,18 @@ export async function getSummarizeArticleCache(
     return { ...EMPTY_MISS, status: 'SUMMARIZE_STATUS_ERROR', statusDetail: 'Invalid cache key', error: 'Invalid cache key', errorType: 'ValidationError' };
   }
 
+  // A well-formed key from a retired namespace is a miss, not an error: a
+  // stale client is not making a bad request, it is asking for a version we
+  // no longer serve.
+  if (!cacheKey.startsWith(CURRENT_NAMESPACE)) {
+    markNoCacheResponse(ctx.request);
+    return EMPTY_MISS;
+  }
+
   try {
-    const cached = await getCachedJson(cacheKey);
+    // A restricted caller reads only summaries written under its own policy
+    // namespace (summarize-article.ts appends the same suffix).
+    const cached = await getCachedJson(`${cacheKey}${aiRoutingCacheSuffix(await resolveAiRouting(ctx.request))}`);
 
     if (cached === NEG_SENTINEL || cached === null || cached === undefined) {
       markNoCacheResponse(ctx.request);

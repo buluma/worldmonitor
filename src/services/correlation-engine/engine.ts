@@ -2,17 +2,24 @@
 import type { AppContext } from '@/app/app-context';
 import type {
   DomainAdapter,
+  CorrelationDomain,
   SignalEvidence,
   ConvergenceCard,
   ClusterState,
   TrendDirection,
 } from './types';
 import { haversineKm } from '@/utils/distance';
-import { IntelligenceServiceClient } from '@/generated/client/worldmonitor/intelligence/v1/service_client';
+
+import { premiumFetch } from '@/services/premium-fetch';
+import { hasPremiumAccess } from '@/services/panel-gating';
+import { IntelligenceServiceClient } from '@/services/generated-rpc-clients';
+import type { CorrelationRuntimeMode } from '@/services/correlation-runtime-mode';
 
 const LLM_SCORE_THRESHOLD = 60;
 const LLM_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const LLM_MAX_CONCURRENT = 3;
+const RUN_TARGET_MS = 100;
+const SLOW_RUNS_BEFORE_WARNING = 2;
 
 interface LlmCacheEntry {
   assessment: string;
@@ -24,13 +31,23 @@ export class CorrelationEngine {
   private cards: Map<string, ConvergenceCard[]> = new Map();
   private previousClusters: Map<string, ClusterState[]> = new Map();
   private llmCache: Map<string, LlmCacheEntry> = new Map();
-  private intelligenceClient: IntelligenceServiceClient;
+  private intelligenceClient: InstanceType<typeof IntelligenceServiceClient>;
   private running = false;
-  private llmInFlight = 0;
+  private llmInFlight = new Set<string>();
+  private assessmentCards = new Map<CorrelationDomain, ConvergenceCard[]>();
+  private attemptedAssessments = new WeakSet<ConvergenceCard>();
+  private assessmentGeneration = 0;
+  private consecutiveSlowRuns = 0;
+  private peakSlowRunMs = 0;
+  private warnedForCurrentSlowStreak = false;
+  private runtimeMode: CorrelationRuntimeMode = 'legacy';
 
   constructor() {
-    // Use '' base URL — requests go to current origin, same as other panels
-    this.intelligenceClient = new IntelligenceServiceClient('');
+    // Use '' base URL — requests go to current origin, same as other panels.
+    // premiumFetch — deductSituation is in PREMIUM_RPC_PATHS. globalThis.fetch
+    // (the generated default) would 401 signed-in browser pros so the LLM
+    // assessment never lands. See #3242 review HIGH(new) #1 for the bug class.
+    this.intelligenceClient = new IntelligenceServiceClient('', { fetch: premiumFetch });
   }
 
   registerAdapter(adapter: DomainAdapter): void {
@@ -39,8 +56,19 @@ export class CorrelationEngine {
     this.previousClusters.set(adapter.domain, []);
   }
 
-  async run(ctx: AppContext): Promise<void> {
-    if (this.running) return;
+  /**
+   * Returns true when this call actually computed, false when it was skipped
+   * because a run was already in flight.
+   *
+   * The skip is not reachable today — this method's body contains no `await`,
+   * so `running` is never true across a yield point. The return value exists so
+   * the contract stays correct if that ever changes: callers must not publish
+   * `getCards()` after a skipped run, because on a first-run overlap the card
+   * map still holds its initial empty arrays and would blank live panels.
+   */
+  async run(ctx: AppContext, runtimeMode: CorrelationRuntimeMode = 'legacy'): Promise<boolean> {
+    if (this.running) return false;
+    this.runtimeMode = runtimeMode;
     this.running = true;
     try {
       this.pruneLlmCache();
@@ -63,15 +91,10 @@ export class CorrelationEngine {
           adapter.domain,
           withTrend.map(c => c.state),
         );
-
-        // Queue LLM assessments (non-blocking)
-        this.queueLlmAssessments(cards, adapter);
       }
 
       const elapsed = performance.now() - t0;
-      if (elapsed > 100) {
-        console.warn(`[CorrelationEngine] run() took ${elapsed.toFixed(0)}ms (>100ms target)`);
-      }
+      this.recordRunDuration(elapsed);
 
       document.dispatchEvent(new CustomEvent('wm:correlation-updated', {
         detail: { domains: this.adapters.map(a => a.domain) },
@@ -79,10 +102,44 @@ export class CorrelationEngine {
     } finally {
       this.running = false;
     }
+    return true;
   }
 
   getCards(domain: string): ConvergenceCard[] {
     return this.cards.get(domain) ?? [];
+  }
+
+  getAllCards(): ConvergenceCard[] {
+    return Array.from(this.cards.values()).flat();
+  }
+
+  getRuntimeMode(): CorrelationRuntimeMode {
+    return this.runtimeMode;
+  }
+
+  private recordRunDuration(elapsedMs: number): void {
+    if (!Number.isFinite(elapsedMs) || elapsedMs <= RUN_TARGET_MS) {
+      this.consecutiveSlowRuns = 0;
+      this.peakSlowRunMs = 0;
+      this.warnedForCurrentSlowStreak = false;
+      return;
+    }
+
+    this.consecutiveSlowRuns++;
+    this.peakSlowRunMs = Math.max(this.peakSlowRunMs, elapsedMs);
+    if (
+      this.consecutiveSlowRuns < SLOW_RUNS_BEFORE_WARNING
+      || this.warnedForCurrentSlowStreak
+    ) {
+      return;
+    }
+
+    this.warnedForCurrentSlowStreak = true;
+    console.warn(
+      `[CorrelationEngine] run() exceeded ${RUN_TARGET_MS}ms for `
+      + `${this.consecutiveSlowRuns} consecutive runs `
+      + `(latest ${elapsedMs.toFixed(0)}ms, peak ${this.peakSlowRunMs.toFixed(0)}ms)`,
+    );
   }
 
   // ── Clustering ──────────────────────────────────────────────
@@ -161,9 +218,31 @@ export class CorrelationEngine {
     signals: SignalEvidence[],
     radiusKm: number,
   ): SignalCluster[] {
-    // Grid-based spatial indexing + union-find: O(n * k) where k = avg signals per cell
+    // Grid-based spatial indexing + union-find: O(n * k) where k = avg signals per cell.
+    // Cells are cellSizeDeg wide in both axes, so a column is the same longitude band
+    // at every latitude. In-radius neighbors are at most one row apart, but a degree of
+    // longitude shrinks toward the poles, so they can be several columns apart.
+    // spatialRadius 0 means no proximity clustering (types.ts), and a non-positive
+    // radius would make the column span infinite.
+    if (!(radiusKm > 0)) return [];
     const DEG_PER_KM_LAT = 1 / 111;
-    const cellSizeLat = radiusKm * DEG_PER_KM_LAT;
+    const EARTH_RADIUS_KM = 6371; // the radius haversineKm uses
+    const cellSizeDeg = radiusKm * DEG_PER_KM_LAT;
+    const maxColSpan = Math.ceil(360 / cellSizeDeg);
+    const sinHalfRadius = Math.sin(radiusKm / EARTH_RADIUS_KM / 2);
+    // Columns to scan either side of a cell in `row`. Neighbors lie in rows
+    // row-1..row+1; for two points at |lat| <= maxAbsLat within radiusKm, haversine
+    // gives sin(dLon / 2) <= sin(radiusKm / 2R) / cos(maxAbsLat).
+    const colSpanForRow = (row: number): number => {
+      const maxAbsLat = Math.min(90, Math.max(
+        Math.abs((row - 1) * cellSizeDeg),
+        Math.abs((row + 2) * cellSizeDeg),
+      ));
+      const ratio = sinHalfRadius / Math.cos(maxAbsLat * Math.PI / 180);
+      if (!(ratio < 1)) return maxColSpan;
+      const maxDeltaLonDeg = 2 * Math.asin(ratio) * 180 / Math.PI;
+      return Math.min(maxColSpan, Math.ceil(maxDeltaLonDeg / cellSizeDeg + 1e-9));
+    };
 
     // Union-Find with path compression
     const parent: number[] = signals.map((_, i) => i);
@@ -183,22 +262,21 @@ export class CorrelationEngine {
       const s = signals[i]!;
       if (s.lat == null || s.lon == null) continue;
       validIndices.push(i);
-      const cellRow = Math.floor(s.lat / cellSizeLat);
-      const cosLat = Math.cos(s.lat * Math.PI / 180);
-      const cellSizeLon = cosLat > 0.01 ? cellSizeLat / cosLat : cellSizeLat;
-      const cellCol = Math.floor(s.lon / cellSizeLon);
+      const cellRow = Math.floor(s.lat / cellSizeDeg);
+      const cellCol = Math.floor(s.lon / cellSizeDeg);
       const key = `${cellRow}:${cellCol}`;
       const list = grid.get(key);
       if (list) list.push(i); else grid.set(key, [i]);
     }
 
-    // Check 3x3 neighborhood for each cell
+    // Check the neighborhood for each cell: one row either side, colSpan columns either side
     for (const [key, indices] of grid) {
       const sep = key.indexOf(':');
       const row = Number(key.slice(0, sep));
       const col = Number(key.slice(sep + 1));
+      const colSpan = colSpanForRow(row);
       for (let dr = -1; dr <= 1; dr++) {
-        for (let dc = -1; dc <= 1; dc++) {
+        for (let dc = -colSpan; dc <= colSpan; dc++) {
           const neighbors = grid.get(`${row + dr}:${col + dc}`);
           if (!neighbors) continue;
           for (const i of indices) {
@@ -355,42 +433,75 @@ export class CorrelationEngine {
 
   // ── LLM Assessment ─────────────────────────────────────────
 
-  private queueLlmAssessments(cards: ConvergenceCard[], adapter: DomainAdapter): void {
-    const pending: Array<{ card: ConvergenceCard; cacheKey: string }> = [];
-    for (const card of cards) {
+  /** Assess only the evidence selected for display, whether seeded or computed locally. */
+  assessCards(domain: CorrelationDomain, cards: ConvergenceCard[]): void {
+    this.assessmentCards.set(domain, cards);
+    this.drainAssessments();
+  }
+
+  clearAssessments(): void {
+    this.assessmentGeneration++;
+    this.llmCache.clear();
+    for (const cards of this.assessmentCards.values()) {
+      for (const card of cards) delete card.assessment;
+    }
+    const domains = [...this.assessmentCards.keys()];
+    this.assessmentCards.clear();
+    this.attemptedAssessments = new WeakSet();
+    document.dispatchEvent(new CustomEvent('wm:correlation-updated', {
+      detail: { domains, assessmentUpdate: true },
+    }));
+  }
+
+  private drainAssessments(): void {
+    if (!hasPremiumAccess()) return;
+    const changed = new Set<CorrelationDomain>();
+    for (const card of [...this.assessmentCards.values()].flat()) {
       if (card.score < LLM_SCORE_THRESHOLD) continue;
 
       const cacheKey = this.llmCacheKey(card);
       const cached = this.llmCache.get(cacheKey);
       if (cached && (Date.now() - cached.timestamp) < LLM_CACHE_TTL_MS) {
-        card.assessment = cached.assessment;
+        if (card.assessment !== cached.assessment) {
+          card.assessment = cached.assessment;
+          changed.add(card.domain);
+        }
         continue;
       }
 
-      pending.push({ card, cacheKey });
+      if (this.llmInFlight.has(cacheKey)) {
+        continue;
+      }
+      if (this.attemptedAssessments.has(card) || this.llmInFlight.size >= LLM_MAX_CONCURRENT) continue;
+      this.attemptedAssessments.add(card);
+      this.llmInFlight.add(cacheKey);
+      void this.fetchAssessment(card, cacheKey).finally(() => {
+        this.llmInFlight.delete(cacheKey);
+        // Re-scan only the currently selected cards; replaced/closed panels
+        // must not leave obsolete paid work waiting behind the concurrency cap.
+        this.drainAssessments();
+      });
     }
-
-    for (const { card, cacheKey } of pending) {
-      if (this.llmInFlight >= LLM_MAX_CONCURRENT) break;
-      this.llmInFlight++;
-      void this.fetchAssessment(card, adapter, cacheKey).finally(() => { this.llmInFlight--; });
+    if (changed.size) {
+      document.dispatchEvent(new CustomEvent('wm:correlation-updated', {
+        detail: { domains: [...changed], assessmentUpdate: true },
+      }));
     }
   }
 
   private llmCacheKey(card: ConvergenceCard): string {
-    const types = [...new Set(card.signals.map(s => s.type))].sort().join(',');
-    const loc = card.countries.sort().join(',') || card.location?.label || 'global';
-    // Include score bucket (10-point granularity) to avoid cache collisions
-    // between clusters with same domain+types+location but different signal counts
-    const scoreBucket = Math.floor(card.score / 10) * 10;
-    return `${card.domain}:${types}:${loc}:s${scoreBucket}`;
+    // Match the prompt evidence; a cluster ID or type/score bucket can outlive it.
+    return JSON.stringify([
+      card.domain, card.score, card.trend, card.countries, card.location,
+      card.signals.map(({ type, label, severity }) => [type, label, severity]),
+    ]);
   }
 
   private async fetchAssessment(
     card: ConvergenceCard,
-    adapter: DomainAdapter,
     cacheKey: string,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
+    const generation = this.assessmentGeneration;
     try {
       const signalSummary = card.signals
         .map(s => `- [${s.type}] ${s.label} (severity: ${s.severity})`)
@@ -403,7 +514,7 @@ export class CorrelationEngine {
         disaster: 'cascading disaster and infrastructure failure',
       };
 
-      const query = `Analyze this ${domainLabels[adapter.domain] ?? adapter.domain} convergence pattern. ` +
+      const query = `Analyze this ${domainLabels[card.domain] ?? card.domain} convergence pattern. ` +
         `${card.signals.length} signals detected in ${card.countries.join(', ') || card.location?.label || 'region'}:\n${signalSummary}\n\n` +
         `Convergence score: ${card.score}/100. Trend: ${card.trend}. ` +
         `What does this pattern indicate? Assess likelihood and potential implications in 2-3 sentences.`;
@@ -414,15 +525,11 @@ export class CorrelationEngine {
           ? `Location: ${card.location.label} (${card.location.lat.toFixed(2)}, ${card.location.lon.toFixed(2)})`
           : '';
 
-      const resp = await this.intelligenceClient.deductSituation({ query, geoContext });
+      const resp = await this.intelligenceClient.deductSituation({ query, geoContext, framework: '' });
 
-      if (resp.analysis) {
-        card.assessment = resp.analysis;
+      if (resp.analysis && generation === this.assessmentGeneration && hasPremiumAccess()) {
         this.llmCache.set(cacheKey, { assessment: resp.analysis, timestamp: Date.now() });
-
-        document.dispatchEvent(new CustomEvent('wm:correlation-updated', {
-          detail: { domains: [adapter.domain], assessmentUpdate: true },
-        }));
+        return resp.analysis;
       }
     } catch (err) {
       console.warn(`[CorrelationEngine] LLM assessment failed for ${card.domain}:`, err);

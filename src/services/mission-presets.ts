@@ -7,23 +7,20 @@ import {
   getEffectivePanelConfig,
 } from '@/config/panels';
 import { SITE_VARIANT } from '@/config/variant';
-import { sanitizeLayersForVariant } from '@/config/map-layer-definitions';
-import type { MapVariant } from '@/config/map-layer-definitions';
+import { isLayerExecutable, sanitizeLayersForVariant } from '@/config/map-layer-definitions';
+import type { RendererKind, MapVariant } from '@/config/map-layer-definitions';
+import {
+  type MissionPresetId,
+  parseMissionPresetId,
+} from '../../shared/mission-domain';
+
+export type { MissionPresetId } from '../../shared/mission-domain';
 
 export const MISSION_PRESET_STORAGE_KEY = 'worldmonitor-mission-preset-v1';
-
-export type MissionPresetId =
-  | 'crisis-desk'
-  | 'supply-chain-risk'
-  | 'energy-security'
-  | 'osint-newsroom'
-  | 'macro-market-watch'
-  | 'tech-ai-watch'
-  | 'good-news-explorer'
-  | 'kenya-watch'
-  | 'aviation-ops';
+export const MISSION_PRESET_DISMISSED_KEY = 'worldmonitor-mission-preset-dismissed-v1';
 
 export type MissionMapView = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
+export type MissionTimeRange = '1h' | '6h' | '24h' | '48h' | '7d' | 'all';
 
 export interface MissionPreset {
   id: MissionPresetId;
@@ -33,12 +30,35 @@ export interface MissionPreset {
   icon: string;
   view: MissionMapView;
   zoom?: number;
+  timeRange: MissionTimeRange;
   panels: string[];
   layers: Array<keyof MapLayers>;
+  /** When set, the preset is offered and applicable only on these variants. */
+  variants?: string[];
+  /** Explicit layouts for variants where the base mission has no coherent native intersection. */
+  variantOverrides?: Partial<Record<string, Pick<MissionPreset, 'panels' | 'layers'>>>;
+  /**
+   * After the preset is applied by the user, open the focus editor so they
+   * choose the countries (and dates) it is about (#10453). Skipped for plans
+   * that cannot set a focus, and when an agent applies the preset.
+   */
+  asksForCountries?: boolean;
+  /**
+   * The preset is only for plans that may set a focus (Pro Business, API
+   * Business, Enterprise). Without the entitlement it is not applied and the
+   * focus gate is shown instead.
+   */
+  requiresFocus?: boolean;
 }
 
 export interface AppliedMissionPreset {
   preset: MissionPreset;
+  panelSettings: Record<string, PanelConfig>;
+  panelOrder: string[];
+  mapLayers: MapLayers;
+}
+
+export interface ResetMissionPresetState {
   panelSettings: Record<string, PanelConfig>;
   panelOrder: string[];
   mapLayers: MapLayers;
@@ -52,14 +72,36 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     description: 'Conflict, posture, instability, and live intelligence.',
     icon: '!',
     view: 'mena',
+    zoom: 3.6,
+    timeRange: '24h',
     panels: [
-      'map', 'live-news', 'insights', 'strategic-posture', 'cii',
-      'strategic-risk', 'gdelt-intel', 'cascade', 'military-correlation',
-      'escalation-correlation', 'ucdp-events', 'security-advisories', 'airline-intel',
+      'map',
+      'live-news',
+      'insights',
+      'strategic-posture',
+      'cii',
+      'strategic-risk',
+      'gdelt-intel',
+      'cascade',
+      'military-correlation',
+      'escalation-correlation',
+      'ucdp-events',
+      'security-advisories',
+      'airline-intel',
     ],
     layers: [
-      'conflicts', 'hotspots', 'military', 'bases', 'iranAttacks',
-      'ucdpEvents', 'protests', 'sanctions', 'outages', 'weather', 'natural', 'ciiChoropleth',
+      'conflicts',
+      'hotspots',
+      'military',
+      'bases',
+      'iranAttacks',
+      'ucdpEvents',
+      'protests',
+      'sanctions',
+      'outages',
+      'weather',
+      'natural',
+      'ciiChoropleth',
     ],
   },
   {
@@ -69,13 +111,35 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     description: 'Routes, chokepoints, country risk, and commodities.',
     icon: 'S',
     view: 'global',
+    zoom: 2.3,
+    timeRange: '7d',
     panels: [
-      'map', 'supply-chain', 'cascade', 'strategic-risk', 'cii',
-      'commodities', 'energy-complex', 'markets',
+      'map',
+      'supply-chain',
+      'chokepoint-strip',
+      'hormuz-tracker',
+      'cascade',
+      'strategic-risk',
+      'cii',
+      'commodities',
+      'energy-complex',
+      'markets',
+      'consumer-prices',
     ],
     layers: [
-      'tradeRoutes', 'waterways', 'ais', 'cables', 'pipelines',
-      'commodityHubs', 'commodityPorts', 'minerals', 'economic', 'sanctions',
+      'tradeRoutes',
+      'waterways',
+      'ais',
+      'cables',
+      'pipelines',
+      'commodityHubs',
+      'commodityPorts',
+      'minerals',
+      'economic',
+      'sanctions',
+      'weather',
+      'natural',
+      'resilienceScore',
     ],
   },
   {
@@ -85,12 +149,37 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     description: 'Pipelines, storage, tankers, outages, and disruption logs.',
     icon: 'E',
     view: 'mena',
+    zoom: 3.2,
+    timeRange: '7d',
     panels: [
-      'map', 'energy-complex', 'commodities', 'supply-chain', 'markets',
+      'map',
+      'energy-complex',
+      'oil-inventories',
+      'energy-crisis',
+      'pipeline-status',
+      'storage-facility-map',
+      'fuel-shortages',
+      'energy-disruptions',
+      'energy-risk-overview',
+      'hormuz-tracker',
+      'chokepoint-strip',
+      'supply-chain',
     ],
     layers: [
-      'pipelines', 'ais', 'tradeRoutes', 'waterways',
-      'commodityPorts', 'commodityHubs', 'sanctions', 'fires', 'weather', 'outages',
+      'pipelines',
+      'storageFacilities',
+      'fuelShortages',
+      'liveTankers',
+      'ais',
+      'tradeRoutes',
+      'waterways',
+      'commodityPorts',
+      'commodityHubs',
+      'sanctions',
+      'fires',
+      'weather',
+      'outages',
+      'natural',
     ],
   },
   {
@@ -100,13 +189,36 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     description: 'Breaking news, source context, webcams, advisories, and social signal.',
     icon: 'N',
     view: 'global',
+    zoom: 2.1,
+    timeRange: '24h',
     panels: [
-      'map', 'live-news', 'gdelt-intel', 'intel', 'politics', 'middleeast',
-      'europe', 'africa', 'latam', 'asia', 'us', 'live-webcams', 'security-advisories',
+      'map',
+      'live-news',
+      'gdelt-intel',
+      'intel',
+      'politics',
+      'middleeast',
+      'europe',
+      'africa',
+      'latam',
+      'asia',
+      'us',
+      'social-velocity',
+      'live-webcams',
+      'security-advisories',
     ],
     layers: [
-      'hotspots', 'conflicts', 'protests', 'ucdpEvents', 'displacement',
-      'outages', 'cyberThreats', 'webcams', 'weather', 'natural', 'fires',
+      'hotspots',
+      'conflicts',
+      'protests',
+      'ucdpEvents',
+      'displacement',
+      'outages',
+      'cyberThreats',
+      'webcams',
+      'weather',
+      'natural',
+      'fires',
     ],
   },
   {
@@ -116,13 +228,43 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     description: 'Stocks, market breadth, earnings, macro signals, and event context.',
     icon: '$',
     view: 'america',
+    zoom: 3,
+    timeRange: '7d',
     panels: [
-      'map', 'markets', 'heatmap', 'macro-signals', 'economic',
-      'commodities', 'energy-complex', 'etf-flows', 'stablecoins', 'crypto', 'finance',
+      'map',
+      'markets',
+      'heatmap',
+      'market-breadth',
+      'earnings-calendar',
+      'macro-signals',
+      'fear-greed',
+      'economic',
+      'liquidity-shifts',
+      'positioning-247',
+      'commodities',
+      'energy-complex',
+      'consumer-prices',
+      'gold-intelligence',
+      'etf-flows',
+      'stablecoins',
+      'crypto',
+      'finance',
+      'economic-calendar',
     ],
     layers: [
-      'stockExchanges', 'financialCenters', 'centralBanks', 'commodityHubs',
-      'economic', 'tradeRoutes', 'pipelines', 'sanctions', 'outages',
+      'stockExchanges',
+      'financialCenters',
+      'centralBanks',
+      'commodityHubs',
+      'gulfInvestments',
+      'economic',
+      'tradeRoutes',
+      'pipelines',
+      'waterways',
+      'sanctions',
+      'outages',
+      'weather',
+      'natural',
     ],
   },
   {
@@ -132,13 +274,40 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     description: 'AI labs, startups, chips, cloud, cyber, and regulation signals.',
     icon: 'T',
     view: 'global',
+    zoom: 2.4,
+    timeRange: '7d',
     panels: [
-      'map', 'live-news', 'insights', 'tech', 'security',
-      'github', 'tech-readiness', 'markets', 'service-status', 'monitors',
+      'map',
+      'live-news',
+      'insights',
+      'ai',
+      'tech',
+      'startups',
+      'security',
+      'policy',
+      'hardware',
+      'cloud',
+      'github',
+      'tech-readiness',
+      'funding',
+      'unicorns',
+      'accelerators',
+      'events',
+      'markets',
+      'internet-disruptions',
+      'service-status',
+      'monitors',
     ],
     layers: [
-      'datacenters', 'startupHubs', 'techHQs', 'cables',
-      'outages', 'cyberThreats', 'natural',
+      'datacenters',
+      'startupHubs',
+      'techHQs',
+      'techEvents',
+      'cloudRegions',
+      'cables',
+      'outages',
+      'cyberThreats',
+      'natural',
     ],
   },
   {
@@ -148,54 +317,139 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
     description: 'Progress, breakthroughs, conservation wins, and clean-energy momentum.',
     icon: '+',
     view: 'global',
+    zoom: 2.2,
+    timeRange: '7d',
     panels: [
-      'map', 'positive-feed', 'progress', 'counters', 'spotlight',
-      'breakthroughs', 'digest', 'species', 'renewable',
+      'map',
+      'positive-feed',
+      'progress',
+      'counters',
+      'spotlight',
+      'breakthroughs',
+      'digest',
+      'species',
+      'renewable',
     ],
     layers: [
-      'positiveEvents', 'kindness', 'happiness', 'speciesRecovery', 'renewableInstallations',
+      'positiveEvents',
+      'kindness',
+      'happiness',
+      'speciesRecovery',
+      'renewableInstallations',
     ],
   },
   {
-    id: 'kenya-watch',
-    label: 'Kenya Watch',
-    shortLabel: 'Kenya',
-    description: 'East Africa security, protests, elections, and economic indicators.',
-    icon: '🇰🇪',
-    view: 'africa',
-    zoom: 5,
+    id: 'nq-day-trader',
+    label: 'NQ Day Trader',
+    shortLabel: 'NQ',
+    description: 'E-mini Nasdaq-100 context, catalysts, and curated NQ news.',
+    icon: 'N',
+    view: 'america',
+    zoom: 3.4,
+    timeRange: '24h',
+    variants: ['finance'],
     panels: [
-      'map', 'cii', 'strategic-risk', 'intel', 'politics', 'conflict',
-      'markets', 'commodities', 'economic', 'live-news', 'live-webcams',
-      'displacement', 'weather-alerts', 'escalation-monitor', 'threat-timeline',
-      'ucdp-events', 'unrest', 'satellite-fires',
+      'map',
+      'nq-pulse',
+      'nq-catalysts',
+      'nq-news',
+      'live-news',
+      'heatmap',
+      'economic',
+      'fear-greed',
+      'fsi',
+      'yield-curve',
+      'markets',
     ],
     layers: [
-      'conflicts', 'natural', 'fires', 'weather',
-      'protests', 'displacement', 'sanctions',
+      'stockExchanges',
+      'financialCenters',
+      'centralBanks',
+      'economic',
+      'outages',
     ],
   },
   {
-    id: 'aviation-ops',
-    label: 'Aviation Ops',
-    shortLabel: 'Aviation',
-    description: 'Flight tracking, military aircraft, airport ops, and airspace closures.',
-    icon: '✈️',
+    id: 'country-watcher',
+    label: 'Country Watcher',
+    shortLabel: 'Watch',
+    description: 'Track the countries you care about — instability, sanctions, displacement, and risk in one view.',
+    icon: '◉',
     view: 'global',
+    zoom: 2.2,
+    timeRange: '48h',
     panels: [
-      'map', 'airline-intel', 'local-adsb', 'acars', 'military-correlation', 'strategic-posture',
-      'live-news', 'threat-timeline', 'hf-propagation', 'weather-alerts',
+      'map',
+      'live-news',
+      'cii',
+      'strategic-risk',
+      'sanctions-pressure',
+      'security-advisories',
+      'gdelt-intel',
+      'displacement',
+      'population-exposure',
+      'economic',
     ],
     layers: [
-      'flights', 'military', 'bases', 'weather', 'conflicts',
+      'conflicts',
+      'hotspots',
+      'protests',
+      'sanctions',
+      'ucdpEvents',
+      'ciiChoropleth',
+      'outages',
+      'natural',
     ],
+    variantOverrides: {
+      happy: {
+        panels: ['map', 'positive-feed', 'progress', 'spotlight', 'species', 'renewable'],
+        layers: ['positiveEvents', 'happiness', 'speciesRecovery', 'renewableInstallations'],
+      },
+    },
+    asksForCountries: true,
+  },
+  {
+    id: 'protective-travel',
+    label: 'Protective Travel',
+    shortLabel: 'Travel',
+    description: 'Security, health, aviation and connectivity signals for a trip. Choose the countries and dates.',
+    icon: '✈',
+    view: 'global',
+    zoom: 2.2,
+    timeRange: '24h',
+    variants: ['full'],
+    // Unrest, weather and natural hazards have no panel of their own; they are
+    // map layers (protests, weather, natural), so they come in through `layers`.
+    panels: [
+      'map',
+      'live-news',
+      'security-advisories',
+      'airline-intel',
+      'disease-outbreaks',
+      'internet-disruptions',
+      'live-webcams',
+      'cii',
+      'monitors',
+    ],
+    layers: [
+      'protests',
+      'weather',
+      'natural',
+      'flights',
+      'outages',
+      'hotspots',
+    ],
+    asksForCountries: true,
+    requiresFocus: true,
   },
 ];
 
 const DYNAMIC_PANEL_PREFIXES = ['cw-', 'mcp-'];
 const MIN_PRESET_PANEL_MATCHES = 2;
+const missionPresetListeners = new Set<(preset: MissionPreset | null) => void>();
+let storageDeniedMissionState: MissionPresetId | null | undefined;
 
-const isDynamicPanel = (key: string): boolean =>
+export const isDynamicPanel = (key: string): boolean =>
   key === 'runtime-config' || DYNAMIC_PANEL_PREFIXES.some((prefix) => key.startsWith(prefix));
 
 const getVariantDefaultPanels = (variant: string): string[] =>
@@ -214,20 +468,92 @@ export function getMissionPreset(id: string | null | undefined): MissionPreset |
   return MISSION_PRESETS.find((preset) => preset.id === id) ?? null;
 }
 
-export function loadStoredMissionPreset(): MissionPreset | null {
+export function resolveMissionPresetForVariant(
+  preset: MissionPreset,
+  variant: string,
+): Pick<MissionPreset, 'panels' | 'layers'> {
+  return preset.variantOverrides?.[variant] ?? preset;
+}
+
+export function isMissionPresetAvailableForVariant(
+  preset: MissionPreset,
+  variant: string,
+): boolean {
+  if (!preset.variants || preset.variants.length === 0) return true;
+  return preset.variants.includes(variant);
+}
+
+export function getMissionPresetsForVariant(variant: string = SITE_VARIANT): readonly MissionPreset[] {
+  return MISSION_PRESETS.filter((preset) => isMissionPresetAvailableForVariant(preset, variant));
+}
+
+export function loadStoredMissionPreset(variant: string = SITE_VARIANT): MissionPreset | null {
+  if (storageDeniedMissionState !== undefined) {
+    const preset = storageDeniedMissionState ? getMissionPreset(storageDeniedMissionState) : null;
+    return preset && isMissionPresetAvailableForVariant(preset, variant) ? preset : null;
+  }
   try {
-    return getMissionPreset(localStorage.getItem(MISSION_PRESET_STORAGE_KEY));
+    const preset = getMissionPreset(parseMissionPresetId(localStorage.getItem(MISSION_PRESET_STORAGE_KEY)));
+    if (!preset || !isMissionPresetAvailableForVariant(preset, variant)) return null;
+    return preset;
   } catch {
     return null;
   }
 }
 
 export function saveMissionPreset(id: MissionPresetId): void {
-  try { localStorage.setItem(MISSION_PRESET_STORAGE_KEY, id); } catch {}
+  try {
+    localStorage.setItem(MISSION_PRESET_STORAGE_KEY, id);
+    localStorage.setItem(MISSION_PRESET_DISMISSED_KEY, '1');
+    storageDeniedMissionState = undefined;
+  } catch {
+    storageDeniedMissionState = id;
+  }
+  notifyMissionPresetListeners(getMissionPreset(id));
 }
 
 export function clearMissionPreset(): void {
-  try { localStorage.removeItem(MISSION_PRESET_STORAGE_KEY); } catch {}
+  try {
+    localStorage.removeItem(MISSION_PRESET_STORAGE_KEY);
+    localStorage.setItem(MISSION_PRESET_DISMISSED_KEY, '1');
+    storageDeniedMissionState = undefined;
+  } catch {
+    storageDeniedMissionState = null;
+  }
+  notifyMissionPresetListeners(null);
+}
+
+function notifyMissionPresetListeners(preset: MissionPreset | null): void {
+  for (const listener of missionPresetListeners) {
+    try {
+      listener(preset);
+    } catch {
+      // A consumer cannot interrupt mission application or another consumer.
+    }
+  }
+}
+
+export function onMissionPresetChange(
+  listener: (preset: MissionPreset | null) => void,
+): () => void {
+  missionPresetListeners.add(listener);
+  return () => missionPresetListeners.delete(listener);
+}
+
+export function isMissionPresetPromptDismissed(): boolean {
+  try {
+    return localStorage.getItem(MISSION_PRESET_DISMISSED_KEY) === '1';
+  } catch {
+    return true;
+  }
+}
+
+export function dismissMissionPresetPrompt(): void {
+  try {
+    localStorage.setItem(MISSION_PRESET_DISMISSED_KEY, '1');
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 export function applyMissionPresetToState(
@@ -238,14 +564,18 @@ export function applyMissionPresetToState(
 ): AppliedMissionPreset {
   const preset = getMissionPreset(presetId);
   if (!preset) throw new Error(`Unknown mission preset: ${presetId}`);
+  if (!isMissionPresetAvailableForVariant(preset, variant)) {
+    throw new Error(`Mission preset ${presetId} is not available on this variant`);
+  }
 
+  const resolvedPreset = resolveMissionPresetForVariant(preset, variant);
   const variantPanels = getVariantDefaultPanels(variant);
   const variantPanelSet = new Set(variantPanels);
-  const matchingPresetPanels = preset.panels.filter((key) => key !== 'map' && variantPanelSet.has(key));
+  const matchingPresetPanels = resolvedPreset.panels.filter((key) => key !== 'map' && variantPanelSet.has(key));
   const useVariantDefaultPanels = matchingPresetPanels.length < MIN_PRESET_PANEL_MATCHES;
   const selectedPanels = useVariantDefaultPanels
     ? withMapPanel(variantPanels)
-    : preset.panels.filter((key) => key === 'map' || variantPanelSet.has(key));
+    : resolvedPreset.panels.filter((key) => key === 'map' || variantPanelSet.has(key));
   const selectedPanelSet = new Set(selectedPanels);
   const nextPanelSettings: Record<string, PanelConfig> = {};
   const allKeys = new Set([
@@ -259,25 +589,34 @@ export function applyMissionPresetToState(
     const current = currentPanelSettings[key];
     const resolved = ALL_PANELS[key] ? getEffectivePanelConfig(key, variant) : current;
     if (!resolved) continue;
+
     if (isDynamicPanel(key)) {
       nextPanelSettings[key] = { ...resolved };
       continue;
     }
+
     const isKnownPanel = key === 'map' || !!ALL_PANELS[key] || !!current;
     if (!isKnownPanel) continue;
 
-    let enabled = selectedPanelSet.has(key);
-    if (key === 'map') enabled = true;
-    else if (useVariantDefaultPanels) enabled = enabled && resolved.enabled !== false;
+    const shouldEnable = selectedPanelSet.has(key);
+    let enabled = shouldEnable;
+    if (key === 'map') {
+      enabled = true;
+    } else if (useVariantDefaultPanels) {
+      enabled = shouldEnable && resolved.enabled !== false;
+    }
 
-    nextPanelSettings[key] = { ...resolved, enabled };
+    nextPanelSettings[key] = {
+      ...resolved,
+      enabled,
+    };
   }
 
   const candidateLayers: MapLayers = { ...defaultLayers };
   for (const key of Object.keys(candidateLayers) as Array<keyof MapLayers>) {
     candidateLayers[key] = false;
   }
-  for (const key of preset.layers) {
+  for (const key of resolvedPreset.layers) {
     candidateLayers[key] = true;
   }
 
@@ -298,7 +637,7 @@ export function resetMissionPresetState(
   currentPanelSettings: Record<string, PanelConfig>,
   defaultLayers: MapLayers = DEFAULT_MAP_LAYERS,
   variant: string = SITE_VARIANT,
-): { panelSettings: Record<string, PanelConfig>; panelOrder: string[]; mapLayers: MapLayers } {
+): ResetMissionPresetState {
   const variantPanels = VARIANT_DEFAULTS[variant] ?? VARIANT_DEFAULTS.full ?? [];
   const variantPanelSet = new Set(variantPanels);
   const nextPanelSettings: Record<string, PanelConfig> = {};
@@ -327,4 +666,23 @@ export function resetMissionPresetState(
     panelOrder: variantPanels.filter((key) => key !== 'map'),
     mapLayers: sanitizeLayersForVariant({ ...defaultLayers }, variant as MapVariant),
   };
+}
+
+export function filterMissionLayersForRenderer(
+  layers: MapLayers,
+  kind: RendererKind,
+  fallbackLayers: MapLayers = DEFAULT_MAP_LAYERS,
+): MapLayers {
+  const filter = (candidateLayers: MapLayers): MapLayers => {
+    const next = { ...candidateLayers };
+    for (const key of Object.keys(next) as Array<keyof MapLayers>) {
+      if (next[key] && !isLayerExecutable(key, kind)) {
+        next[key] = false;
+      }
+    }
+    return next;
+  };
+
+  const next = filter(layers);
+  return hasAnyActiveLayer(next) ? next : filter(fallbackLayers);
 }

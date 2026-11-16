@@ -4,12 +4,14 @@
  * showing misleading "all clear" when we actually have no data.
  */
 
-import { getCSSColor } from '@/utils';
+import { getCSSColor } from '@/utils/theme-colors';
+import { isHealthMappedSource } from '@/services/health-freshness-map';
 import type { DataSourceId } from '@/types';
 
 export type { DataSourceId } from '@/types';
 
 export type FreshnessStatus = 'fresh' | 'stale' | 'very_stale' | 'no_data' | 'disabled' | 'error';
+type FreshnessEvidence = 'session' | 'seed-health';
 
 export interface DataSourceState {
   id: DataSourceId;
@@ -18,8 +20,13 @@ export interface DataSourceState {
   lastError: string | null;
   itemCount: number;
   enabled: boolean;
+  mapLayerEnabled: boolean;
   status: FreshnessStatus;
-  requiredForRisk: boolean; // Is this source important for risk assessment?
+  // Drives the StrategicRiskPanel hard insufficient-data gate; not the full list of CII score inputs.
+  requiredForRisk: boolean;
+  maxStaleMin?: number;
+  healthStatus?: string;
+  freshnessEvidence: FreshnessEvidence | null;
 }
 
 export interface DataFreshnessSummary {
@@ -34,13 +41,44 @@ export interface DataFreshnessSummary {
   newestUpdate: Date | null;
 }
 
+export interface PanelFreshnessSource {
+  id: DataSourceId;
+  name: string;
+  status: FreshnessStatus;
+  lastUpdate: Date | null;
+  itemCount: number;
+  healthStatus?: string;
+  lastError: string | null;
+}
+
+export interface PanelFreshnessSummary {
+  panelId: string;
+  status: FreshnessStatus;
+  lastUpdate: Date | null;
+  labelUpdate: Date | null;
+  sources: PanelFreshnessSource[];
+}
+
+export interface SeedHealthUpdate {
+  sourceId: DataSourceId;
+  status: string;
+  records?: number | null;
+  seedAgeMin?: number | null;
+  maxStaleMin?: number | null;
+  contentAgeMin?: number | null;
+  maxContentAgeMin?: number | null;
+  checkedAtMs?: number;
+}
+
 // Thresholds in milliseconds
 const FRESH_THRESHOLD = 15 * 60 * 1000;      // 15 minutes
 const STALE_THRESHOLD = 2 * 60 * 60 * 1000;  // 2 hours
 const VERY_STALE_THRESHOLD = 6 * 60 * 60 * 1000; // 6 hours
 
-// Core sources needed for meaningful risk assessment
-// Note: ACLED is optional since GDELT provides protest data as fallback
+// Core browser-tracker sources needed before the Strategic Risk panel leaves its
+// hard insufficient-data state. This is intentionally narrower than the full CII
+// scorer input graph; source-specific health and /api/health.riskScores monitor
+// ACLED/UCDP conflict, cyber, and other score-relevant feeds.
 const CORE_SOURCES: DataSourceId[] = ['gdelt', 'rss'];
 
 const SOURCE_METADATA: Record<DataSourceId, { name: string; requiredForRisk: boolean; panelId?: string }> = {
@@ -57,7 +95,17 @@ const SOURCE_METADATA: Record<DataSourceId, { name: string; requiredForRisk: boo
   pizzint: { name: 'PizzINT Monitoring', requiredForRisk: false, panelId: 'intel' },
   outages: { name: 'Internet Outages', requiredForRisk: false, panelId: 'outages' },
   cyber_threats: { name: 'Cyber Threat IOCs', requiredForRisk: false, panelId: 'map' },
+  // This branch widened the weather source to cover ECCC as well as NWS; main's
+  // road entries below are untouched by that.
   weather: { name: 'Weather Alerts', requiredForRisk: false, panelId: 'weather' },
+  // One entry per CANADA_ROAD_SOURCES descriptor. Five sources union onto the
+  // canadaRoads layer, and recording them all as ontario_511 made an Alberta,
+  // Toronto or BC outage read as an Ontario one — or vanish entirely.
+  ontario_511: { name: 'Ontario Roads (511)', requiredForRisk: false, panelId: 'map' },
+  alberta_511: { name: 'Alberta Roads (511)', requiredForRisk: false, panelId: 'map' },
+  manitoba_511: { name: 'Manitoba Roads (511)', requiredForRisk: false, panelId: 'map' },
+  toronto_roads: { name: 'Toronto Road Restrictions', requiredForRisk: false, panelId: 'map' },
+  bc_open511: { name: 'BC Roads (Open511)', requiredForRisk: false, panelId: 'map' },
   economic: { name: 'Economic Data (FRED)', requiredForRisk: false, panelId: 'economic' },
   oil: { name: 'Oil Analytics (EIA)', requiredForRisk: false, panelId: 'economic' },
   spending: { name: 'Gov Spending', requiredForRisk: false, panelId: 'economic' },
@@ -71,6 +119,7 @@ const SOURCE_METADATA: Record<DataSourceId, { name: string; requiredForRisk: boo
   worldpop: { name: 'Population Exposure', requiredForRisk: false, panelId: 'population-exposure' },
   giving: { name: 'Global Giving Activity', requiredForRisk: false, panelId: 'giving' },
   bis: { name: 'BIS Central Banks', requiredForRisk: false, panelId: 'economic' },
+  bls: { name: 'BLS Labor Market', requiredForRisk: false, panelId: 'economic' },
   wto_trade: { name: 'WTO Trade Policy', requiredForRisk: false, panelId: 'trade-policy' },
   supply_chain: { name: 'Supply Chain Intelligence', requiredForRisk: false, panelId: 'supply-chain' },
   security_advisories: { name: 'Security Advisories', requiredForRisk: false, panelId: 'security-advisories' },
@@ -78,6 +127,41 @@ const SOURCE_METADATA: Record<DataSourceId, { name: string; requiredForRisk: boo
   radiation: { name: 'Radiation Watch', requiredForRisk: false, panelId: 'radiation-watch' },
   gpsjam: { name: 'GPS/GNSS Interference', requiredForRisk: false, panelId: 'map' },
   treasury_revenue: { name: 'Treasury Customs Revenue', requiredForRisk: false, panelId: 'trade-policy' },
+};
+
+const PANEL_FRESHNESS_SOURCES: Record<string, readonly DataSourceId[]> = {
+  'strategic-risk': CORE_SOURCES,
+  cii: CORE_SOURCES,
+  'live-news': ['rss'],
+  intel: ['gdelt', 'pizzint'],
+  'gdelt-intel': ['gdelt'],
+  protests: ['acled', 'acled_conflict', 'gdelt_doc', 'ucdp', 'hapi'],
+  'ucdp-events': ['ucdp_events'],
+  polymarket: ['polymarket', 'predictions'],
+  economic: ['economic', 'oil', 'spending', 'bis', 'bls'],
+  'trade-policy': ['wto_trade', 'treasury_revenue'],
+  'supply-chain': ['supply_chain'],
+  'security-advisories': ['security_advisories'],
+  'sanctions-pressure': ['sanctions_pressure'],
+  'radiation-watch': ['radiation'],
+  displacement: ['unhcr'],
+  climate: ['climate'],
+  'population-exposure': ['worldpop'],
+  giving: ['giving'],
+  'internet-disruptions': ['outages'],
+  outages: ['outages'],
+  military: ['opensky', 'wingbits'],
+  shipping: ['ais'],
+  natural: ['usgs'],
+};
+
+const STATUS_SEVERITY: Record<FreshnessStatus, number> = {
+  fresh: 0,
+  disabled: 1,
+  stale: 2,
+  very_stale: 3,
+  no_data: 4,
+  error: 5,
 };
 
 class DataFreshnessTracker {
@@ -94,8 +178,10 @@ class DataFreshnessTracker {
         lastError: null,
         itemCount: 0,
         enabled: true, // Assume enabled by default
+        mapLayerEnabled: true,
         status: 'no_data',
         requiredForRisk: meta.requiredForRisk,
+        freshnessEvidence: null,
       });
     }
   }
@@ -106,9 +192,16 @@ class DataFreshnessTracker {
   recordUpdate(sourceId: DataSourceId, itemCount: number = 1): void {
     const source = this.sources.get(sourceId);
     if (source) {
+      if (isHealthMappedSource(sourceId) && source.freshnessEvidence === 'seed-health') {
+        source.itemCount += itemCount;
+        source.status = this.monitoringStatus(source);
+        this.notifyListeners();
+        return;
+      }
       source.lastUpdate = new Date();
       source.itemCount += itemCount;
       source.lastError = null;
+      source.freshnessEvidence = 'session';
       source.status = this.calculateStatus(source);
       this.notifyListeners();
     }
@@ -120,6 +213,11 @@ class DataFreshnessTracker {
   recordError(sourceId: DataSourceId, error: string): void {
     const source = this.sources.get(sourceId);
     if (source) {
+      if (isHealthMappedSource(sourceId) && source.freshnessEvidence === 'seed-health') {
+        source.status = this.monitoringStatus(source);
+        this.notifyListeners();
+        return;
+      }
       source.lastError = error;
       source.status = 'error';
       this.notifyListeners();
@@ -127,13 +225,75 @@ class DataFreshnessTracker {
   }
 
   /**
-   * Set whether a source is enabled/disabled
+   * Merge cadence-aware seed freshness from /api/health.
+   */
+  recordSeedHealth(updates: SeedHealthUpdate[]): void {
+    let changed = false;
+    for (const update of updates) {
+      const source = this.sources.get(update.sourceId);
+      if (!source) continue;
+
+      const records = typeof update.records === 'number' && Number.isFinite(update.records)
+        ? Math.max(0, update.records)
+        : source.itemCount;
+      const maxStaleMin = typeof update.maxStaleMin === 'number' && update.maxStaleMin > 0
+        ? update.maxStaleMin
+        : undefined;
+      const maxContentAgeMin = typeof update.maxContentAgeMin === 'number' && update.maxContentAgeMin > 0
+        ? update.maxContentAgeMin
+        : undefined;
+      const checkedAtMs = Number.isFinite(update.checkedAtMs)
+        ? update.checkedAtMs!
+        : Date.now();
+      const seedAgeMin = typeof update.seedAgeMin === 'number' && update.seedAgeMin >= 0
+        ? update.seedAgeMin
+        : null;
+      const contentAgeMin = typeof update.contentAgeMin === 'number' && update.contentAgeMin >= 0
+        ? update.contentAgeMin
+        : null;
+      const ageMin = update.status === 'STALE_CONTENT' && contentAgeMin !== null
+        ? contentAgeMin
+        : seedAgeMin;
+
+      source.itemCount = records;
+      source.maxStaleMin = update.status === 'STALE_CONTENT'
+        ? (maxContentAgeMin ?? maxStaleMin)
+        : maxStaleMin;
+      source.healthStatus = update.status;
+      source.freshnessEvidence = 'seed-health';
+      source.lastError = this.healthStatusIsError(update.status) ? update.status : null;
+      source.lastUpdate = this.healthStatusHasNoData(update.status)
+        ? null
+        : ageMin !== null
+        ? new Date(checkedAtMs - ageMin * 60_000)
+        : source.lastUpdate;
+      source.status = this.monitoringStatus(source);
+      changed = true;
+    }
+    if (changed) this.notifyListeners();
+  }
+
+  /**
+   * Set whether this client can collect the source at all (configured, feature available).
    */
   setEnabled(sourceId: DataSourceId, enabled: boolean): void {
     const source = this.sources.get(sourceId);
     if (source) {
       source.enabled = enabled;
-      source.status = enabled ? this.calculateStatus(source) : 'disabled';
+      source.status = this.monitoringStatus(source);
+      this.notifyListeners();
+    }
+  }
+
+  /**
+   * Record whether the map layer that draws this source is on. Panels load their
+   * data regardless of the layer, so this only affects the monitoring summary.
+   */
+  setMapLayerEnabled(sourceId: DataSourceId, enabled: boolean): void {
+    const source = this.sources.get(sourceId);
+    if (source) {
+      source.mapLayerEnabled = enabled;
+      source.status = this.monitoringStatus(source);
       this.notifyListeners();
     }
   }
@@ -145,7 +305,7 @@ class DataFreshnessTracker {
     const source = this.sources.get(sourceId);
     if (source) {
       // Recalculate status in case time has passed
-      source.status = source.enabled ? this.calculateStatus(source) : 'disabled';
+      source.status = this.monitoringStatus(source);
     }
     return source;
   }
@@ -156,12 +316,12 @@ class DataFreshnessTracker {
   getAllSources(): DataSourceState[] {
     return Array.from(this.sources.values()).map(source => ({
       ...source,
-      status: source.enabled ? this.calculateStatus(source) : 'disabled',
+      status: this.monitoringStatus(source),
     }));
   }
 
   /**
-   * Get sources required for risk assessment
+   * Get sources required for the Strategic Risk insufficient-data gate.
    */
   getRiskSources(): DataSourceState[] {
     return this.getAllSources().filter(s => s.requiredForRisk);
@@ -184,7 +344,7 @@ class DataFreshnessTracker {
       .filter(s => s.lastUpdate)
       .map(s => s.lastUpdate!.getTime());
 
-    // Coverage is based on risk-required sources
+    // Coverage is based on sources required by the panel's hard gate, not every CII input.
     const coveragePercent = riskSources.length > 0
       ? Math.round((activeRiskSources.length / riskSources.length) * 100)
       : 0;
@@ -234,11 +394,95 @@ class DataFreshnessTracker {
   }
 
   /**
+   * Whether every source behind a panel is covered by /api/health, so the panel
+   * can carry a header badge once seed-health evidence arrives.
+   */
+  hasPanelFreshnessSources(panelId: string): boolean {
+    const sourceIds = this.getSourceIdsForPanel(panelId);
+    return sourceIds.length > 0 && sourceIds.every(isHealthMappedSource);
+  }
+
+  /**
+   * Get freshness sources that contribute to a panel header badge.
+   */
+  getSourcesForPanel(panelId: string): PanelFreshnessSource[] {
+    if (!this.hasPanelFreshnessSources(panelId)) return [];
+
+    const sources = this.getSourceIdsForPanel(panelId).map(sourceId => this.sources.get(sourceId));
+    if (sources.some(source => !source || source.freshnessEvidence !== 'seed-health')) {
+      return [];
+    }
+
+    return sources
+      .filter((source): source is DataSourceState => Boolean(source))
+      .map(source => ({
+        id: source.id,
+        name: source.name,
+        status: this.calculateStatus(source),
+        lastUpdate: source.lastUpdate,
+        itemCount: source.itemCount,
+        healthStatus: source.healthStatus,
+        lastError: source.lastError,
+      }));
+  }
+
+  /**
+   * Aggregate a panel's mapped sources to the worst current status.
+   */
+  getPanelFreshness(panelId: string): PanelFreshnessSummary | null {
+    const sources = this.getSourcesForPanel(panelId);
+    if (sources.length === 0) return null;
+
+    const activeSources = sources.filter(source => source.status !== 'disabled');
+    const sourcesForStatus = activeSources.length > 0 ? activeSources : sources;
+    const worstStatus = sourcesForStatus.reduce<FreshnessStatus>((worst, source) => (
+      STATUS_SEVERITY[source.status] > STATUS_SEVERITY[worst] ? source.status : worst
+    ), 'fresh');
+
+    const updates = sources
+      .map(source => source.lastUpdate)
+      .filter((date): date is Date => date instanceof Date);
+    const newestUpdate = updates.length > 0
+      ? new Date(Math.max(...updates.map(date => date.getTime())))
+      : null;
+    const worstStatusUpdates = sourcesForStatus
+      .filter(source => source.status === worstStatus)
+      .map(source => source.lastUpdate)
+      .filter((date): date is Date => date instanceof Date);
+    const labelUpdate = worstStatusUpdates.length > 0
+      ? new Date(Math.min(...worstStatusUpdates.map(date => date.getTime())))
+      : newestUpdate;
+
+    return {
+      panelId,
+      status: worstStatus,
+      lastUpdate: newestUpdate,
+      labelUpdate,
+      sources,
+    };
+  }
+
+  private getSourceIdsForPanel(panelId: string): DataSourceId[] {
+    const explicitSources = PANEL_FRESHNESS_SOURCES[panelId];
+    const sourceIds = new Set<DataSourceId>(explicitSources ?? []);
+    for (const sourceId of Object.entries(SOURCE_METADATA)
+      .filter(([, meta]) => meta.panelId === panelId)
+      .map(([sourceId]) => sourceId as DataSourceId)) {
+      sourceIds.add(sourceId);
+    }
+    return [...sourceIds];
+  }
+
+  /**
    * Subscribe to changes
    */
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  private monitoringStatus(source: DataSourceState): FreshnessStatus {
+    return source.mapLayerEnabled ? this.calculateStatus(source) : 'disabled';
   }
 
   private calculateStatus(source: DataSourceState): FreshnessStatus {
@@ -247,10 +491,31 @@ class DataFreshnessTracker {
     if (!source.lastUpdate) return 'no_data';
 
     const age = Date.now() - source.lastUpdate.getTime();
-    if (age < FRESH_THRESHOLD) return 'fresh';
-    if (age < STALE_THRESHOLD) return 'stale';
-    if (age < VERY_STALE_THRESHOLD) return 'very_stale';
+    const freshThreshold = source.maxStaleMin ? source.maxStaleMin * 60_000 : FRESH_THRESHOLD;
+    const staleThreshold = source.maxStaleMin ? source.maxStaleMin * 2 * 60_000 : STALE_THRESHOLD;
+    const veryStaleThreshold = source.maxStaleMin ? source.maxStaleMin * 3 * 60_000 : VERY_STALE_THRESHOLD;
+    if (age <= freshThreshold) return source.healthStatus === 'COVERAGE_PARTIAL'
+      || source.healthStatus === 'STALE_CONTENT'
+      || source.healthStatus === 'STALE_SEED'
+      || source.healthStatus === 'COVERAGE_DEGRADED'
+      || source.healthStatus === 'CHINA_DEGRADED'
+      || source.healthStatus === 'ROLLOUT_PENDING'
+      ? 'stale'
+      : 'fresh';
+    if (age <= staleThreshold) return 'stale';
+    if (age <= veryStaleThreshold) return 'very_stale';
     return 'no_data'; // Too old, treat as no data
+  }
+
+  private healthStatusIsError(status: string): boolean {
+    return status === 'SEED_ERROR' || status === 'REDIS_DOWN' || status === 'REDIS_PARTIAL'
+      // Server-crit: a fresh-aged CHINA_UNAVAILABLE must render as an error, not
+      // pass through calculateStatus's age check as 'fresh' (api/health.js crit).
+      || status === 'CHINA_UNAVAILABLE';
+  }
+
+  private healthStatusHasNoData(status: string): boolean {
+    return status === 'EMPTY' || status === 'EMPTY_DATA' || status === 'EMPTY_ON_DEMAND';
   }
 
   private notifyListeners(): void {
@@ -268,14 +533,19 @@ class DataFreshnessTracker {
    */
   getTimeSince(sourceId: DataSourceId): string {
     const source = this.sources.get(sourceId);
-    if (!source?.lastUpdate) return 'never';
+    return this.formatTimeSince(source?.lastUpdate ?? null);
+  }
 
-    const ms = Date.now() - source.lastUpdate.getTime();
+  private formatTimeSince(date: Date | null): string {
+    if (!date) return 'never';
+
+    const ms = Math.max(0, Date.now() - date.getTime());
     if (ms < 60000) return 'just now';
     if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
     if (ms < 86400000) return `${Math.floor(ms / 3600000)}h ago`;
     return `${Math.floor(ms / 86400000)}d ago`;
   }
+
 }
 
 // Singleton instance
@@ -320,7 +590,12 @@ const INTELLIGENCE_GAP_MESSAGES: Record<DataSourceId, string> = {
   pizzint: 'PizzINT monitor unavailable—location/tension tracking degraded',
   outages: 'Internet disruptions may be unreported—outage monitoring offline',
   cyber_threats: 'Cyber IOC map points unavailable—malicious infrastructure visibility reduced',
-  weather: 'Severe weather warnings may be missed—weather alerts unavailable',
+  weather: 'Official weather warnings may be missed—NWS, ECCC, or WMO SWIC alerts unavailable',
+  ontario_511: 'Ontario highway incidents may be missed—511 feed unavailable',
+  alberta_511: 'Alberta highway incidents may be missed—511 feed unavailable',
+  manitoba_511: 'Manitoba highway incidents may be missed—511 feed unavailable',
+  toronto_roads: 'Toronto road restrictions may be missed—City of Toronto feed unavailable',
+  bc_open511: 'BC highway incidents may be missed—Open511 feed unavailable',
   economic: 'Economic indicators stale—Fed/Treasury data not updating',
   oil: 'Oil market analytics unavailable—EIA data not updating',
   spending: 'Government spending data unavailable',
@@ -331,9 +606,10 @@ const INTELLIGENCE_GAP_MESSAGES: Record<DataSourceId, string> = {
   ucdp_events: 'UCDP event-level conflict data unavailable',
   unhcr: 'UNHCR displacement data unavailable—refugee flows unknown',
   climate: 'Climate anomaly data unavailable—extreme weather patterns undetected',
-  worldpop: 'Population exposure data unavailable—affected population unknown',
+  worldpop: 'Population exposure estimates unavailable',
   giving: 'Global giving activity data unavailable',
   bis: 'Central bank policy data may be stale—BIS feed unavailable',
+  bls: 'Labor market data unavailable—BLS feed not yet seeded',
   wto_trade: 'Trade policy intelligence unavailable—WTO data not updating',
   supply_chain: 'Supply chain disruption status unavailable—chokepoint monitoring offline',
   security_advisories: 'Government travel advisory data unavailable—security alerts may be missed',
@@ -363,22 +639,4 @@ export function getIntelligenceGaps(): { source: DataSourceId; message: string; 
     if (a.severity !== b.severity) return a.severity === 'critical' ? -1 : 1;
     return 0;
   });
-}
-
-/**
- * Get a formatted intelligence gap summary for display.
- */
-export function getIntelligenceGapSummary(): string[] {
-  const gaps = getIntelligenceGaps();
-  return gaps.map(gap => {
-    const icon = gap.severity === 'critical' ? '⚠️ CRITICAL' : '⚡';
-    return `${icon}: ${gap.message}`;
-  });
-}
-
-/**
- * Check if there are any critical intelligence gaps.
- */
-export function hasCriticalGaps(): boolean {
-  return getIntelligenceGaps().some(gap => gap.severity === 'critical');
 }

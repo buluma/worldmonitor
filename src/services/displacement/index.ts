@@ -1,11 +1,21 @@
 import { getRpcBaseUrl } from '@/services/rpc-client';
-import {
-  DisplacementServiceClient,
-  type GetDisplacementSummaryResponse as ProtoResponse,
-  type CountryDisplacement as ProtoCountry,
-  type DisplacementFlow as ProtoFlow,
+import type {
+  GetDisplacementSummaryResponse as ProtoResponse,
+  GetCrossBorderMovementsResponse,
+  CountryDisplacement as ProtoCountry,
+  DisplacementFlow as ProtoFlow,
 } from '@/generated/client/worldmonitor/displacement/v1/service_client';
-import { createCircuitBreaker, getCSSColor } from '@/utils';
+import { createCircuitBreaker } from '@/utils';
+import { DisplacementServiceClient } from '@/services/generated-rpc-clients';
+import { publicRpcFetch } from '@/services/public-rpc-fetch';
+import { ensureHydrated } from '@/services/bootstrap';
+import { EMPTY_INTERNAL_DISPLACEMENT, toInternalDisplacementData, type InternalDisplacementData } from './internal';
+import { toMovementData, type CrossBorderData } from './cross-border';
+import { EMPTY_DISPLACEMENT_EVENTS, toDisplacementEventsData, type DisplacementEventsData } from './idu-events';
+
+export * from './internal';
+export * from './cross-border';
+export * from './idu-events';
 
 // ─── Consumer-friendly types (matching legacy shape exactly) ───
 
@@ -116,7 +126,14 @@ function toDisplayFlow(proto: ProtoFlow): DisplacementFlow {
 
 // ─── Client + circuit breaker ───
 
-const client = new DisplacementServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
+async function fetchPublicDisplacementSummary(): Promise<ProtoResponse> {
+  return new DisplacementServiceClient(getRpcBaseUrl(), { fetch: publicRpcFetch })
+    .getDisplacementSummary({
+      year: 0,          // 0 = handler uses year fallback
+      countryLimit: 0,  // 0 = all countries
+      flowLimit: 50,    // top 50 flows (matching legacy)
+    });
+}
 
 const breaker = createCircuitBreaker<UnhcrSummary>({
   name: 'UNHCR Displacement',
@@ -128,13 +145,9 @@ const breaker = createCircuitBreaker<UnhcrSummary>({
 
 export async function fetchUnhcrPopulation(): Promise<UnhcrFetchResult> {
   const data = await breaker.execute(async () => {
-    const response = await client.getDisplacementSummary({
-      year: 0,          // 0 = handler uses year fallback
-      countryLimit: 0,  // 0 = all countries
-      flowLimit: 50,    // top 50 flows (matching legacy)
-    });
+    const response = await fetchPublicDisplacementSummary();
     return toDisplaySummary(response);
-  }, emptyResult);
+  }, emptyResult, { shouldCache: (r) => r.countries.length > 0 });
 
   return {
     ok: data !== emptyResult && data.countries.length > 0,
@@ -142,36 +155,59 @@ export async function fetchUnhcrPopulation(): Promise<UnhcrFetchResult> {
   };
 }
 
-// ─── Presentation helpers (copied verbatim from legacy src/services/unhcr.ts) ───
+// ─── Internal displacement (IOM DTM) ───
 
-export function getDisplacementColor(totalDisplaced: number): [number, number, number, number] {
-  if (totalDisplaced >= 1_000_000) return [255, 50, 50, 200];
-  if (totalDisplaced >= 500_000) return [255, 150, 0, 200];
-  if (totalDisplaced >= 100_000) return [255, 220, 0, 180];
-  return [100, 200, 100, 150];
+const internalBreaker = createCircuitBreaker<InternalDisplacementData>({
+  name: 'IOM DTM Displacement',
+  cacheTtlMs: 30 * 60 * 1000,
+  persistCache: true,
+});
+
+export async function fetchInternalDisplacement(): Promise<InternalDisplacementData> {
+  return internalBreaker.execute(async () => {
+    const response = await new DisplacementServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) })
+      .getInternalDisplacement({ countryCode: '' });
+    return toInternalDisplacementData(response);
+  }, EMPTY_INTERNAL_DISPLACEMENT, { shouldCache: (r) => r.operations.length > 0 });
 }
 
-export function getDisplacementBadge(totalDisplaced: number): { label: string; color: string } {
-  if (totalDisplaced >= 1_000_000) return { label: 'CRISIS', color: getCSSColor('--semantic-critical') };
-  if (totalDisplaced >= 500_000) return { label: 'HIGH', color: getCSSColor('--semantic-high') };
-  if (totalDisplaced >= 100_000) return { label: 'ELEVATED', color: getCSSColor('--semantic-elevated') };
-  return { label: '', color: '' };
+// ─── Internal displacement events (IDMC) ───
+
+const displacementEventsBreaker = createCircuitBreaker<DisplacementEventsData>({
+  name: 'IDMC Displacement Events',
+  cacheTtlMs: 30 * 60 * 1000,
+  persistCache: true,
+});
+
+// On-demand bootstrap key: fetched only when the panel or map layer needs it.
+export async function fetchDisplacementEvents(): Promise<DisplacementEventsData> {
+  return displacementEventsBreaker.execute(async () => {
+    const data = toDisplacementEventsData(await ensureHydrated('idmcIduDisplacement'));
+    if (data.points.length === 0 && data.countries.length === 0) throw new Error('IDMC displacement events unavailable');
+    return data;
+  }, EMPTY_DISPLACEMENT_EVENTS, { shouldCache: (r) => r.points.length > 0 || r.countries.length > 0 });
+}
+
+// ─── Cross-border movements (UNHCR Operational Data Portal) ───
+
+const crossBorderBreaker = createCircuitBreaker<GetCrossBorderMovementsResponse>({
+  name: 'Cross-Border Movement Reports',
+  cacheTtlMs: 30 * 60 * 1000,
+  persistCache: true,
+});
+
+// Fetch only when the displacement panel or layer needs the source-dated view.
+export async function fetchCrossBorderArrivals(): Promise<CrossBorderData> {
+  const response = await crossBorderBreaker.execute(async () => {
+    const result = await new DisplacementServiceClient(getRpcBaseUrl(), { fetch: publicRpcFetch }).getCrossBorderMovements({ countryCode: '', route: '' });
+    if (!result.dataAvailable) throw new Error('cross-border movements unavailable');
+    return result;
+  }, { movements: [], sources: [], dataAvailable: false }, { shouldCache: (r) => r.movements.length > 0 });
+  return toMovementData(response);
 }
 
 export function formatPopulation(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
-}
-
-export function getOriginCountries(data: UnhcrSummary): CountryDisplacement[] {
-  return [...data.countries]
-    .filter(c => c.refugees + c.asylumSeekers > 0)
-    .sort((a, b) => (b.refugees + b.asylumSeekers) - (a.refugees + a.asylumSeekers));
-}
-
-export function getHostCountries(data: UnhcrSummary): CountryDisplacement[] {
-  return [...data.countries]
-    .filter(c => (c.hostTotal || 0) > 0)
-    .sort((a, b) => (b.hostTotal || 0) - (a.hostTotal || 0));
 }

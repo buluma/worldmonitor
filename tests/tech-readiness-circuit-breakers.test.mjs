@@ -16,29 +16,34 @@
  *      "No data available".
  *
  * Fix: replace single wbBreaker with getWbBreaker(indicatorCode) map,
- * so each indicator has an isolated cache and cooldown state.
+ * identical to the existing getFredBreaker(seriesId) pattern.
  */
 
-import { describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { build } from 'esbuild';
 import * as ts from 'typescript'; // TypeScript compiler API — available via the typescript devDep used by tsc
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const economicPath = resolve(root, 'src/services/economic/index.ts');
-const src = readFileSync(economicPath, 'utf-8');
+const techReadinessPanelPath = resolve(root, 'src/components/TechReadinessPanel.ts');
 
 function loadEconomicSourceFile() {
   return ts.createSourceFile(
     economicPath,
-    src,
+    readFileSync(economicPath, 'utf-8'),
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TS,
   );
+}
+
+function loadTechReadinessPanelSource() {
+  return readFileSync(techReadinessPanelPath, 'utf-8');
 }
 
 function walk(node, visit) {
@@ -72,15 +77,6 @@ function collectCallExpressions(node) {
   return calls;
 }
 
-function findPropertyAssignment(node, name) {
-  if (!ts.isObjectLiteralExpression(node)) return undefined;
-  return node.properties.find(
-    (prop) => ts.isPropertyAssignment(prop)
-      && ((ts.isIdentifier(prop.name) && prop.name.text === name)
-        || (ts.isStringLiteral(prop.name) && prop.name.text === name)),
-  );
-}
-
 function isIdentifierNamed(node, name) {
   return ts.isIdentifier(node) && node.text === name;
 }
@@ -103,48 +99,111 @@ function getTechIndicatorKeys(sourceFile) {
   return keys;
 }
 
-function getCreateCircuitBreakerNameInitializer(fn) {
-  const createCall = collectCallExpressions(fn).find((call) => isIdentifierNamed(call.expression, 'createCircuitBreaker'));
-  assert.ok(createCall, 'getWbBreaker must call createCircuitBreaker');
-
-  const optionsArg = createCall.arguments[0];
-  assert.ok(optionsArg && ts.isObjectLiteralExpression(optionsArg), 'createCircuitBreaker must receive an options object');
-
-  const nameProp = findPropertyAssignment(optionsArg, 'name');
-  assert.ok(nameProp, 'createCircuitBreaker options must include a name');
-  return nameProp.initializer;
-}
-
 // ============================================================
-// 1. Static analysis: source structure guarantees
+// 1. Behavioral: the pool hands out one breaker per indicator
 // ============================================================
 
+// The structural assertions this section replaced pinned the shape of
+// getWbBreaker (a Map exists, a factory exists, the name is a template
+// string) without ever calling it. Keying the pool on a constant instead
+// of `indicatorCode` — the exact bug in this file's header — left every
+// one of them green, because the mutation preserves the shape they read.
+// These drive the real factory instead.
 describe('economic/index.ts — per-indicator World Bank circuit breakers', () => {
+  let getWbBreaker;
+  let wbBreakerPoolSize;
+
+  before(async () => {
+    const result = await build({
+      stdin: {
+        contents: "export { __testing__ } from './src/services/economic/index.ts';",
+        loader: 'ts',
+        resolveDir: root,
+        sourcefile: 'wb-breaker-test-entry.ts',
+      },
+      bundle: true,
+      // `import.meta.env` and `import.meta.glob` are Vite-only. The economic
+      // service reaches i18n's locale glob transitively, so both need a value
+      // before the bundle will evaluate under node.
+      define: { 'import.meta.env': '{"DEV":false}', 'import.meta.glob': '__wmNoGlob' },
+      inject: [resolve(__dirname, 'helpers/vite-glob-stub.mjs')],
+      format: 'esm',
+      logLevel: 'silent',
+      platform: 'node',
+      target: 'node20',
+      write: false,
+    });
+    const source = result.outputFiles[0]?.text;
+    assert.ok(source, 'esbuild must emit the economic service harness');
+    const mod = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+    ({ getWbBreaker, wbBreakerPoolSize } = mod.__testing__);
+  });
+
+  // Declared first so it reads a clean pool. A shared breaker would answer
+  // the second indicator from the first one's warm cache without calling
+  // through at all, which is failure mode 1 in this file's header.
+  it('never serves one indicator’s cached rows to another', async () => {
+    const fallback = { data: [], pagination: undefined };
+    const rowsA = {
+      data: [{ countryCode: 'USA', indicatorCode: 'WB.CACHE.A', year: 2023, value: 120 }],
+      pagination: undefined,
+    };
+    const rowsB = {
+      data: [{ countryCode: 'FRA', indicatorCode: 'WB.CACHE.B', year: 2023, value: 42 }],
+      pagination: undefined,
+    };
+
+    const servedA = await getWbBreaker('WB.CACHE.A').execute(async () => rowsA, fallback);
+    const servedB = await getWbBreaker('WB.CACHE.B').execute(async () => rowsB, fallback);
+
+    assert.deepEqual(servedA, rowsA);
+    assert.deepEqual(servedB, rowsB, 'the second indicator must call through, not read the first one’s cache');
+  });
+
+  it('hands out a distinct breaker per indicator code', () => {
+    assert.notEqual(
+      getWbBreaker('IT.NET.USER.ZS'),
+      getWbBreaker('IT.CEL.SETS.P2'),
+      'two indicators must not share one breaker instance',
+    );
+  });
+
+  it('hands out the same breaker for a repeated indicator code', () => {
+    assert.equal(getWbBreaker('IT.NET.BBND.P2'), getWbBreaker('IT.NET.BBND.P2'));
+  });
+
+  it('grows the pool once per distinct indicator', () => {
+    const startSize = wbBreakerPoolSize();
+    getWbBreaker('GB.XPD.RSDV.GD.ZS');
+    getWbBreaker('GB.XPD.RSDV.GD.ZS');
+    assert.equal(wbBreakerPoolSize(), startSize + 1);
+  });
+
+  it('names each breaker for its own indicator', () => {
+    assert.equal(getWbBreaker('WB.NAME.CHECK').name, 'WB:WB.NAME.CHECK');
+  });
+
+  it('confines a tripped indicator to itself', async () => {
+    const tripped = getWbBreaker('WB.TRIP.A');
+    const healthy = getWbBreaker('WB.TRIP.B');
+    const fallback = { data: [], pagination: undefined };
+    const alwaysFail = () => { throw new Error('World Bank unavailable'); };
+
+    await tripped.execute(alwaysFail, fallback);
+    await tripped.execute(alwaysFail, fallback);
+
+    assert.equal(tripped.isOnCooldown(), true, 'two failures must trip the indicator that failed');
+    assert.equal(healthy.isOnCooldown(), false, 'a second indicator must stay closed');
+  });
+
+});
+
+// ============================================================
+// 2. Static analysis: the call site the pool tests cannot reach
+// ============================================================
+
+describe('economic/index.ts — getIndicatorData wiring', () => {
   const sourceFile = loadEconomicSourceFile();
-
-  it('does NOT have a single shared wbBreaker', () => {
-    assert.equal(
-      findVariableDeclaration(sourceFile, 'wbBreaker'),
-      undefined,
-      'Single shared wbBreaker must not exist — use getWbBreaker(indicatorCode) instead',
-    );
-  });
-
-  it('has a wbBreakers Map for per-indicator instances', () => {
-    const decl = findVariableDeclaration(sourceFile, 'wbBreakers');
-    assert.ok(decl?.initializer && ts.isNewExpression(decl.initializer), 'wbBreakers declaration must exist');
-    assert.ok(isIdentifierNamed(decl.initializer.expression, 'Map'), 'wbBreakers must be initialized with new Map(...)');
-  });
-
-  it('has a getWbBreaker(indicatorCode) factory function', () => {
-    const fn = findFunctionDeclaration(sourceFile, 'getWbBreaker');
-    assert.ok(fn, 'getWbBreaker function must exist');
-    assert.equal(fn.parameters[0]?.name.getText(sourceFile), 'indicatorCode');
-    assert.ok(
-      collectCallExpressions(fn).some((call) => isIdentifierNamed(call.expression, 'createCircuitBreaker')),
-      'getWbBreaker must create circuit breakers lazily',
-    );
-  });
 
   it('getIndicatorData calls getWbBreaker(indicator).execute, not a shared breaker', () => {
     const fn = findFunctionDeclaration(sourceFile, 'getIndicatorData');
@@ -162,32 +221,6 @@ describe('economic/index.ts — per-indicator World Bank circuit breakers', () =
       executeCall,
       'getIndicatorData must use getWbBreaker(indicator).execute, not a shared wbBreaker',
     );
-  });
-
-  it('per-indicator breaker names include the indicator code', () => {
-    const fn = findFunctionDeclaration(sourceFile, 'getWbBreaker');
-    assert.ok(fn, 'getWbBreaker function must exist');
-
-    const nameInitializer = getCreateCircuitBreakerNameInitializer(fn);
-    assert.ok(
-      ts.isTemplateExpression(nameInitializer),
-      'Breaker name should be a template string scoped to the indicator code',
-    );
-    assert.equal(nameInitializer.head.text, 'WB:');
-    assert.equal(nameInitializer.templateSpans.length, 1);
-    assert.ok(isIdentifierNamed(nameInitializer.templateSpans[0]?.expression, 'indicatorCode'));
-  });
-
-  it('uses a Map-backed factory for per-indicator WB breakers', () => {
-    const wbBreakerSection = src.slice(
-      src.indexOf('wbBreakers'),
-      src.indexOf('wbBreakers') + 800,
-    );
-    assert.match(wbBreakerSection, /new\s+Map/, 'wbBreakers must use a Map');
-    assert.match(wbBreakerSection, /wbBreakers\.has\(indicatorCode\)/,
-      'getWbBreaker must check for an existing breaker before creating one');
-    assert.match(wbBreakerSection, /wbBreakers\.set\(indicatorCode,/,
-      'getWbBreaker must store each breaker by indicatorCode');
   });
 });
 
@@ -321,22 +354,36 @@ describe('getTechReadinessRankings — bootstrap-only data flow', () => {
     assert.equal(wbCalls.length, 0, 'Must NOT call getIndicatorData (WB API) from frontend');
   });
 
-  it('uses a persistent breaker so prior rankings survive bootstrap outages', () => {
-    assert.match(src, /techReadinessBreaker\s*=\s*createCircuitBreaker/,
-      'Tech readiness should use a dedicated circuit breaker');
-    assert.match(src, /name:\s*'WB:tech-readiness'/,
-      'Tech readiness breaker should have a stable persistence key');
-    assert.match(src, /persistCache:\s*true/,
-      'Tech readiness breaker should persist successful payloads across reloads');
-    assert.match(src, /techReadinessBreaker\.execute/,
-      'getTechReadinessRankings should execute through the breaker');
-  });
-
   it('indicator codes exist in TECH_INDICATORS for seed script parity', () => {
     const keys = getTechIndicatorKeys(sourceFile);
     assert.ok(keys.has('IT.NET.USER.ZS'), 'Internet Users indicator must be present');
     assert.ok(keys.has('IT.CEL.SETS.P2'), 'Mobile Subscriptions indicator must be present');
     assert.ok(keys.has('IT.NET.BBND.P2'), 'Fixed Broadband indicator must be present');
     assert.ok(keys.has('GB.XPD.RSDV.GD.ZS'), 'R&D Expenditure indicator must be present');
+  });
+});
+
+// ============================================================
+// 4. TechReadinessPanel: soft-refresh retry UX regressions
+// ============================================================
+
+describe('TechReadinessPanel — empty/error retry UX', () => {
+  const panelSrc = loadTechReadinessPanelSource();
+
+  it('does not set the count badge to 0 before the empty-result soft state', () => {
+    assert.doesNotMatch(
+      panelSrc,
+      /this\.setCount\(result\.length\)/,
+      'empty result must not write count badge 0 before showSoftRefreshing()',
+    );
+    assert.match(panelSrc, /this\.hideCountBadge\(\);[\s\S]*?this\.setSafeContent\(unsafeRawHtml\(`\s*<div class="panel-soft-empty"/);
+    assert.match(panelSrc, /this\.showCountBadge\(ranked\);/);
+  });
+
+  it('resets retry budget only on external refreshes, not scheduled retries', () => {
+    assert.match(panelSrc, /public async refresh\(isRetry = false\): Promise<void>/);
+    assert.match(panelSrc, /if \(!isRetry\) this\.localRetryAttempt = 0;/);
+    assert.match(panelSrc, /void this\.refresh\(true\);/);
+    assert.doesNotMatch(panelSrc, /void this\.refresh\(\);\s*\}, delay\);/);
   });
 });

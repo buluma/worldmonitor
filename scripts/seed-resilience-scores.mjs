@@ -36,33 +36,7 @@ function requireSeedRefreshKey() {
   throw new Error('WORLDMONITOR_SEED_REFRESH_KEY is required for resilience ranking refresh');
 }
 
-// Bumped v13 → v14 in lockstep with server/worldmonitor/resilience/v1/
-// _shared.ts for plan 2026-04-25-004 Phase 2 (Ship 2) — adds the new
-// `financialSystemExposure` dim to the headline score; v13 entries lack
-// the new dim's contribution so caching them post-deploy would surface
-// stale partial-shape payloads.
-// Earlier: v12 → v13 for plan 2026-04-25-004 Phase 1 (tradeSanctions →
-// tradePolicy rename + dropped OFAC component + reweighted formula).
-// Earlier: v11 → v12 for PR 3A §net-imports denominator (plan
-// 2026-04-24-002). Seeder and server MUST agree on the prefix or the
-// seeder writes scores the handler will never read.
-// v17 → v18 for plan 2026-04-26-002 §U8.1 (net-imports denominator
-// extended from sovereignFiscalBuffer to liquidReserveAdequacy). Same
-// reasoning as PR 3A's v11→v12: the `_formula` tag does not detect
-// intra-'d6' scorer changes, so v17 entries would serve gross-imports
-// AE/PA scores until TTL expires post-deploy.
-// v18 → v19 for issue #3971: cyberDigital caps per-snapshot cyber-feed
-// severity weight, so seeder-written scores and rankings must agree with
-// server readers.
-// v19 → v20 for country-resilience audit P1-3: stale observed data now
-// derates confidence coverage and headline eligibility, so seeder-written
-// payloads must not share keys with pre-derate confidence metadata.
-// v20 → v21 for the P1-1 CRI contract fix: pillar member domains now use
-// domain.weight * average dimension coverage inside the active `pc` formula.
-// v20 is reserved for the parallel staleness-derate rollout.
-// v21 → v22 for country-resilience audit round 2 P2-N2/P2-N3: currencyExternal
-// inflation stability and NaN-safe blend math change published score values, so
-// seeder-written scores and rankings must share the server reader namespace.
+// resilience:score:v29: and resilience:ranking:v29 must match server/worldmonitor/resilience/v1/_shared.ts. The handlers write these keys and the seeder reads them.
 // v22 → v23 batches three same-tag `pc` scorer changes: import-HHI stale /
 // missing source years now derate certainty coverage (#4088), observed
 // zero-outage feeds score as observed-quiet in infrastructure (P3-8), and WTO
@@ -72,11 +46,8 @@ function requireSeedRefreshKey() {
 // v23 → v24 for country-resilience audit round 5 R5-2 / PR #4101: governance
 // WGI indicator slot semantics changed under the same `pc` formula tag, so the
 // seeder-written score/ranking namespace must match the server reader bump.
-// v24 → v25 for issue #4009: cyberDigital discovery-day smoothing changes
-// same-tag `pc` score values, so the seeder-written score/ranking namespace
-// must match the server reader bump.
-export const RESILIENCE_SCORE_CACHE_PREFIX = 'resilience:score:v27:';
-export const RESILIENCE_RANKING_CACHE_KEY = 'resilience:ranking:v27';
+export const RESILIENCE_SCORE_CACHE_PREFIX = 'resilience:score:v29:';
+export const RESILIENCE_RANKING_CACHE_KEY = 'resilience:ranking:v29';
 // Must match the server-side RESILIENCE_RANKING_CACHE_TTL_SECONDS. Extended
 // to 12h (2x the cron interval) so a missed/slow cron can't create an
 // EMPTY_ON_DEMAND gap before the next successful rebuild.
@@ -91,6 +62,56 @@ const INTERVAL_SOURCE_VERSION = `resilience-intervals:${INTERVAL_KEY_PREFIX}${IN
 const INTERVAL_META_KEY = 'seed-meta:resilience:intervals';
 export const RESILIENCE_INTERVAL_MIN_RECORD_COUNT = 180;
 export const RESILIENCE_INTERVAL_PROBE_COUNTRY_CODE = 'US';
+
+// #6562 item 3: the laggard warm-up phase previously had no aggregate
+// deadline — batches of 5 countries at a 30s per-request timeout over up to
+// 196 countries is ~20 min worst case, longer than any timeout that fits the
+// 240s Resilience-Scores section cap. This wall budget bounds the phase with
+// headroom below the section timeout so a degraded run stops warming and
+// still publishes the ranking + intervals for what did warm, instead of
+// being SIGTERM'd mid-warm and publishing nothing.
+export const LAGGARD_WARMUP_BUDGET_MS = 150_000;
+export const LAGGARD_WARMUP_BATCH_SIZE = 5;
+
+// Individual warm-up for countries the bulk ranking warm path timed out on.
+// Bounded by LAGGARD_WARMUP_BUDGET_MS so the phase cannot outlive the section
+// timeout; on exhaustion it stops early and the caller still publishes the
+// ranking aggregate and intervals for whatever did warm (#6562 item 3).
+export async function warmLaggardCountries(stillMissing, {
+  apiKey,
+  budgetMs = LAGGARD_WARMUP_BUDGET_MS,
+  batchSize = LAGGARD_WARMUP_BATCH_SIZE,
+  apiBase = API_BASE,
+  fetchImpl = (u, i) => globalThis.fetch(u, i),
+} = {}) {
+  if (stillMissing.length === 0) return 0;
+  if (!apiKey) {
+    console.warn(`[resilience-scores] ${stillMissing.length} laggards found but neither WORLDMONITOR_API_KEY nor WORLDMONITOR_VALID_KEYS is set — skipping individual warmup`);
+    return 0;
+  }
+  console.log(`[resilience-scores] Warming ${stillMissing.length} laggards individually...`);
+  const deadline = Date.now() + budgetMs;
+  let warmed = 0;
+  for (let i = 0; i < stillMissing.length; i += batchSize) {
+    if (Date.now() > deadline) {
+      console.warn(`[resilience-scores] Laggard warmup budget exhausted after ${warmed}/${stillMissing.length} — continuing with partial warmup so the ranking and intervals still publish (#6562 item 3)`);
+      break;
+    }
+    const batch = stillMissing.slice(i, i + batchSize);
+    const results = await Promise.allSettled(batch.map(async (cc) => {
+      const scoreUrl = `${apiBase}/api/resilience/v1/get-resilience-score?countryCode=${cc}`;
+      const resp = await fetchImpl(scoreUrl, {
+        headers: { 'User-Agent': SEED_UA, 'Accept': 'application/json', 'X-WorldMonitor-Key': apiKey },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!resp.ok) throw new Error(`${cc}: HTTP ${resp.status}`);
+      return cc;
+    }));
+    warmed += results.filter((r) => r.status === 'fulfilled').length;
+  }
+  console.log(`[resilience-scores] Laggards warmed: ${warmed}/${stillMissing.length}`);
+  return warmed;
+}
 export { computeIntervals };
 
 function isKnownScoreFormulaTag(value) {
@@ -523,29 +544,9 @@ export async function seedResilienceScores({ runtimeCacheState = fetchRuntimeCac
       if (parseCachedScorePayload(raw, expectedCacheState) == null) stillMissing.push(countryCodes[i]);
     }
 
-    // Warm laggards individually (countries the bulk ranking timed out on)
-    if (stillMissing.length > 0 && !WM_KEY) {
-      console.warn(`[resilience-scores] ${stillMissing.length} laggards found but neither WORLDMONITOR_API_KEY nor WORLDMONITOR_VALID_KEYS is set — skipping individual warmup`);
-    }
-    let laggardsWarmed = 0;
-    if (stillMissing.length > 0 && WM_KEY) {
-      console.log(`[resilience-scores] Warming ${stillMissing.length} laggards individually...`);
-      const BATCH = 5;
-      for (let i = 0; i < stillMissing.length; i += BATCH) {
-        const batch = stillMissing.slice(i, i + BATCH);
-        const results = await Promise.allSettled(batch.map(async (cc) => {
-          const scoreUrl = `${API_BASE}/api/resilience/v1/get-resilience-score?countryCode=${cc}`;
-          const resp = await fetch(scoreUrl, {
-            headers: { 'User-Agent': SEED_UA, 'Accept': 'application/json', 'X-WorldMonitor-Key': WM_KEY },
-            signal: AbortSignal.timeout(30_000),
-          });
-          if (!resp.ok) throw new Error(`${cc}: HTTP ${resp.status}`);
-          return cc;
-        }));
-        laggardsWarmed += results.filter(r => r.status === 'fulfilled').length;
-      }
-      console.log(`[resilience-scores] Laggards warmed: ${laggardsWarmed}/${stillMissing.length}`);
-    }
+    // Warm laggards individually (countries the bulk ranking timed out on).
+    // The phase is bounded by LAGGARD_WARMUP_BUDGET_MS — see #6562 item 3.
+    const laggardsWarmed = await warmLaggardCountries(stillMissing, { apiKey: WM_KEY });
 
     const rankingPresent = await refreshRankingAggregate({ url, token, laggardsWarmed });
     // refresh=1 rotates every per-country score, not only the ranking aggregate.
@@ -627,6 +628,13 @@ export async function seedResilienceScores({ runtimeCacheState = fetchRuntimeCac
 // completes. A failed or timed-out rebuild may have rotated some per-country
 // scores before the request ended, so callers must stop before reading that
 // mixed cohort for a new interval generation.
+function describeFetchError(err) {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause instanceof Error ? err.cause : null;
+  if (!cause) return err.message;
+  return `${err.message}: ${cause.code ? `${cause.code} ` : ''}${cause.message}`;
+}
+
 export async function refreshRankingAggregate({ url, token, laggardsWarmed }) {
   const reason = laggardsWarmed > 0 ? `${laggardsWarmed} laggard warms` : 'scheduled cron refresh';
   const refreshStartedAt = Date.now();
@@ -639,12 +647,31 @@ export async function refreshRankingAggregate({ url, token, laggardsWarmed }) {
     // stale-but-present.
     const rebuildHeaders = { 'User-Agent': SEED_UA, 'Accept': 'application/json' };
     if (WM_REFRESH_KEY) rebuildHeaders['X-WorldMonitor-Key'] = WM_REFRESH_KEY;
-    const rebuildResp = await fetch(`${API_BASE}/api/resilience/v1/get-resilience-ranking?refresh=1`, {
-      headers: rebuildHeaders,
-      signal: AbortSignal.timeout(RANKING_REFRESH_TIMEOUT_MS),
+    const requestRebuild = async () => {
+      const resp = await fetch(`${API_BASE}/api/resilience/v1/get-resilience-ranking?refresh=1`, {
+        headers: rebuildHeaders,
+        signal: AbortSignal.timeout(RANKING_REFRESH_TIMEOUT_MS),
+      });
+      return { status: resp.status, body: resp.ok ? await resp.json() : null };
+    };
+    // A pooled keep-alive socket the far side already closed rejects within
+    // milliseconds (2026-11-05 18:04Z, 28ms), so retry a dropped connection
+    // once. A timeout is not retried: the handler is slow, and a second
+    // attempt would double the wait. Malformed JSON is not a transport fault.
+    const rebuild = await requestRebuild().catch((err) => {
+      if (['TimeoutError', 'AbortError', 'SyntaxError'].includes(err?.name)) throw err;
+      console.warn(`[resilience-scores] Ranking refresh connection failed (${describeFetchError(err)}); retrying once`);
+      return requestRebuild();
     });
-    if (rebuildResp.ok) {
-      const rebuilt = await rebuildResp.json();
+    // A 200 alone does not prove a rebuild. When another refresh holds the
+    // slot (for example the first attempt, still running server-side), the
+    // handler serves the cached ranking, whose fetchedAt predates this run.
+    const rebuiltAtMs = Date.parse(rebuild.body?.fetchedAt ?? '');
+    if (rebuild.body && !(rebuiltAtMs >= refreshStartedAt)) {
+      refreshFailure = `served the ranking from ${rebuild.body.fetchedAt ?? 'an unknown time'}, not a rebuild from this run`;
+      console.warn(`[resilience-scores] Ranking refresh ${refreshFailure}`);
+    } else if (rebuild.body) {
+      const rebuilt = rebuild.body;
       const total = (rebuilt.items?.length ?? 0) + (rebuilt.greyedOut?.length ?? 0);
       refreshCompleted = true;
       const durationMs = Date.now() - refreshStartedAt;
@@ -659,11 +686,11 @@ export async function refreshRankingAggregate({ url, token, laggardsWarmed }) {
         );
       }
     } else {
-      refreshFailure = `HTTP ${rebuildResp.status}`;
-      console.warn(`[resilience-scores] Refresh ranking HTTP ${rebuildResp.status} — ranking cache stays at its prior state until next cron`);
+      refreshFailure = `HTTP ${rebuild.status}`;
+      console.warn(`[resilience-scores] Refresh ranking HTTP ${rebuild.status} — ranking cache stays at its prior state until next cron`);
     }
   } catch (err) {
-    refreshFailure = err instanceof Error ? err.message : String(err);
+    refreshFailure = describeFetchError(err);
     console.warn(
       `[resilience-scores] Failed to refresh ranking cache after ${Date.now() - refreshStartedAt}ms: ${refreshFailure}`,
     );

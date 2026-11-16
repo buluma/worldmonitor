@@ -3,8 +3,9 @@ import { t } from '@/services/i18n';
 import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
 import { getHydratedData } from '@/services/bootstrap';
 import { createLazyClient, getRpcBaseUrl, rpcFetch } from '@/services/rpc-client';
-import { EconomicServiceClient } from '@/generated/client/worldmonitor/economic/v1/service_client';
+
 import type { ListFuelPricesResponse } from '@/generated/client/worldmonitor/economic/v1/service_client';
+import { EconomicServiceClient } from '@/services/generated-rpc-clients';
 
 const getEconomicClient = createLazyClient(() => new EconomicServiceClient(getRpcBaseUrl(), { fetch: rpcFetch }));
 
@@ -78,24 +79,24 @@ export class FuelPricesPanel extends Panel {
     }).join('');
 
     const updatedAt = data.fetchedAt ? new Date(data.fetchedAt).toLocaleDateString() : '';
-    const countLabel = data.countryCount ? ` (${data.countryCount} countries)` : '';
+    const countLabel = data.countryCount ? ` (${data.countryCount} ${t('components.fuelPrices.countries')})` : '';
 
     const html = `
       <div class="gb-wrapper">
-        <div class="gb-scroll">
-          <table class="gb-table">
+        <div class="gb-scroll table-scroll table-scroll-pinned-start" role="group" tabindex="0" aria-labelledby="${this.panelId}Title">
+          <table class="wm-table gb-table">
             <thead><tr>
-              <th class="gb-item-col">Country</th>
-              <th class="gb-cell">Gasoline</th>
-              <th class="gb-cell">Diesel</th>
+              <th scope="col" class="gb-item-col">${t('panels.fuelPricesCountry')}</th>
+              <th scope="col" class="gb-cell">${t('panels.fuelPricesGasoline')}</th>
+              <th scope="col" class="gb-cell">${t('panels.fuelPricesDiesel')}</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
-        ${updatedAt ? `<div class="gb-updated">Updated ${escapeHtml(updatedAt)}${escapeHtml(countLabel)}</div>` : ''}
+        ${updatedAt ? `<div class="gb-updated">${t('components.status.updatedAt', { time: updatedAt })}${countLabel}</div>` : ''}
       </div>
     `;
 
-    this.setSafeContent(unsafeRawHtml(html, 'RPC data escaped at each interpolation point'));
+    this.setSafeContent(unsafeRawHtml(html, 'legacy Panel.setContent() migration'));
   }
 }

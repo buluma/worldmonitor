@@ -11,7 +11,7 @@ export type { ScoreInterval };
 
 import { cachedFetchJson, getCachedJson, runRedisPipeline, setCachedJson } from '../../../_shared/redis';
 import { unwrapEnvelope } from '../../../_shared/seed-envelope';
-import { detectTrend, round } from '../../../_shared/resilience-stats';
+import { detectTrend, getResilienceStressFactor, round } from '../../../_shared/resilience-stats';
 import { isInRankableUniverse } from './_rankable-universe';
 import {
   RESILIENCE_DIMENSION_DOMAINS,
@@ -32,6 +32,11 @@ import {
   type ResilienceSeedReader,
 } from './_dimension-scorers';
 import { buildPillarList } from './_pillar-membership';
+import {
+  createIndicatorTraceCollector,
+  materializeIndicatorTrace,
+  type ResilienceIndicatorTraceSnapshot,
+} from './_indicator-trace';
 
 // Phase 2 T2.1/T2.3: feature flag for the three-pillar response shape.
 // Default is `true` → responses carry `schemaVersion: "2.0"` and a
@@ -44,6 +49,14 @@ import { buildPillarList } from './_pillar-membership';
 // in both modes for widget + map layer + Country Brief consumers.
 export const RESILIENCE_SCHEMA_V2_ENABLED =
   (process.env.RESILIENCE_SCHEMA_V2_ENABLED ?? 'true').toLowerCase() === 'true';
+
+export function toResilienceDataVersion(value: unknown): string {
+  const timestamp = typeof value === 'number' || typeof value === 'string'
+    ? new Date(value)
+    : null;
+  if (!timestamp || !Number.isFinite(timestamp.getTime())) return '';
+  return timestamp.toISOString().slice(0, 10);
+}
 
 // Phase 2 T2.3 activation: feature flag that switches `overallScore`
 // from the 6-domain weighted aggregate (legacy compensatory form) to
@@ -120,6 +133,8 @@ export function isFinancialSystemExposureEnabled(): boolean {
 }
 
 export const RESILIENCE_SCORE_CACHE_TTL_SECONDS = 6 * 60 * 60;
+export const RESILIENCE_SCORE_TRACE_CACHE_TTL_SECONDS = 7 * 60 * 60;
+export const RESILIENCE_SCORE_TRACE_CACHE_PREFIX = 'resilience:score-trace:v1:';
 // Ranking TTL must exceed the cron interval (6h) by enough to tolerate one
 // missed/slow cron tick. With TTL==cron_interval, writing near the end of a
 // run and firing the next cron near the start of the next interval left a
@@ -127,74 +142,7 @@ export const RESILIENCE_SCORE_CACHE_TTL_SECONDS = 6 * 60 * 60;
 // full cron-cycle of headroom — ensureRankingPresent() still refreshes on
 // every cron, so under normal operation the key stays well above TTL=0.
 export const RESILIENCE_RANKING_CACHE_TTL_SECONDS = 12 * 60 * 60;
-// Bumped from v9 to v10 in the pillar-combined activation PR. Provides
-// a clean slate at PR deploy so no pre-PR cache entries (whose payloads
-// lack the `_formula` tag) can leak through on activation day. NOTE:
-// the version bump alone is NOT sufficient to isolate formulas — the
-// flag defaults to off, so v10 is populated with 6-domain entries long
-// before anyone flips RESILIENCE_PILLAR_COMBINE_ENABLED=true. The real
-// cross-formula guard is the in-payload `_formula` marker written by
-// `buildResilienceScore`, read by `ensureResilienceScoreCached` and
-// `getCachedResilienceScores` to reject stale-formula hits at serve
-// time. See the `CacheFormulaTag` comment block.
-// v12 bump for PR 3A §net-imports denominator (plan
-// `docs/plans/2026-04-24-002-fix-resilience-cohort-ranking-structural-
-// audit-plan.md`). The SWF seeder's rawMonths denominator changed
-// from grossImports to grossImports × (1 − reexportShareOfImports)
-// for countries in the re-export share manifest; totalEffectiveMonths
-// values thus shift for those countries. The `_formula` tag (d6/pc)
-// does NOT detect intra-'d6' seed-payload changes, so without a
-// prefix bump v11 entries would serve stale pre-fix scores for the
-// full 6h TTL post-deploy. v12 forces a clean slate — matches the
-// established v9→v10 and v10→v11 patterns for formula-affecting
-// deploys. v12→v13 bump in plan 2026-04-25-004 Phase 1 (Ship 1) for the
-// `tradeSanctions` → `tradePolicy` rename + dropped OFAC component +
-// reweighted trade-policy formula. Without the bump, v12 entries would
-// serve pre-rename economic-domain scores for the full 6h TTL post-deploy.
-// v13→v14 bump in plan 2026-04-25-004 Phase 2 (Ship 2) for the new
-// `financialSystemExposure` dim — adds a 20th dimension contributing to
-// the economic domain, so v13 entries (which lack the new dim's score)
-// would surface incomplete payloads on cache hit.
-// v15→v16 bump for plan 2026-04-26-002 §U4+U5+U6 (combined PR 3+4+5):
-// imputed dims now contribute 0.5× nominal weight to the
-// coverage-weighted mean (U4); IMPUTE entries fall back to "unknown"
-// (50/0.3) instead of "stable-absence" (85/0.6) for non-comprehensive
-// sources (U5); event-counted dims (socialCohesion unrest, borderSecurity
-// UCDP) normalize per-million-population (U6). Every country's score
-// shifts; mixing v15 + v16 cached scores in the same response would
-// create internally-inconsistent rankings.
-// v16→v17 bump for plan 2026-04-26-002 §U7 (PR 6): `headlineEligible`
-// flips from PR 2's "true everywhere" to actual eligibility logic
-// (coverage >= 0.65 AND (population >= 200k OR coverage >= 0.85) AND
-// !lowConfidence). Cached v16 score entries carry headlineEligible:true
-// for every country (the PR 2 default), which would let ineligible
-// countries through the headline ranking filter for the full 6h TTL
-// post-deploy. Bump forces a clean recompute aligned with the new gate.
-// v17→v18 bump for plan 2026-04-26-002 §U8.1 (net-imports denominator
-// extended from sovereignFiscalBuffer to liquidReserveAdequacy). The
-// `_formula` tag is binary 'd6'|'pc' and does NOT detect intra-'d6'
-// scorer-formula changes — without this bump, cached v17 AE/PA scores
-// (gross-imports-denominated) would continue to serve for the full 6h
-// TTL post-deploy, defeating the construct fix this PR delivers. Same
-// pattern as the v11→v12 bump that PR 3A used for the SWF-side fix.
-// v18→v19 bump for issue #3971: cyberDigital now caps the per-snapshot
-// severity-weighted cyber threat count before normalization. The `_formula`
-// tag does not distinguish intra-formula scorer changes, so cached v18
-// scores would otherwise serve pre-cap cyberDigital values until TTL.
-// v19→v20 bump for country-resilience audit P1-3: freshness/staleness
-// now derates confidence coverage and therefore can change lowConfidence
-// plus headlineEligible. Scores are unchanged, but cached v19 score
-// payloads already carry the old confidence/eligibility booleans.
-// v20→v21 bump for the P1-1 CRI contract fix: pillar member domains now
-// use domain.weight * average dimension coverage inside the active `pc`
-// formula. The `_formula` tag remains `pc`, so the prefix bump is required
-// to reject old same-tag pillar scores deterministically at deploy. v20 is
-// reserved for the parallel staleness-derate rollout, so this branch sequences
-// the next same-tag `pc` formula change into v21.
-// v21→v22 bump for country-resilience audit round 2 P2-N2/P2-N3:
-// currencyExternal now scores inflation stability around a low-positive target
-// band instead of treating deflation/0% inflation as perfect, and blend math
-// rejects NaN scores rather than consuming their weights.
+// Must match scripts/seed-resilience-scores.mjs. ensureResilienceScoreCached writes this prefix and the seeder reads it.
 // v22→v23 bump batches three same-tag `pc` scorer changes: import-HHI stale /
 // missing source years now derate certainty coverage (#4088), infrastructure
 // treats an observed outage feed with zero outages as observed-quiet (score 100)
@@ -207,162 +155,14 @@ export const RESILIENCE_RANKING_CACHE_TTL_SECONDS = 12 * 60 * 60;
 // signal instead of relying on drift-prone slot semantics. The formula tag is
 // still `pc`, but governance, state-continuity, pillar, and overall payloads can
 // move, so cached score entries must not survive the methodology change.
-// v24→v25 bump for issue #4009: cyberDigital now groups cyber threats by
-// stable firstSeenAt discovery day and decays old one-day bursts while
-// allowing sustained multi-day pressure to reach the cap. Same `pc` formula
-// tag, but infrastructure, pillar, and overall payloads can move.
-// v25→v26 bump (2026-08-10) for the serialized `education` dimension. The
-// flag-off triple-zero placeholder is excluded from domain, pillar, and
-// confidence denominators, so numeric scores do not move. The score namespace
-// still rotates because old cached score payloads do not contain the new
-// dimension row.
-export const RESILIENCE_SCORE_CACHE_PREFIX = 'resilience:score:v27:';
-// Bumped from v4 to v5 in the pillar-combined activation PR. Provides
-// a clean slate at PR deploy so pre-PR history points (which were
-// written without a formula tag) do not mix with tagged points. NOTE:
-// the version bump alone is NOT sufficient because the flag defaults
-// to off, so v5 accumulates d6-tagged entries during the default-off
-// window. The real cross-formula guard is the `:d6` / `:pc` suffix on
-// each sorted-set member written by `appendHistory` and filtered by
-// `buildResilienceScore` before change30d / trend are computed. Legacy
-// untagged members (from older deploys that happen to survive on v4
-// readers) decode as `d6` — matching the only formula that existed
-// before this PR — so the filter stays correct in either direction.
-// v7 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v11→v12 for
-// PR 3A §net-imports denominator. Pre-bump history points were written
-// against gross-imports-denominated scores; mixing them with net-imports
-// points inside a rolling 30-day window would manufacture false
-// "falling" trends for re-export hubs on day one of deploy (history's
-// moving average mixes v11 scores from day -29 with v12 scores from
-// day 0, exactly the scenario the cache-prefix-bump-propagation-scope
-// skill warns against). Rotation forces a clean 30-day window.
-// v7→v8 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v12→v13 for
-// plan 2026-04-25-004 Phase 1 (Ship 1) — same reasoning: pre-rename
-// economic-domain history points must not mix with post-rename points
-// inside the rolling 30-day window or the trend signal goes haywire.
-// v8→v9 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v13→v14 for
-// plan 2026-04-25-004 Phase 2 (Ship 2) — same reasoning. Adding a new
-// dim shifts every country's overall-score baseline; mixing pre/post
-// points in the 30-day rolling window manufactures false trends.
-// v9→v10 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v14→v15 for
-// plan 2026-04-26-001 §U4 (small-state bias fixes A+B+C). Mixing pre-fix
-// v9 history points with post-fix v15 score points inside the 30-day
-// rolling window would produce false-trend signals across the deploy
-// (memory: cache-prefix-bump-propagation-scope).
-// v10→v11 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v15→v16
-// for plan 2026-04-26-002 §U4+U5+U6 (combined PR 3+4+5). Mixing pre-fix
-// v10 history points with post-fix v16 score points inside the 30-day
-// rolling window would produce false-trend signals — the score-formula
-// shift this PR introduces is one of the largest in the index's history.
-// v11→v12 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v16→v17
-// for plan 2026-04-26-002 §U7 (PR 6). Per the cache-prefix-bump-
-// propagation-scope skill: history points written under v11 reflect
-// the PR-2 "all-true headlineEligible" world; mixing them with v17
-// score points across the rolling 30-day window risks no behavior
-// shift on history (history doesn't carry the field), but rotating
-// in lockstep keeps the bump pattern consistent and the audit trail
-// clean.
-// v12→v13 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v17→v18
-// for plan 2026-04-26-002 §U8.1 (liquidReserveAdequacy net-imports).
-// Pre-bump history points for AE and PA were written against the
-// gross-imports-denominated reserves-in-months value; mixing them
-// inside the rolling 30-day window with post-fix net-imports points
-// would manufacture a false "improving" trend on day one of deploy
-// (history's moving average mixes v12 scores from day -29 with v13
-// scores from day 0). Same skill (cache-prefix-bump-propagation-scope)
-// that motivated the v6→v7 bump for the SWF-side fix in PR 3A.
-// v13→v14 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v18→v19
-// for issue #3971. Mixing uncapped cyberDigital history points with
-// capped points inside the rolling 30-day trend window would manufacture
-// false changes for countries hit by a single-day cyber-feed burst.
-// v15→v16 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v20→v21 for
-// the P1-1 `pc` aggregation fix. Mixing coverage-only pillar history with
-// domain-weighted pillar history would manufacture false 30-day changes.
-// v16→v17 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v21→v22 for
-// the inflation-stability scorer change; otherwise old and new currency
-// external baselines would mix inside the rolling 30-day trend window.
-// v17→v18 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v22→v23 for
-// the batched import-HHI certainty derate, P3-8 outage semantics, and WTO
-// severity scoring changes; otherwise pre-change and post-change scores would
-// mix inside the rolling 30-day trend window and manufacture deploy-day trends.
-// v18→v19 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v23→v24 for
-// the WGI governance indicator-slot semantics change. History points written
-// from pre-change governance/state-continuity scores must not mix with v24
-// scores inside the rolling 30-day trend window.
-// v19→v20 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX v24→v25 for
-// issue #4009 so pre-smoothing cyberDigital history points do not mix with
-// discovery-decayed points inside the rolling 30-day trend window.
-// Education is numerically inert while dark, so retain v20 history continuity.
-// Rotate only when the flag is activated and the published score can move.
-export const RESILIENCE_HISTORY_KEY_PREFIX = 'resilience:history:v21:';
-// v12 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX (v11 → v12)
-// for PR 3A §net-imports denominator. As with the score prefix, the
-// version bump is a belt — the suspenders are cache-only metadata on
-// the ranking payload itself, written via stampRankingCacheTag and
-// read via rankingCacheTagMatches in the ranking handler. `_formula`
-// forces a recompute-and-publish on a cross-formula cache hit; the
-// interval-methodology tag forces the same for rankStable values baked
-// from stale interval-generation semantics. v12→v13 bump
-// in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for plan 2026-04-25-004
-// Phase 1 (Ship 1). v13→v14 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX
-// for plan 2026-04-25-004 Phase 2 (Ship 2).
-// v15→v16 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for
-// plan 2026-04-26-002 §U4+U5+U6 (combined PR 3+4+5).
-// v16→v17 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for
-// plan 2026-04-26-002 §U7 (PR 6). v16 cached rankings include items
-// flagged headlineEligible:true unconditionally (PR 2 default); they
-// would serve as the front-of-house ranking for the full 6h TTL even
-// after the gate logic flips. Bump forces a clean recompute against
-// the v17 score entries, which now carry the real headlineEligible.
-// v17→v18 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for plan
-// 2026-04-26-002 §U8.1. Without it, the v17 ranking payload (with
-// pre-fix AE liquidReserveAdequacy) would continue to serve for the
-// full 12h ranking TTL post-deploy. v18 forces a clean recompute
-// against post-fix v18 score entries.
-// v18→v19 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for issue
-// #3971 so the public ranking recomputes against capped cyberDigital
-// score entries instead of serving the pre-cap aggregate for 12h.
-// v19→v20 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for P1-3
-// so ranking items recompute against staleness-derated confidence
-// coverage instead of serving old overallCoverage/headlineEligible.
-// v20→v21 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for the P1-1
-// `pc` aggregation fix. v20 is reserved for the parallel staleness-derate
-// rollout, so this branch sequences the next same-tag `pc` ranking into v21.
-// v21→v22 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for the
-// inflation-stability scorer change so the public ranking recomputes against
-// v22 score entries instead of serving pre-fix aggregates for 12h.
-// v22→v23 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for the batched
-// import-HHI certainty derate, P3-8 outage semantics, and WTO severity scoring
-// changes so the public ranking recomputes against v23 score entries instead
-// of serving pre-fix aggregates for 12h.
-// v23→v24 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for the PR #4101
-// WGI governance indicator-slot semantics change so the public ranking
-// recomputes against v24 score entries instead of serving pre-change aggregates
-// for 12h.
-// v24→v25 bump in lockstep with RESILIENCE_SCORE_CACHE_PREFIX for issue #4009
-// so the public ranking recomputes against discovery-decayed cyberDigital score
-// entries instead of serving pre-change aggregates for 12h.
-export const RESILIENCE_RANKING_CACHE_KEY = 'resilience:ranking:v27';
+export const RESILIENCE_SCORE_CACHE_PREFIX = 'resilience:score:v29:';
+// appendHistory writes resilience:history:v23: and the trend reader scans the same prefix.
+export const RESILIENCE_HISTORY_KEY_PREFIX = 'resilience:history:v23:';
+// Must match scripts/seed-resilience-scores.mjs and api/health.js. getResilienceRanking writes this key. The seeder and the health probe read it.
+export const RESILIENCE_RANKING_CACHE_KEY = 'resilience:ranking:v29';
 export const RESILIENCE_STATIC_INDEX_KEY = 'resilience:static:index:v1';
-// v2→v3: issue #3967. v2 intervals were still generated by jittering
-// six-domain weights after the pillar-combined score formula activated,
-// so scoreInterval/rankStable could mix pc scores with d6-shaped bands.
-// v3 payloads carry a `_formula` tag and readers reject untagged or
-// stale-formula entries, mirroring score/ranking cache isolation.
-// v4→v5: P1-1 changes the same-tag `pc` pillar scores that intervals
-// perturb around, so old interval bands must not be reused.
-// v5→v6: P2-N2 changes currencyExternal score inputs under the same formula
-// tag, so old sensitivity bands must not be served with v22 scores.
-// v6→v7: the v23 batch changes same-tag `pc` baselines through import-HHI
-// certainty coverage, P3-8 outage semantics, and WTO severity scoring, so old
-// rank-stability bands must not be served with v23 scores.
-// v7→v8: PR #4101 changes same-tag `pc` baselines through governance WGI
-// indicator-slot semantics, so old rank-stability bands must not be served
-// with v24 scores.
-// v8→v9: issue #4009 changes same-tag `pc` cyberDigital baselines through
-// discovery-day smoothing, so old rank-stability bands must not be served with
-// v25 scores.
-export const RESILIENCE_INTERVAL_KEY_PREFIX = 'resilience:intervals:v10:';
+// Must match scripts/_resilience-intervals.mjs and api/seed-health.js. The seeder writes these keys and getResilienceScore reads them.
+export const RESILIENCE_INTERVAL_KEY_PREFIX = 'resilience:intervals:v12:';
 export const RESILIENCE_INTERVAL_METHODOLOGY = 'weight-perturbation-sensitivity-v3';
 export const RESILIENCE_STATIC_META_KEY = 'seed-meta:resilience:static';
 export const RESILIENCE_RANKING_META_KEY = 'seed-meta:resilience:ranking';
@@ -387,8 +187,14 @@ const STALENESS_CONFIDENCE_COVERAGE_FACTOR: Record<string, number> = {
 // themselves protect against the default-off-then-activate path —
 // default-off writes land in the new v10/v5 namespace tagged as 'd6',
 // and only the in-payload tag check forces a rebuild / filter on flip.
-type CacheFormulaTag = 'd6' | 'pc';
+export type CacheFormulaTag = 'd6' | 'pc';
 type EducationCacheState = 'education-on' | 'education-off';
+
+export interface ResilienceConstructVersions {
+  energy: 'legacy' | 'v2';
+  education: 'active' | 'rollback';
+  financialSystemExposure: 'active' | 'rollback';
+}
 
 function currentCacheFormula(): CacheFormulaTag {
   // Mirrors the gating in buildResilienceScore's overallScore branch so
@@ -404,6 +210,51 @@ function currentEducationCacheState(): EducationCacheState {
 
 export function getCurrentEducationCacheState(): EducationCacheState {
   return currentEducationCacheState();
+}
+
+export function getCurrentResilienceConstructVersions(): ResilienceConstructVersions {
+  return {
+    energy: isEnergyV2Enabled() ? 'v2' : 'legacy',
+    education: currentEducationCacheState() === 'education-on' ? 'active' : 'rollback',
+    financialSystemExposure: isFinancialSystemExposureEnabled() ? 'active' : 'rollback',
+  };
+}
+
+function scoreGenerationCacheIdentity(
+  formula: CacheFormulaTag,
+  schemaVersion: '1.0' | '2.0',
+  constructs: ResilienceConstructVersions,
+): string {
+  return [
+    formula,
+    `schema-${schemaVersion}`,
+    `energy-${constructs.energy}`,
+    `education-${constructs.education}`,
+    `financial-system-${constructs.financialSystemExposure}`,
+  ].join(':');
+}
+
+function currentScoreGenerationCacheIdentity(
+  constructs = getCurrentResilienceConstructVersions(),
+): string {
+  return scoreGenerationCacheIdentity(
+    currentCacheFormula(),
+    RESILIENCE_SCHEMA_V2_ENABLED ? '2.0' : '1.0',
+    constructs,
+  );
+}
+
+function cachedConstructIdentityMatches(
+  value: unknown,
+  constructs = getCurrentResilienceConstructVersions(),
+): boolean {
+  if (value === currentScoreGenerationCacheIdentity(constructs)) return true;
+  // Payloads written before construct fingerprints existed are safe only in
+  // the original legacy/rollback state. A flag activation must reject them so
+  // ranking warmup rebuilds every country under one coherent construct.
+  return value === undefined
+    && constructs.energy === 'legacy'
+    && constructs.financialSystemExposure === 'rollback';
 }
 
 function educationCacheStateMatches(
@@ -449,6 +300,10 @@ function normalizeCountryCode(countryCode: string): string {
 
 export function scoreCacheKey(countryCode: string): string {
   return `${RESILIENCE_SCORE_CACHE_PREFIX}${countryCode}`;
+}
+
+export function scoreTraceCacheKey(countryCode: string, generationId: string): string {
+  return `${RESILIENCE_SCORE_TRACE_CACHE_PREFIX}${countryCode}:${generationId}`;
 }
 
 function intervalCacheKey(countryCode: string): string {
@@ -571,6 +426,11 @@ function coverageWeightedMean(dimensions: ResilienceDimension[]): number {
   if (!totalWeight) return 0;
   return weightedSum / totalWeight;
 }
+
+export const __testing__ = {
+  coverageWeightedMean,
+  IMPUTED_DIM_WEIGHT_FACTOR,
+};
 
 export const PENALTY_ALPHA = 0.50;
 
@@ -775,15 +635,31 @@ async function appendHistory(
   ]);
 }
 
-// Pure compute: no caching, no Redis side-effects (except appendHistory, which
-// is part of the score semantics). Kept separate from `ensureResilienceScoreCached`
-// so the ranking warm path can persist with explicit write-verification via a
-// pipeline (see `warmMissingResilienceScores`) rather than trusting
-// `cachedFetchJson`'s log-and-swallow write semantics.
-async function buildResilienceScore(
+export interface ResilienceScoreTraceSidecar {
+  version: 1;
+  generationId: string;
+  cacheIdentity: string;
+  countryCode: string;
+  formula: CacheFormulaTag;
+  dataVersion: string;
+  schemaVersion: '1.0' | '2.0';
+  constructVersions: ResilienceConstructVersions;
+  snapshot: ResilienceIndicatorTraceSnapshot;
+}
+
+export interface ResilienceScoreGeneration {
+  score: GetResilienceScoreResponse;
+  trace: ResilienceScoreTraceSidecar;
+}
+
+// One scorer execution owns both public score and indicator trace. The trace is
+// persisted separately so public score/ranking reads stay small, while its
+// immutable generation ID prevents an independently refreshed drill-down from
+// explaining an older six-hour score.
+async function buildResilienceScoreGeneration(
   normalizedCountryCode: string,
   reader?: ResilienceSeedReader,
-): Promise<GetResilienceScoreResponse> {
+): Promise<ResilienceScoreGeneration> {
   const staticMeta = await getCachedJson(RESILIENCE_STATIC_META_KEY, true) as { fetchedAt?: number } | null;
   const dataVersion = staticMeta?.fetchedAt
     ? new Date(staticMeta.fetchedAt).toISOString().slice(0, 10)
@@ -793,7 +669,9 @@ async function buildResilienceScore(
   // build so the IMF labor seed read for the headline-eligible gate
   // (below) shares the cache with the dimension scorers' reads.
   const seedReader = reader ?? createMemoizedSeedReader();
-  const scoreMap = await scoreAllDimensions(normalizedCountryCode, seedReader);
+  const constructVersions = getCurrentResilienceConstructVersions();
+  const traceCollector = createIndicatorTraceCollector();
+  const scoreMap = await scoreAllDimensions(normalizedCountryCode, seedReader, { trace: traceCollector });
   const dimensions = buildDimensionList(scoreMap);
   const domains = buildDomainList(dimensions);
   const pillars = buildPillarList(domains, true);
@@ -807,7 +685,7 @@ async function buildResilienceScore(
   }
   const baselineScore = round(coverageWeightedMean(baselineDims));
   const stressScore = round(coverageWeightedMean(stressDims));
-  const stressFactor = round(Math.max(0, Math.min(1 - stressScore / 100, 0.5)), 4);
+  const stressFactor = round(getResilienceStressFactor(stressScore), 4);
   // Phase 2 T2.3 activation: `overallScore` is either the legacy
   // 6-domain weighted aggregate (compensatory, `Σ domain.score *
   // domain.weight`) or the pillar-combined penalized form (non-
@@ -875,7 +753,7 @@ async function buildResilienceScore(
     lowConfidence,
   });
 
-  return {
+  const score: GetResilienceScoreResponse = {
     countryCode: normalizedCountryCode,
     overallScore,
     baselineScore,
@@ -892,6 +770,22 @@ async function buildResilienceScore(
     schemaVersion: '2.0',
     headlineEligible,
   };
+  const schemaVersion = RESILIENCE_SCHEMA_V2_ENABLED ? '2.0' : '1.0';
+  const generationId = crypto.randomUUID();
+  return {
+    score,
+    trace: {
+      version: 1,
+      generationId,
+      cacheIdentity: scoreGenerationCacheIdentity(formula, schemaVersion, constructVersions),
+      countryCode: normalizedCountryCode,
+      formula,
+      dataVersion,
+      schemaVersion,
+      constructVersions,
+      snapshot: materializeIndicatorTrace(traceCollector, scoreMap),
+    },
+  };
 }
 
 // The shape we actually store in Redis. Extends the public response type
@@ -901,12 +795,22 @@ async function buildResilienceScore(
 type CachedScorePayload = GetResilienceScoreResponse & {
   _formula?: CacheFormulaTag;
   _educationState?: EducationCacheState;
+  _traceGenerationId?: string;
+  _traceCacheIdentity?: string;
 };
 
 function stripCacheMeta(payload: CachedScorePayload): GetResilienceScoreResponse {
-  const { _formula: _drop, _educationState: _dropEducationState, ...rest } = payload;
+  const {
+    _formula: _drop,
+    _educationState: _dropEducationState,
+    _traceGenerationId: _dropTraceGenerationId,
+    _traceCacheIdentity: _dropTraceCacheIdentity,
+    ...rest
+  } = payload;
   void _drop;
   void _dropEducationState;
+  void _dropTraceGenerationId;
+  void _dropTraceCacheIdentity;
   // Plan 2026-04-26-002 §U3+§U7 — `headlineEligible` backfill semantic
   // changes per cache prefix:
   //
@@ -930,6 +834,74 @@ function stripCacheMeta(payload: CachedScorePayload): GetResilienceScoreResponse
   return rest;
 }
 
+function cachedPayloadForGeneration(generation: ResilienceScoreGeneration): CachedScorePayload {
+  return {
+    ...generation.score,
+    _formula: generation.trace.formula,
+    _educationState: generation.trace.constructVersions.education === 'active'
+      ? 'education-on'
+      : 'education-off',
+    _traceGenerationId: generation.trace.generationId,
+    _traceCacheIdentity: generation.trace.cacheIdentity,
+  };
+}
+
+function isMatchingTraceSidecar(
+  value: unknown,
+  countryCode: string,
+  payload: CachedScorePayload,
+): value is ResilienceScoreTraceSidecar {
+  if (!value || typeof value !== 'object') return false;
+  const trace = value as Partial<ResilienceScoreTraceSidecar>;
+  return trace.version === 1
+    && trace.countryCode === countryCode
+    && trace.generationId === payload._traceGenerationId
+    && trace.cacheIdentity === payload._traceCacheIdentity
+    && trace.snapshot != null;
+}
+
+async function persistGenerationTrace(generation: ResilienceScoreGeneration): Promise<void> {
+  const persisted = await setCachedJson(
+    scoreTraceCacheKey(generation.trace.countryCode, generation.trace.generationId),
+    generation.trace,
+    RESILIENCE_SCORE_TRACE_CACHE_TTL_SECONDS,
+  );
+  if (!persisted) {
+    throw new Error(`Failed to persist resilience trace generation for ${generation.trace.countryCode}`);
+  }
+}
+
+async function persistFullScoreGeneration(generation: ResilienceScoreGeneration): Promise<CachedScorePayload> {
+  await persistGenerationTrace(generation);
+  const cachedPayload = cachedPayloadForGeneration(generation);
+  const scorePersisted = await setCachedJson(
+    scoreCacheKey(generation.trace.countryCode),
+    cachedPayload,
+    RESILIENCE_SCORE_CACHE_TTL_SECONDS,
+  );
+  if (!scorePersisted) {
+    throw new Error(`Failed to persist resilience score generation for ${generation.trace.countryCode}`);
+  }
+  return cachedPayload;
+}
+
+async function toPublicCachedScore(
+  countryCode: string,
+  cached: CachedScorePayload,
+): Promise<GetResilienceScoreResponse> {
+  let payload = stripCacheMeta(cached);
+  const scoreInterval = await readScoreInterval(countryCode);
+  if (scoreInterval) payload = { ...payload, scoreInterval };
+
+  // The cache stores the v2 superset. Gate the public shape at serve time so a
+  // schema rollback takes effect without waiting for the score TTL.
+  if (!RESILIENCE_SCHEMA_V2_ENABLED) {
+    payload.pillars = [];
+    payload.schemaVersion = '1.0';
+  }
+  return payload;
+}
+
 // Exposed helpers so the ranking handler can apply the same
 // stale-formula invalidation to its own cache key. Kept in this module
 // alongside the score versions so the tag convention has one source of
@@ -945,12 +917,15 @@ export function stampRankingCacheTag<T extends object>(
   _formula: CacheFormulaTag;
   _educationState: EducationCacheState;
   _intervalMethodology: typeof RESILIENCE_INTERVAL_METHODOLOGY;
+  _scoreCacheIdentity: string;
 } {
+  const constructs = getCurrentResilienceConstructVersions();
   return {
     ...payload,
     _formula: currentCacheFormula(),
     _educationState: currentEducationCacheState(),
     _intervalMethodology: RESILIENCE_INTERVAL_METHODOLOGY,
+    _scoreCacheIdentity: currentScoreGenerationCacheIdentity(constructs),
   };
 }
 
@@ -959,9 +934,11 @@ export function rankingCacheTagMatches(payload: unknown): boolean {
   const tag = (payload as { _formula?: unknown })._formula;
   const educationState = (payload as { _educationState?: unknown })._educationState;
   const intervalMethodology = (payload as { _intervalMethodology?: unknown })._intervalMethodology;
+  const scoreCacheIdentity = (payload as { _scoreCacheIdentity?: unknown })._scoreCacheIdentity;
   return tag === currentCacheFormula()
     && educationCacheStateMatches(educationState)
-    && intervalMethodology === RESILIENCE_INTERVAL_METHODOLOGY;
+    && intervalMethodology === RESILIENCE_INTERVAL_METHODOLOGY
+    && cachedConstructIdentityMatches(scoreCacheIdentity);
 }
 
 export function isCurrentResilienceIntervalPayload(
@@ -1024,17 +1001,16 @@ export async function ensureResilienceScoreCached(countryCode: string, reader?: 
   }
 
   const current = currentCacheFormula();
-  const currentEducationState = currentEducationCacheState();
+  const currentTraceIdentity = currentScoreGenerationCacheIdentity();
   const cacheKey = scoreCacheKey(normalizedCountryCode);
 
   let cached = await cachedFetchJson<CachedScorePayload>(
     cacheKey,
     RESILIENCE_SCORE_CACHE_TTL_SECONDS,
     async () => {
-      const built = await buildResilienceScore(normalizedCountryCode, reader);
-      // Tag with the formula buildResilienceScore actually used so
-      // downstream readers can reject cross-formula entries.
-      return { ...built, _formula: current, _educationState: currentEducationState };
+      const generation = await buildResilienceScoreGeneration(normalizedCountryCode, reader);
+      await persistGenerationTrace(generation);
+      return cachedPayloadForGeneration(generation);
     },
     300,
   );
@@ -1047,15 +1023,20 @@ export async function ensureResilienceScoreCached(countryCode: string, reader?: 
   // window would keep serving legacy scores. Legacy untagged entries
   // (pre-PR writes that happen to survive the v9→v10 bump via
   // external writers) are treated as stale-formula and rebuilt.
-  if (cached && (cached._formula !== current || !educationCacheStateMatches(cached._educationState))) {
-    const rebuilt = await buildResilienceScore(normalizedCountryCode, reader);
-    cached = { ...rebuilt, _formula: current, _educationState: currentEducationState };
-    await setCachedJson(cacheKey, cached, RESILIENCE_SCORE_CACHE_TTL_SECONDS);
+  if (cached && (
+    cached._formula !== current
+    || !educationCacheStateMatches(cached._educationState)
+    || typeof cached._traceGenerationId !== 'string'
+    || cached._traceGenerationId.length === 0
+    || cached._traceCacheIdentity !== currentTraceIdentity
+  )) {
+    const rebuilt = await buildResilienceScoreGeneration(normalizedCountryCode, reader);
+    cached = await persistFullScoreGeneration(rebuilt);
   }
 
-  let payload: GetResilienceScoreResponse = cached
-    ? stripCacheMeta(cached)
-    : {
+  if (cached) return toPublicCachedScore(normalizedCountryCode, cached);
+
+  return {
         countryCode: normalizedCountryCode,
         overallScore: 0,
         baselineScore: 0,
@@ -1076,21 +1057,40 @@ export async function ensureResilienceScoreCached(countryCode: string, reader?: 
         // false even during the PR-2 "true-by-default" window.
         headlineEligible: false,
       };
+}
 
-  const scoreInterval = await readScoreInterval(normalizedCountryCode);
-  if (scoreInterval) {
-    payload = { ...payload, scoreInterval };
+export async function ensureResilienceScoreGenerationCached(
+  countryCode: string,
+  reader?: ResilienceSeedReader,
+): Promise<{ score: GetResilienceScoreResponse; trace: ResilienceScoreTraceSidecar }> {
+  const normalizedCountryCode = normalizeCountryCode(countryCode);
+  if (!normalizedCountryCode) {
+    throw new Error('A valid country code is required for a resilience score generation');
   }
 
-  // P1 fix: the cache always stores the v2 superset (pillars + schemaVersion='2.0').
-  // When the flag is off, strip pillars and downgrade schemaVersion so consumers
-  // see the v1 shape. Flag flips take effect immediately, no 6h TTL wait.
-  if (!RESILIENCE_SCHEMA_V2_ENABLED) {
-    payload.pillars = [];
-    payload.schemaVersion = '1.0';
+  await ensureResilienceScoreCached(normalizedCountryCode, reader);
+  const cached = await getCachedJson(scoreCacheKey(normalizedCountryCode)) as CachedScorePayload | null;
+  if (cached?._traceGenerationId && cached._traceCacheIdentity) {
+    const trace = await getCachedJson(
+      scoreTraceCacheKey(normalizedCountryCode, cached._traceGenerationId),
+    );
+    if (isMatchingTraceSidecar(trace, normalizedCountryCode, cached)) {
+      return {
+        score: await toPublicCachedScore(normalizedCountryCode, cached),
+        trace,
+      };
+    }
   }
 
-  return payload;
+  // Missing, evicted, or malformed trace references invalidate the complete
+  // generation. Rebuild score and trace together; never attach a fresh trace to
+  // the older cached score.
+  const rebuilt = await buildResilienceScoreGeneration(normalizedCountryCode, reader);
+  const rebuiltCached = await persistFullScoreGeneration(rebuilt);
+  return {
+    score: await toPublicCachedScore(normalizedCountryCode, rebuiltCached),
+    trace: rebuilt.trace,
+  };
 }
 
 export async function listScorableCountries(): Promise<string[]> {
@@ -1124,6 +1124,7 @@ export async function getCachedResilienceScores(countryCodes: string[]): Promise
   const scores = new Map<string, GetResilienceScoreResponse>();
   const current = currentCacheFormula();
   const currentEducationState = currentEducationCacheState();
+  const currentConstructs = getCurrentResilienceConstructVersions();
 
   for (let index = 0; index < normalized.length; index += 1) {
     const countryCode = normalized[index]!;
@@ -1152,7 +1153,8 @@ export async function getCachedResilienceScores(countryCodes: string[]): Promise
       // whole cache-tag strategy is meant to prevent.
       if (
         parsed._formula !== current ||
-        !educationCacheStateMatches(parsed._educationState, currentEducationState)
+        !educationCacheStateMatches(parsed._educationState, currentEducationState) ||
+        !cachedConstructIdentityMatches(parsed._traceCacheIdentity, currentConstructs)
       ) continue;
       const publicPayload = stripCacheMeta(parsed);
       // P1 fix: cached payload is always v2 superset. Gate on serve.
@@ -1282,6 +1284,61 @@ function recordWarmFailure(
   warmed.failedCountryCodes.add(failure.countryCode);
 }
 
+interface RedisPersistResult {
+  result?: 'OK';
+  reason?: string;
+  retried: boolean;
+}
+
+async function persistRedisCommandsWithRetry(
+  commands: Array<Array<string>>,
+  batchSize: number,
+): Promise<RedisPersistResult[]> {
+  const batches: Array<Array<Array<string>>> = [];
+  for (let index = 0; index < commands.length; index += batchSize) {
+    batches.push(commands.slice(index, index + batchSize));
+  }
+  const batchPersisted = (batch: Array<Array<string>>, results: Array<{ result?: unknown }>): boolean =>
+    results.length === batch.length && results.every((result) => result?.result === 'OK');
+  const batchOutcomes = await Promise.all(batches.map((batch) => runRedisPipeline(batch)));
+  const retryBatchIndexes: number[] = [];
+  for (let index = 0; index < batches.length; index += 1) {
+    if (!batchPersisted(batches[index]!, batchOutcomes[index]!)) retryBatchIndexes.push(index);
+  }
+  const retryOutcomesByBatch = new Map<number, Array<{ result?: unknown }>>();
+  if (retryBatchIndexes.length > 0) {
+    const retryOutcomes = await Promise.all(
+      retryBatchIndexes.map((batchIndex) => runRedisPipeline(batches[batchIndex]!)),
+    );
+    for (let index = 0; index < retryBatchIndexes.length; index += 1) {
+      retryOutcomesByBatch.set(retryBatchIndexes[index]!, retryOutcomes[index]!);
+    }
+  }
+
+  const resultReason = (result: { result?: unknown } | undefined, fallback: string): string =>
+    result ? `SET returned ${JSON.stringify(result.result ?? null)}` : fallback;
+  const retriedBatchIndexes = new Set(retryBatchIndexes);
+  const results: RedisPersistResult[] = [];
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+    const batch = batches[batchIndex]!;
+    const initialResults = batchOutcomes[batchIndex]!;
+    const retryResults = retryOutcomesByBatch.get(batchIndex);
+    for (let commandIndex = 0; commandIndex < batch.length; commandIndex += 1) {
+      const initialResult = initialResults.length === batch.length ? initialResults[commandIndex] : undefined;
+      const retryResult = retryResults?.length === batch.length ? retryResults[commandIndex] : undefined;
+      const persisted = initialResult?.result === 'OK' || retryResult?.result === 'OK';
+      results.push({
+        result: persisted ? 'OK' : undefined,
+        reason: persisted
+          ? undefined
+          : resultReason(retryResult, resultReason(initialResult, 'pipeline transport failure')),
+        retried: retriedBatchIndexes.has(batchIndex) && initialResult?.result !== 'OK',
+      });
+    }
+  }
+  return results;
+}
+
 // Warms the resilience score cache for the given countries and returns a map
 // of country-code → score for ONLY the scores whose writes actually landed in
 // Redis. Two subtle requirements:
@@ -1307,7 +1364,7 @@ export async function warmMissingResilienceScores(
   scoreBuilder: (
     countryCode: string,
     reader: ResilienceSeedReader,
-  ) => Promise<GetResilienceScoreResponse> = buildResilienceScore,
+  ) => Promise<GetResilienceScoreResponse | ResilienceScoreGeneration> = buildResilienceScoreGeneration,
 ): Promise<WarmedResilienceScores> {
   const uniqueCodes = [...new Set(countryCodes.map((countryCode) => normalizeCountryCode(countryCode)).filter(Boolean))];
   const warmed = createWarmedResilienceScores();
@@ -1322,14 +1379,26 @@ export async function warmMissingResilienceScores(
   // (#6510).
   const sharedReader = createMemoizedSeedReader(undefined, { retryJoinedSeedMetaNull: true });
   const computed = await Promise.allSettled(
-    uniqueCodes.map(async (cc) => ({ cc, score: await scoreBuilder(cc, sharedReader) })),
+    uniqueCodes.map(async (cc) => ({ cc, built: await scoreBuilder(cc, sharedReader) })),
   );
 
-  const scores: Array<{ cc: string; score: GetResilienceScoreResponse }> = [];
+  const computedScores: Array<{
+    cc: string;
+    score: GetResilienceScoreResponse;
+    generation?: ResilienceScoreGeneration;
+  }> = [];
   for (let i = 0; i < computed.length; i++) {
     const result = computed[i]!;
     if (result.status === 'fulfilled') {
-      scores.push(result.value);
+      const { cc, built } = result.value;
+      const generation = 'score' in built && 'trace' in built
+        ? built as ResilienceScoreGeneration
+        : undefined;
+      computedScores.push({
+        cc,
+        score: generation?.score ?? built as GetResilienceScoreResponse,
+        generation,
+      });
     } else {
       const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
       recordWarmFailure(warmed, {
@@ -1345,6 +1414,39 @@ export async function warmMissingResilienceScores(
     const sample = computeFailures.slice(0, 10).map((f) => `${f.countryCode}(${f.reason})`).join(', ');
     console.warn(`[resilience] warm compute failed for ${computeFailures.length}/${uniqueCodes.length} countries: ${sample}${computeFailures.length > 10 ? '...' : ''}`);
   }
+  if (computedScores.length === 0) return warmed;
+
+  // Persist immutable trace sidecars before publishing score references. The
+  // small batch size keeps each ~90KB trace pipeline under the shared Redis
+  // timeout/body limits. Explicitly injected legacy builders remain supported
+  // for focused warm-path tests and do not claim a trace generation.
+  const tracedScores = computedScores.filter((entry) => entry.generation != null);
+  const traceCommands = tracedScores.map(({ generation }) => [
+    'SET',
+    scoreTraceCacheKey(generation!.trace.countryCode, generation!.trace.generationId),
+    JSON.stringify(generation!.trace),
+    'EX',
+    String(RESILIENCE_SCORE_TRACE_CACHE_TTL_SECONDS),
+  ]);
+  const tracePersistResults = await persistRedisCommandsWithRetry(traceCommands, 4);
+  const tracePersistedByCountry = new Map<string, boolean>();
+  for (let index = 0; index < tracedScores.length; index += 1) {
+    const entry = tracedScores[index]!;
+    const result = tracePersistResults[index];
+    const persisted = result?.result === 'OK';
+    tracePersistedByCountry.set(entry.cc, persisted);
+    if (!persisted) {
+      recordWarmFailure(warmed, {
+        countryCode: entry.cc,
+        stage: 'persist',
+        reason: `trace: ${result?.reason ?? 'SET did not return OK'}`,
+        retried: result?.retried ?? false,
+      });
+    }
+  }
+  const scores = computedScores.filter((entry) => (
+    entry.generation == null || tracePersistedByCountry.get(entry.cc) === true
+  ));
   if (scores.length === 0) return warmed;
 
   // Default `raw=false` so runRedisPipeline applies the env-based key prefix
@@ -1364,66 +1466,22 @@ export async function warmMissingResilienceScores(
   const SET_BATCH = 30;
   const current = currentCacheFormula();
   const currentEducationState = currentEducationCacheState();
-  const allSetCommands = scores.map(({ cc, score }) => [
+  const allSetCommands = scores.map(({ cc, score, generation }) => [
     'SET',
     scoreCacheKey(cc),
     // Stamp the formula tag on the written payload so the bulk-read
     // path in getCachedResilienceScores can filter stale entries after
     // a flag flip. Without this tag, warmed-then-flipped entries would
     // be served as-is until the 6h TTL expired.
-    JSON.stringify({ ...score, _formula: current, _educationState: currentEducationState } satisfies CachedScorePayload),
+    JSON.stringify(
+      generation
+        ? cachedPayloadForGeneration(generation)
+        : { ...score, _formula: current, _educationState: currentEducationState } satisfies CachedScorePayload,
+    ),
     'EX',
     String(RESILIENCE_SCORE_CACHE_TTL_SECONDS),
   ]);
-  // Fire all batches concurrently. Serial awaits would add 7 extra Upstash
-  // round-trips for a 222-country warm (~100-500ms each on Edge). Each batch
-  // is independent, so Promise.all collapses them into a single wall-clock
-  // window bounded by the slowest batch. Failed batches are retried once and
-  // merged per command so an initial OK is not lost if the retry transport
-  // fails.
-  const batches: Array<Array<Array<string>>> = [];
-  for (let i = 0; i < allSetCommands.length; i += SET_BATCH) {
-    batches.push(allSetCommands.slice(i, i + SET_BATCH));
-  }
-
-  const batchPersisted = (batch: Array<Array<string>>, results: Array<{ result?: unknown }>): boolean =>
-    results.length === batch.length && results.every((result) => result?.result === 'OK');
-
-  const batchOutcomes = await Promise.all(batches.map((batch) => runRedisPipeline(batch)));
-  const retryBatchIndexes: number[] = [];
-  for (let b = 0; b < batches.length; b++) {
-    if (!batchPersisted(batches[b]!, batchOutcomes[b]!)) retryBatchIndexes.push(b);
-  }
-  const retryOutcomesByBatch = new Map<number, Array<{ result?: unknown }>>();
-  if (retryBatchIndexes.length > 0) {
-    const retryOutcomes = await Promise.all(retryBatchIndexes.map((batchIndex) => runRedisPipeline(batches[batchIndex]!)));
-    for (let i = 0; i < retryBatchIndexes.length; i++) {
-      retryOutcomesByBatch.set(retryBatchIndexes[i]!, retryOutcomes[i]!);
-    }
-  }
-
-  const resultReason = (result: { result?: unknown } | undefined, fallback: string): string =>
-    result ? `SET returned ${JSON.stringify(result.result ?? null)}` : fallback;
-  const retriedBatchIndexes = new Set(retryBatchIndexes);
-  const persistResults: Array<{ result?: unknown; reason?: string; retried: boolean }> = [];
-  for (let b = 0; b < batches.length; b++) {
-    const batch = batches[b]!;
-    const batchResults = batchOutcomes[b]!;
-    const batchRetried = retriedBatchIndexes.has(b);
-    const retryResults = retryOutcomesByBatch.get(b);
-    for (let j = 0; j < batch.length; j++) {
-      const initialResult = batchResults.length === batch.length ? batchResults[j] : undefined;
-      const retryResult = retryResults?.length === batch.length ? retryResults[j] : undefined;
-      const persisted = initialResult?.result === 'OK' || retryResult?.result === 'OK';
-      persistResults.push({
-        result: persisted ? 'OK' : undefined,
-        reason: persisted
-          ? undefined
-          : resultReason(retryResult, resultReason(initialResult, 'pipeline transport failure')),
-        retried: batchRetried && initialResult?.result !== 'OK',
-      });
-    }
-  }
+  const persistResults = await persistRedisCommandsWithRetry(allSetCommands, SET_BATCH);
 
   let persistFailures = 0;
   for (let i = 0; i < scores.length; i++) {

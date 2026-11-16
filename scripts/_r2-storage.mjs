@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { createHash } from 'node:crypto';
+
 let _S3Client, _PutObjectCommand, _GetObjectCommand;
 async function loadS3SDK() {
   if (!_S3Client) {
@@ -19,9 +21,14 @@ async function loadS3SDK() {
 // settles — no rejection for a try/catch to catch, and no open handle to
 // keep the event loop alive. In a seeder that awaits R2 at the top level
 // (e.g. seed-forecasts reading prior trace state) that drains the loop and
-// Node exits 13 with "Detected unsettled top-level await" — a red cron
+// Node exits 13 with "Detected unsettled top-level await" — a red Railway
 // badge that is neither a graceful skip nor a catchable failure.
 const R2_S3_TIMEOUT_MS = 30_000;
+let _s3TimeoutMs = R2_S3_TIMEOUT_MS;   // overridable in tests
+let _s3ClientOverride = null;          // test hook: inject a fake S3 client
+
+function __setS3ClientForTests(client) { _s3ClientOverride = client; }
+function __setR2S3TimeoutForTests(ms) { _s3TimeoutMs = ms == null ? R2_S3_TIMEOUT_MS : ms; }
 
 // Guarantees the returned promise settles: rejects if `promise` has not
 // settled within `ms`. clearTimeout in finally so a fast-settling call
@@ -35,6 +42,32 @@ function withSettleTimeout(promise, ms, label) {
   });
   return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
 }
+
+const R2_STORAGE_PROFILES = Object.freeze({
+  default: Object.freeze({
+    accountId: ['CLOUDFLARE_R2_ACCOUNT_ID'],
+    endpoint: ['CLOUDFLARE_R2_ENDPOINT'],
+    accessKeyId: ['CLOUDFLARE_R2_ACCESS_KEY_ID'],
+    secretAccessKey: ['CLOUDFLARE_R2_SECRET_ACCESS_KEY'],
+    apiToken: ['CLOUDFLARE_R2_TOKEN', 'CLOUDFLARE_API_TOKEN'],
+    apiBaseUrl: ['CLOUDFLARE_API_BASE_URL'],
+    region: ['CLOUDFLARE_R2_REGION'],
+    forcePathStyle: ['CLOUDFLARE_R2_FORCE_PATH_STYLE'],
+    defaultPrefix: 'seed-data/forecast-traces',
+  }),
+  bootstrap: Object.freeze({
+    accountId: ['R2_ACCOUNT_ID'],
+    endpoint: ['R2_ENDPOINT'],
+    bucket: ['R2_BOOTSTRAP_BUCKET'],
+    accessKeyId: ['R2_BOOTSTRAP_ACCESS_KEY_ID'],
+    secretAccessKey: ['R2_BOOTSTRAP_SECRET_ACCESS_KEY'],
+    apiToken: [],
+    apiBaseUrl: [],
+    region: [],
+    forcePathStyle: [],
+    defaultPrefix: '',
+  }),
+});
 
 function getEnvValue(env, keys) {
   for (const key of keys) {
@@ -63,7 +96,9 @@ function isRetryableApiStatus(status) {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
-function isRetryableR2Error(err) {
+function isRetryableR2Error(err, depth = 0) {
+  if (depth > 4) return false;
+  if (['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENETUNREACH', 'EAI_AGAIN'].includes(err?.code)) return true;
   const status = err?.status;
   if (typeof status === 'number') return isRetryableApiStatus(status);
 
@@ -83,12 +118,11 @@ function isRetryableR2Error(err) {
 
   const httpStatus = err?.$metadata?.httpStatusCode;
   if (typeof httpStatus === 'number') return isRetryableApiStatus(httpStatus);
-  return false;
+  return err?.cause ? isRetryableR2Error(err.cause, depth + 1) : false;
 }
 
 async function withR2Retry(operation, context = {}) {
   const maxAttempts = 3;
-  const delays = [0, 500, 1500];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -99,23 +133,32 @@ async function withR2Retry(operation, context = {}) {
       if (!retryable || lastAttempt) throw err;
 
       console.warn(`  [R2] Retry ${attempt}/${maxAttempts - 1} for ${context.op || 'operation'} key=${context.key || ''}: ${summarizeError(err)}`);
-      await sleep(delays[attempt] || 1500);
+      const ceiling = Math.min(5_000, 500 * 2 ** (attempt - 1));
+      await sleep(Math.round(ceiling * (0.5 + Math.random() * 0.5)));
     }
   }
 }
 
 function resolveR2StorageConfig(env = process.env, options = {}) {
-  const accountId = getEnvValue(env, ['CLOUDFLARE_R2_ACCOUNT_ID']);
-  const bucket = getEnvValue(env, [options.bucketEnv || 'CLOUDFLARE_R2_TRACE_BUCKET', 'CLOUDFLARE_R2_BUCKET']);
-  const accessKeyId = getEnvValue(env, ['CLOUDFLARE_R2_ACCESS_KEY_ID']);
-  const secretAccessKey = getEnvValue(env, ['CLOUDFLARE_R2_SECRET_ACCESS_KEY']);
-  const apiToken = getEnvValue(env, ['CLOUDFLARE_R2_TOKEN', 'CLOUDFLARE_API_TOKEN']);
-  const endpoint = getEnvValue(env, ['CLOUDFLARE_R2_ENDPOINT']) || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : '');
-  const apiBaseUrl = getEnvValue(env, ['CLOUDFLARE_API_BASE_URL']) || 'https://api.cloudflare.com/client/v4';
-  const region = getEnvValue(env, ['CLOUDFLARE_R2_REGION']) || 'auto';
-  const basePrefix = (getEnvValue(env, [options.prefixEnv || 'CLOUDFLARE_R2_TRACE_PREFIX']) || 'seed-data/forecast-traces')
+  const profileName = options.profile || 'default';
+  const profile = R2_STORAGE_PROFILES[profileName];
+  if (!profile) throw new TypeError(`Unknown R2 storage profile: ${profileName}`);
+
+  const isDefaultProfile = profileName === 'default';
+  const accountId = getEnvValue(env, profile.accountId);
+  const bucketKeys = profile.bucket
+    || [options.bucketEnv || 'CLOUDFLARE_R2_TRACE_BUCKET', 'CLOUDFLARE_R2_BUCKET'];
+  const bucket = getEnvValue(env, bucketKeys);
+  const accessKeyId = getEnvValue(env, profile.accessKeyId);
+  const secretAccessKey = getEnvValue(env, profile.secretAccessKey);
+  const apiToken = getEnvValue(env, profile.apiToken);
+  const endpoint = getEnvValue(env, profile.endpoint) || (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : '');
+  const apiBaseUrl = getEnvValue(env, profile.apiBaseUrl) || 'https://api.cloudflare.com/client/v4';
+  const region = getEnvValue(env, profile.region) || 'auto';
+  const prefixKeys = isDefaultProfile ? [options.prefixEnv || 'CLOUDFLARE_R2_TRACE_PREFIX'] : [];
+  const basePrefix = (getEnvValue(env, prefixKeys) || profile.defaultPrefix)
     .replace(/^\/+|\/+$/g, '');
-  const forcePathStyle = parseBoolean(getEnvValue(env, ['CLOUDFLARE_R2_FORCE_PATH_STYLE']), true);
+  const forcePathStyle = parseBoolean(getEnvValue(env, profile.forcePathStyle), true);
 
   if (!bucket || !accountId) {
     console.log(`  [R2] Config: accountId=${accountId ? 'set' : 'MISSING'}, bucket=${bucket ? 'set' : 'MISSING'}`);
@@ -152,6 +195,7 @@ function resolveR2StorageConfig(env = process.env, options = {}) {
 const CLIENT_CACHE = new Map();
 
 async function getR2StorageClient(config) {
+  if (_s3ClientOverride) return _s3ClientOverride;
   const cacheKey = JSON.stringify({
     endpoint: config.endpoint,
     region: config.region,
@@ -167,6 +211,8 @@ async function getR2StorageClient(config) {
       region: config.region,
       credentials: config.credentials,
       forcePathStyle: config.forcePathStyle,
+      // withR2Retry owns the three-attempt budget; do not nest SDK retries.
+      maxAttempts: 1,
       // Bound connection + socket-inactivity so a stalled R2 socket fails
       // fast (→ withR2Retry → caller fallback) rather than hanging the run.
       requestHandler: { requestTimeout: R2_S3_TIMEOUT_MS, connectionTimeout: 10_000 },
@@ -176,8 +222,24 @@ async function getR2StorageClient(config) {
   return client;
 }
 
+// The exact bytes putR2JsonObject writes. A reader that parses an object and
+// serializes it again gets the same bytes, so a recorded digest can be checked.
+function serializeR2JsonBody(payload) {
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+function sha256Hex(body) {
+  return createHash('sha256').update(body, 'utf8').digest('hex');
+}
+
 async function putR2JsonObject(config, key, payload, metadata = {}) {
-  const body = `${JSON.stringify(payload, null, 2)}\n`;
+  return putR2JsonBody(config, key, serializeR2JsonBody(payload), metadata);
+}
+
+// Writes an already-serialized JSON body, for a caller that records the
+// digest before the write. Returns the digest of the bytes written.
+async function putR2JsonBody(config, key, body, metadata = {}) {
+  const sha256 = sha256Hex(body);
 
   if (config.mode === 'api') {
     return withR2Retry(async () => {
@@ -197,7 +259,7 @@ async function putR2JsonObject(config, key, payload, metadata = {}) {
         error.status = resp.status;
         throw error;
       }
-      return { bucket: config.bucket, key, bytes: Buffer.byteLength(body, 'utf8') };
+      return { bucket: config.bucket, key, bytes: Buffer.byteLength(body, 'utf8'), sha256 };
     }, {
       op: 'put',
       key,
@@ -215,11 +277,11 @@ async function putR2JsonObject(config, key, payload, metadata = {}) {
         ContentType: 'application/json; charset=utf-8',
         CacheControl: 'no-store',
         Metadata: metadata,
-      }), { abortSignal: AbortSignal.timeout(R2_S3_TIMEOUT_MS) }),
-      R2_S3_TIMEOUT_MS,
+      }), { abortSignal: AbortSignal.timeout(_s3TimeoutMs) }),
+      _s3TimeoutMs,
       `R2 s3 put ${key}`,
     );
-    return { bucket: config.bucket, key, bytes: Buffer.byteLength(body, 'utf8') };
+    return { bucket: config.bucket, key, bytes: Buffer.byteLength(body, 'utf8'), sha256 };
   }, {
     op: 'put',
     key,
@@ -259,12 +321,12 @@ async function getR2JsonObject(config, key) {
         client.send(new GetObjectCommand({
           Bucket: config.bucket,
           Key: key,
-        }), { abortSignal: AbortSignal.timeout(R2_S3_TIMEOUT_MS) }),
-        R2_S3_TIMEOUT_MS,
+        }), { abortSignal: AbortSignal.timeout(_s3TimeoutMs) }),
+        _s3TimeoutMs,
         `R2 s3 get ${key} send`,
       );
       const body = response.Body
-        ? await withSettleTimeout(response.Body.transformToString(), R2_S3_TIMEOUT_MS, `R2 s3 get ${key} body`)
+        ? await withSettleTimeout(response.Body.transformToString(), _s3TimeoutMs, `R2 s3 get ${key} body`)
         : null;
       if (!body) return null;
       return JSON.parse(body);
@@ -283,4 +345,10 @@ export {
   getR2StorageClient,
   getR2JsonObject,
   putR2JsonObject,
+  putR2JsonBody,
+  serializeR2JsonBody,
+  sha256Hex,
+  withSettleTimeout,
+  __setS3ClientForTests,
+  __setR2S3TimeoutForTests,
 };

@@ -1,4 +1,5 @@
 import sovereignStatus from '../../scripts/shared/sovereign-status.json';
+import { FINSYS_NON_DRS_COUNTRY_CODES } from './resilience-finsys-fixtures.mts';
 
 export type FixtureMap = Record<string, unknown>;
 
@@ -18,12 +19,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:NO': {
     wgi: {
       indicators: {
-        'GOV_WGI_VA.EST': { value: 1.9, year: 2025 },
-        'GOV_WGI_PV.EST': { value: 1.7, year: 2025 },
-        'GOV_WGI_GE.EST': { value: 1.8, year: 2025 },
-        'GOV_WGI_RQ.EST': { value: 1.9, year: 2025 },
-        'GOV_WGI_RL.EST': { value: 1.8, year: 2025 },
-        'GOV_WGI_CC.EST': { value: 1.9, year: 2025 },
+        'VA.EST': { value: 1.9, year: 2025 },
+        'PV.EST': { value: 1.7, year: 2025 },
+        'GE.EST': { value: 1.8, year: 2025 },
+        'RQ.EST': { value: 1.9, year: 2025 },
+        'RL.EST': { value: 1.8, year: 2025 },
+        'CC.EST': { value: 1.9, year: 2025 },
       },
     },
     infrastructure: {
@@ -55,12 +56,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:US': {
     wgi: {
       indicators: {
-        'GOV_WGI_VA.EST': { value: 0.9, year: 2025 },
-        'GOV_WGI_PV.EST': { value: 0.6, year: 2025 },
-        'GOV_WGI_GE.EST': { value: 1.1, year: 2025 },
-        'GOV_WGI_RQ.EST': { value: 1.2, year: 2025 },
-        'GOV_WGI_RL.EST': { value: 1.0, year: 2025 },
-        'GOV_WGI_CC.EST': { value: 1.1, year: 2025 },
+        'VA.EST': { value: 0.9, year: 2025 },
+        'PV.EST': { value: 0.6, year: 2025 },
+        'GE.EST': { value: 1.1, year: 2025 },
+        'RQ.EST': { value: 1.2, year: 2025 },
+        'RL.EST': { value: 1.0, year: 2025 },
+        'CC.EST': { value: 1.1, year: 2025 },
       },
     },
     infrastructure: {
@@ -92,12 +93,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:YE': {
     wgi: {
       indicators: {
-        'GOV_WGI_VA.EST': { value: -1.9, year: 2025 },
-        'GOV_WGI_PV.EST': { value: -2.3, year: 2025 },
-        'GOV_WGI_GE.EST': { value: -1.8, year: 2025 },
-        'GOV_WGI_RQ.EST': { value: -1.7, year: 2025 },
-        'GOV_WGI_RL.EST': { value: -2.0, year: 2025 },
-        'GOV_WGI_CC.EST': { value: -2.1, year: 2025 },
+        'VA.EST': { value: -1.9, year: 2025 },
+        'PV.EST': { value: -2.3, year: 2025 },
+        'GE.EST': { value: -1.8, year: 2025 },
+        'RQ.EST': { value: -1.7, year: 2025 },
+        'RL.EST': { value: -2.0, year: 2025 },
+        'CC.EST': { value: -2.1, year: 2025 },
       },
     },
     infrastructure: {
@@ -334,12 +335,12 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
   'resilience:static:LB': {
     wgi: {
       indicators: {
-        'GOV_WGI_VA.EST': { value: -0.9, year: 2025 },
-        'GOV_WGI_PV.EST': { value: -1.8, year: 2025 },
-        'GOV_WGI_GE.EST': { value: -1.2, year: 2025 },
-        'GOV_WGI_RQ.EST': { value: -1.0, year: 2025 },
-        'GOV_WGI_RL.EST': { value: -1.1, year: 2025 },
-        'GOV_WGI_CC.EST': { value: -1.3, year: 2025 },
+        'VA.EST': { value: -0.9, year: 2025 },
+        'PV.EST': { value: -1.8, year: 2025 },
+        'GE.EST': { value: -1.2, year: 2025 },
+        'RQ.EST': { value: -1.0, year: 2025 },
+        'RL.EST': { value: -1.1, year: 2025 },
+        'CC.EST': { value: -1.3, year: 2025 },
       },
     },
     infrastructure: {
@@ -428,11 +429,13 @@ export const RESILIENCE_FIXTURES: FixtureMap = {
     seededAt: '2026-08-11T08:03:25.357Z',
   },
   'economic:wb-external-debt:v1': {
+    schemaVersion: 2,
     countries: {
       NO: { value: 2, year: 2024 },     // 2% GNI — Norway low external debt → score ~87
       US: { value: 0, year: 2024 },     // HIC, WB IDS doesn't publish — fixture treats as 0 for the test triple
       YE: { value: 14, year: 2023 },    // ~14% GNI — fragile state near worst goalpost → score ~7
     },
+    nonDrsCountryCodes: FINSYS_NON_DRS_COUNTRY_CODES,
     seededAt: '2026-04-25T00:00:00.000Z',
   },
   'economic:bis-lbs:v1': {

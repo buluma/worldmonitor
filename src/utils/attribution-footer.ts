@@ -1,23 +1,44 @@
 import { escapeHtml } from './sanitize';
 
+/**
+ * Attribution footer for energy-atlas panels.
+ *
+ * Design: every public number on the Energy Atlas must expose its grounds —
+ * source type, method, calibration sample size, freshness. This is the
+ * "quantitative rigour" moat called out in §5.6 of the parity-and-surpass
+ * plan. Reusable so future pipeline / storage / shortage panels hit the
+ * same bar automatically.
+ *
+ * Intentionally a string builder (not a Panel helper) so it composes with
+ * the existing panel render pattern (template-literal HTML). Data-
+ * attributes are agent-readable so MCP tools can surface the same provenance.
+ */
+
 export type AttributionSourceType =
-  | 'operator'
-  | 'regulator'
-  | 'ais'
-  | 'satellite'
-  | 'press'
-  | 'classifier'
-  | 'derived';
+  | 'operator'        // operator disclosure / dashboard
+  | 'regulator'       // govt regulator / EIA / IEA / JODI
+  | 'ais'             // AIS-relay / Portwatch DWT calibration
+  | 'satellite'       // Sentinel / Landsat / commercial EO
+  | 'press'           // wire / outlet coverage
+  | 'classifier'      // internal LLM/heuristic classifier
+  | 'derived';        // computed from other sources
 
 export interface AttributionFooterInput {
+  /** Primary source type. */
   sourceType: AttributionSourceType;
+  /** Free-text method summary — short, e.g. "AIS-DWT calibrated" or "GIE AGSI+ daily". */
   method?: string;
+  /** Observation sample size (vessels, stations, rows, etc.). */
   sampleSize?: number;
   sampleLabel?: string;
+  /** ISO8601 timestamp of last data refresh (or a Date). */
   updatedAt?: string | Date | number | null;
+  /** Confidence band 0..1 (shown as "high/medium/low" to end user). */
   confidence?: number;
+  /** Optional URL / credit for the data source (e.g. OWID, GEM). */
   creditName?: string;
   creditUrl?: string;
+  /** Optional classifier version string for evidence-derived badges. */
   classifierVersion?: string;
 }
 
@@ -59,7 +80,9 @@ const SOURCE_LABEL: Record<AttributionSourceType, string> = {
 export function attributionFooterHtml(input: AttributionFooterInput): string {
   const parts: string[] = [];
 
-  parts.push(escapeHtml(SOURCE_LABEL[input.sourceType]));
+  const sourceLabel = SOURCE_LABEL[input.sourceType];
+  parts.push(escapeHtml(sourceLabel));
+
   if (input.method) parts.push(escapeHtml(input.method));
 
   if (typeof input.sampleSize === 'number' && Number.isFinite(input.sampleSize)) {
@@ -92,13 +115,14 @@ export function attributionFooterHtml(input: AttributionFooterInput): string {
   return `<div class="panel-attribution-footer" ${dataAttrs}>${parts.join(' · ')}${creditHtml}</div>`;
 }
 
+/** Inline <style> block to accompany the footer. Include once per panel. */
 export const ATTRIBUTION_FOOTER_CSS = `
 <style>
   .panel-attribution-footer {
     margin-top: 8px;
     padding-top: 6px;
     border-top: 1px solid rgba(255,255,255,0.05);
-    font-size: 9px;
+    font-size: calc(9px * var(--wm-panel-effective-scale, 1));
     color: var(--text-dim, #888);
     text-transform: uppercase;
     letter-spacing: 0.04em;

@@ -12,13 +12,46 @@ interface BaselineEntry {
 
 let db: IDBDatabase | null = null;
 
+// Environments where `indexedDB` is unavailable: Firefox/Brave private mode,
+// some embedded webviews, sandboxed iframes, and any non-browser context that
+// somehow loads this chunk. Pre-fix: `indexedDB.open(...)` threw
+// `ReferenceError: indexedDB is not defined` as an unhandled rejection
+// (Sentry WORLDMONITOR-7479081164). Now: probe up-front and reject with a
+// named error that `withTransaction` recognises and degrades gracefully.
+//
+// The browser can also refuse the open itself: Chrome rejects with
+// `UnknownError: The user denied permission to access the database.` when site
+// storage is blocked, and sandboxed origins throw `SecurityError`
+// synchronously (Sentry WORLDMONITOR-1D1). Those DOMExceptions mean the same
+// thing, so they surface as IndexedDBUnavailableError with the browser error
+// kept as `cause`.
+export class IndexedDBUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super('IndexedDB is not available in this environment', cause === undefined ? undefined : { cause });
+    this.name = 'IndexedDBUnavailableError';
+  }
+}
+
+function asUnavailable(err: unknown): unknown {
+  return err instanceof DOMException ? new IndexedDBUnavailableError(err) : err;
+}
+
 export async function initDB(): Promise<IDBDatabase> {
   if (db) return db;
+  if (typeof indexedDB === 'undefined') {
+    throw new IndexedDBUnavailableError();
+  }
 
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    let request: IDBOpenDBRequest;
+    try {
+      request = indexedDB.open(DB_NAME, DB_VERSION);
+    } catch (err) {
+      reject(asUnavailable(err));
+      return;
+    }
 
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(asUnavailable(request.error));
 
     request.onsuccess = () => {
       db = request.result;
@@ -39,6 +72,34 @@ export async function initDB(): Promise<IDBDatabase> {
       }
     };
   });
+}
+
+/**
+ * Whether the database can be opened right now. False only when the browser
+ * has no IndexedDB or refuses it; other failures still reject. A failed open
+ * is not cached, so a later call retries.
+ */
+export async function isStorageAvailable(): Promise<boolean> {
+  try {
+    await initDB();
+    return true;
+  } catch (err) {
+    if (err instanceof IndexedDBUnavailableError) return false;
+    throw err;
+  }
+}
+
+/**
+ * Open the database during dashboard boot. The database only holds baselines
+ * and playback snapshots, so a browser that refuses storage must not stop the
+ * app: report false and let reads degrade. Other failures still reject.
+ */
+export async function openStorageForBoot(): Promise<boolean> {
+  const available = await isStorageAvailable();
+  if (!available) {
+    console.warn('[Storage] IndexedDB unavailable; baselines and snapshots are disabled');
+  }
+  return available;
 }
 
 async function withTransaction<T>(
@@ -68,6 +129,13 @@ async function withTransaction<T>(
         if (attempt === 0) continue;
         console.warn('[Storage] IndexedDB connection closing after retry');
         if (mode === 'readwrite') throw new DOMException('IndexedDB write failed — connection closing', 'InvalidStateError');
+        return undefined as T;
+      }
+      // Environments without IndexedDB (private mode, some webviews) hit
+      // this branch. Degrade silently for reads; throw a typed error on
+      // writes so callers can opt into different handling.
+      if (err instanceof IndexedDBUnavailableError) {
+        if (mode === 'readwrite') throw err;
         return undefined as T;
       }
       throw err;
@@ -160,12 +228,6 @@ export function calculateDeviation(current: number, baseline: BaselineEntry): {
   };
 }
 
-export async function getAllBaselines(): Promise<BaselineEntry[]> {
-  return (await withTransaction<BaselineEntry[]>(
-    'baselines', 'readonly', (store) => store.getAll(), true,
-  )) || [];
-}
-
 // Snapshot types and functions
 export interface DashboardSnapshot {
   timestamp: number;
@@ -214,7 +276,10 @@ export async function cleanOldSnapshots(): Promise<void> {
       const request = store.index('by_time').openCursor(IDBKeyRange.upperBound(cutoff));
       request.onsuccess = () => {
         const cursor = request.result;
-        if (cursor) { cursor.delete(); cursor.continue(); }
+        if (!cursor) return;
+        // iOS Safari kills in-flight IDB transactions when the tab backgrounds;
+        // cleanup is idempotent so swallow TransactionInactiveError and resume next run.
+        try { cursor.delete(); cursor.continue(); } catch { /* tx died mid-cleanup */ }
       };
       void tx;
     },

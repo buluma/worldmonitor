@@ -1,4 +1,5 @@
 import { getConfiguredWebApiBaseUrl } from '@/services/runtime';
+import { createRequestTimeoutSignal } from './timeout-signal';
 
 export function getRpcBaseUrl(): string {
   // Desktop keeps a relative base so installRuntimeFetchPatch() can resolve the
@@ -7,7 +8,11 @@ export function getRpcBaseUrl(): string {
 }
 
 export function rpcFetch(...args: Parameters<typeof fetch>): ReturnType<typeof fetch> {
-  return globalThis.fetch(...args);
+  const [input, init] = args;
+  return globalThis.fetch(input, {
+    ...init,
+    signal: createRequestTimeoutSignal(input, init, 120_000),
+  });
 }
 
 export function createLazyClient<T>(factory: () => T): () => T {
@@ -16,4 +21,10 @@ export function createLazyClient<T>(factory: () => T): () => T {
     client ??= factory();
     return client;
   };
+}
+
+export function getRpcErrorStatusCode(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return typeof statusCode === 'number' ? statusCode : undefined;
 }

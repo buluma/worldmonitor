@@ -1,110 +1,109 @@
-import { createCircuitBreaker } from '@/utils';
-import { getRpcBaseUrl } from '@/services/rpc-client';
-import type { CountryPopulation, PopulationExposure } from '@/types';
-import { DisplacementServiceClient } from '@/generated/client/worldmonitor/displacement/v1/service_client';
-import type { GetPopulationExposureResponse } from '@/generated/client/worldmonitor/displacement/v1/service_client';
+import { exposureLocationKey } from '../../scripts/shared/exposure-location-key.mjs';
+import { resolveCountryCode } from '../../shared/country-code-resolve';
+import type { UcdpExposureEvent } from '@/services/conflict';
+import { ucdpExposureName } from '../../shared/ucdp-display';
+import type { ExposureCoverage, PopulationExposure } from '@/types';
+import {
+  estimateExposure,
+  getRadiusForEventType,
+} from '../../shared/analysis-population-exposure';
 
-const client = new DisplacementServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
-
-const countriesBreaker = createCircuitBreaker<GetPopulationExposureResponse>({ name: 'WorldPop Countries', cacheTtlMs: 30 * 60 * 1000, persistCache: true });
-
-const exposureBreaker = createCircuitBreaker<ExposureResponse | null>({
-  name: 'PopExposure',
-  cacheTtlMs: 6 * 60 * 60 * 1000,
-  persistCache: true,
-  maxCacheEntries: 64,
-});
-
-export async function fetchCountryPopulations(): Promise<CountryPopulation[]> {
-  const result = await countriesBreaker.execute(async () => {
-    return client.getPopulationExposure({ mode: 'countries', lat: 0, lon: 0, radius: 0 });
-  }, { success: false, countries: [] });
-
-  return result.countries;
-}
-
-interface ExposureResponse {
-  exposedPopulation: number;
-  exposureRadiusKm: number;
-  nearestCountry: string;
-  densityPerKm2: number;
-}
-
-export async function fetchExposure(lat: number, lon: number, radiusKm: number): Promise<ExposureResponse | null> {
-  const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)},${radiusKm}`;
-  return exposureBreaker.execute(
-    async () => {
-      const result = await client.getPopulationExposure({ mode: 'exposure', lat, lon, radius: radiusKm });
-      return result.exposure ?? null;
-    },
-    null,
-    { cacheKey },
-  );
-}
-
-interface EventForExposure {
+export interface EventForExposure {
   id: string;
   name: string;
+  /** Present for UCDP inputs, including an empty place name. */
+  locationName?: string;
   type: string;
+  country: string;
+  hasPreciseLocation?: boolean;
   lat: number;
   lon: number;
+  eventCount?: number;
 }
 
-function getRadiusForEventType(type: string): number {
-  switch (type) {
-    case 'conflict':
-    case 'battle':
-    case 'state-based':
-    case 'non-state':
-    case 'one-sided':
-      return 50;
-    case 'earthquake':
-      return 100;
-    case 'flood':
-      return 100;
-    case 'fire':
-    case 'wildfire':
-      return 30;
-    default:
-      return 50;
-  }
-}
-
-export async function enrichEventsWithExposure(
+export function enrichEventsWithExposure(
   events: EventForExposure[],
-): Promise<PopulationExposure[]> {
-  const MAX_CONCURRENT = 10;
-  const results: PopulationExposure[] = [];
-
-  for (let i = 0; i < events.length; i += MAX_CONCURRENT) {
-    const batch = events.slice(i, i + MAX_CONCURRENT);
-    const batchResults = await Promise.allSettled(
-      batch.map(async (event) => {
-        const radius = getRadiusForEventType(event.type);
-        const exposure = await fetchExposure(event.lat, event.lon, radius);
-        if (!exposure) return null;
-        return {
-          eventId: event.id,
-          eventName: event.name,
-          eventType: event.type,
-          lat: event.lat,
-          lon: event.lon,
-          exposedPopulation: exposure.exposedPopulation,
-          exposureRadiusKm: radius,
-        } as PopulationExposure;
-      })
-    );
-
-    for (const r of batchResults) {
-      if (r.status === 'fulfilled' && r.value) results.push(r.value);
+  limit = events.length,
+  allowUnknownPrecision = false,
+): { exposures: PopulationExposure[]; coverage: ExposureCoverage } {
+  const byLocation = new Map<string, PopulationExposure>();
+  const coverage: ExposureCoverage = { totalEvents: 0, withoutPreciseLocation: 0, withoutEstimate: 0, atOtherPlaces: 0 };
+  for (const event of events) {
+    const eventCount = event.eventCount ?? 1;
+    coverage.totalEvents += eventCount;
+    const locationPending = allowUnknownPrecision && event.hasPreciseLocation === undefined;
+    if (event.hasPreciseLocation !== true && !locationPending) {
+      coverage.withoutPreciseLocation += eventCount;
+      continue;
     }
-  }
+    const exposure = estimateExposure(event.lat, event.lon, event.country, getRadiusForEventType(event.type));
+    if (!exposure) {
+      coverage.withoutEstimate += eventCount;
+      continue;
+    }
 
-  return results.sort((a, b) => b.exposedPopulation - a.exposedPopulation);
+    const key = exposureLocationKey(event.lat, event.lon);
+    const existing = byLocation.get(key);
+    if (existing) {
+      existing.eventCount += eventCount;
+      if (locationPending) existing.locationPending = true;
+      continue;
+    }
+    if (byLocation.size >= limit) {
+      coverage.atOtherPlaces += eventCount;
+      continue;
+    }
+
+    byLocation.set(key, {
+      eventId: event.id,
+      eventName: event.locationName !== undefined
+        ? ucdpExposureName(event.locationName, event.country, exposure.country)
+        : event.name,
+      eventType: event.type,
+      lat: event.lat,
+      lon: event.lon,
+      exposedPopulation: exposure.exposedPopulation,
+      exposureRadiusKm: exposure.exposureRadiusKm,
+      eventCount,
+      ...(locationPending ? { locationPending: true } : {}),
+    });
+  }
+  return { exposures: [...byLocation.values()], coverage };
+}
+
+export function addExposureCoverage(a: ExposureCoverage, b: ExposureCoverage): ExposureCoverage {
+  return {
+    totalEvents: a.totalEvents + b.totalEvents,
+    withoutPreciseLocation: a.withoutPreciseLocation + b.withoutPreciseLocation,
+    withoutEstimate: a.withoutEstimate + b.withoutEstimate,
+    atOtherPlaces: a.atOtherPlaces + b.atOtherPlaces,
+  };
 }
 
 export function formatPopulation(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
+}
+
+/** Use the estimate's corrected point country (not an upstream historical label). */
+export function exposureEventCountry(event: EventForExposure): string | null {
+  const estimate = event.hasPreciseLocation !== false
+    ? estimateExposure(event.lat, event.lon, event.country, getRadiusForEventType(event.type))
+    : null;
+  return resolveCountryCode(estimate?.country ?? event.country);
+}
+
+export function ucdpExposureEvents(events: UcdpExposureEvent[]): EventForExposure[] {
+  return events.map(e => ({
+    id: e.id, lat: e.latitude, lon: e.longitude, type: e.type_of_violence,
+    name: e.locationName ?? '', locationName: e.locationName ?? '',
+    country: e.country, hasPreciseLocation: e.hasPreciseLocation, eventCount: e.eventCount,
+  }));
+}
+
+export interface ExposureSources {
+  unrest: EventForExposure[];
+  ucdp: EventForExposure[];
+  ucdpIsProjection: boolean;
 }

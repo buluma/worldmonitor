@@ -3,15 +3,23 @@ syntax = "proto3";
 package worldmonitor.health.v1;
 
 import "sebuf/http/annotations.proto";
-import "worldmonitor/health/v1/air_quality_alert.proto";
 
-// ListAirQualityAlertsRequest has no filters -- returns the full cached alert set.
-message ListAirQualityAlertsRequest {
+message AirQualityAlert {
+  string city = 1;
+  string country_code = 2;
+  double lat = 3;
+  double lng = 4;
+  double pm25 = 5;
+  int32 aqi = 6;
+  string risk_level = 7;
+  string pollutant = 8;
+  int64 measured_at = 9 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  string source = 10;
 }
 
-// ListAirQualityAlertsResponse contains cached city-level air quality alerts.
+message ListAirQualityAlertsRequest {}
+
 message ListAirQualityAlertsResponse {
   repeated AirQualityAlert alerts = 1;
-  // Cache fetch time as Unix epoch milliseconds.
   int64 fetched_at = 2 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
 }

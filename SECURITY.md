@@ -16,7 +16,9 @@ If you discover a security vulnerability in World Monitor, please report it resp
 
 1. **GitHub Private Vulnerability Reporting**: Use [GitHub's private vulnerability reporting](https://github.com/koala73/worldmonitor/security/advisories/new) to submit your report directly through the repository.
 
-2. **Direct Contact**: Alternatively, reach out to the repository owner [@koala73](https://github.com/koala73) directly through GitHub.
+2. **Email**: Send your report to the security contact at [elie@worldmonitor.app](mailto:elie@worldmonitor.app). This is the same address published as `Contact:` in [security.txt](https://www.worldmonitor.app/.well-known/security.txt).
+
+3. **Direct Contact**: Alternatively, reach out to the repository owner [@koala73](https://github.com/koala73) directly through GitHub.
 
 ### What to Include
 
@@ -48,11 +50,12 @@ World Monitor is a client-side intelligence dashboard that aggregates publicly a
 - **Desktop runtime**: API keys are stored in the OS keychain (macOS Keychain / Windows Credential Manager) via a consolidated vault entry, never on disk in plaintext
 - No API keys should ever be committed to the repository
 - Environment variables (`.env.local`) are gitignored
-- The RSS proxy uses domain allowlisting to prevent SSRF
+- The RSS proxy uses domain allowlisting to prevent SSRF. Both the Vercel Edge proxy and the Railway relay re-check the RSS allowlist on every redirect hop.
+- The Pro-gated MCP proxy accepts only HTTPS targets, resolves and rejects private/reserved A and AAAA answers immediately before each outbound request, and strips cloud-metadata headers. Vercel Edge `fetch` cannot pin its socket to the vetted address, so a narrow resolve-versus-connect DNS-rebinding window remains an accepted residual; closing it requires a Node-runtime/socket-pinning design (tracked in draft advisory [GHSA-887j-p88r-qmm9](https://github.com/koala73/worldmonitor/security/advisories/GHSA-887j-p88r-qmm9), access restricted until publication).
 
 ### Edge Functions & Sebuf Handlers
 
-- All 17 domain APIs are served through Sebuf (a Proto-first RPC framework) via Vercel Edge Functions
+- Domain APIs are served through Sebuf (a Proto-first RPC framework) via Vercel Edge Functions
 - Edge functions and handlers should validate/sanitize all input
 - CORS headers are configured per-function
 - Rate limiting and circuit breakers protect against abuse

@@ -5,6 +5,10 @@
 // return shapes). Runtime parity between this file and
 // scripts/_seed-envelope-source.mjs / api/_seed-envelope.js is the contract.
 // TS-only narrowing/casting is tolerated, but the runtime effect must match.
+//
+// The JS source ↔ edge copy are diffed programmatically by
+// scripts/verify-seed-envelope-parity.mjs. The TS copy is reviewed manually
+// and validated by `tsc --noEmit`.
 
 export type SeedState = 'OK' | 'OK_ZERO' | 'ERROR';
 
@@ -17,6 +21,11 @@ export interface SeedMeta {
   failedDatasets?: string[];
   errorReason?: string;
   groupId?: string;
+  // Content-age trio (opt-in via runSeed `contentMeta` + `maxContentAgeMin`).
+  // Presence of `maxContentAgeMin` is the opt-in signal. `newestItemAt` /
+  // `oldestItemAt` may be explicit `null` when contentMeta returned null
+  // (no usable item timestamps), which the health classifier reads as
+  // STALE_CONTENT. See docs/plans/2026-05-04-001-feat-health-readiness-probe-content-age-plan.md
   newestItemAt?: number | null;
   oldestItemAt?: number | null;
   maxContentAgeMin?: number;
@@ -70,11 +79,7 @@ export function buildEnvelope(input: {
   maxContentAgeMin?: number;
   data: unknown;
 }): SeedEnvelope {
-  const {
-    fetchedAt, recordCount, sourceVersion, schemaVersion, state,
-    failedDatasets, errorReason, groupId, newestItemAt, oldestItemAt,
-    maxContentAgeMin, data,
-  } = input;
+  const { fetchedAt, recordCount, sourceVersion, schemaVersion, state, failedDatasets, errorReason, groupId, newestItemAt, oldestItemAt, maxContentAgeMin, data } = input;
   const _seed: SeedMeta = { fetchedAt, recordCount, sourceVersion, schemaVersion, state };
   if (failedDatasets != null) _seed.failedDatasets = failedDatasets;
   if (errorReason != null) _seed.errorReason = errorReason;

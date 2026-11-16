@@ -1,15 +1,27 @@
+import { createTimeoutSignal, isTimeoutOrAbortError } from '@/services/timeout-signal';
 import type { CustomWidgetSpec } from '@/services/widget-store';
-import { getWidgetAgentKey, getProWidgetKey } from '@/services/widget-store';
+import { getBrowserTesterKey, getWidgetAgentKey, getProWidgetKey } from '@/services/widget-store';
+import { getClerkToken } from '@/services/clerk';
 import { t } from '@/services/i18n';
 import { escapeHtml } from '@/utils/sanitize';
 import { widgetAgentHealthUrl, widgetAgentUrl } from '@/utils/proxy';
 import { wrapWidgetHtml, wrapProWidgetHtml } from '@/utils/widget-sanitizer';
 import { track } from '@/services/analytics';
+import { createFocusTrap, type FocusTrap } from '@/utils/focus-trap';
+import { reportEntitlementDesync } from '@/services/entitlement-desync-telemetry';
+import { classifyPremiumDenial, type ClientEntitlementBelief } from '@/services/premium-denial';
+import { readClientEntitlementBelief } from '@/services/panel-gating';
+import { getAuthState } from '@/services/auth-state';
+import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import { declareOverlay } from '@/utils/open-modal';
+
 
 interface WidgetChatOptions {
   mode: 'create' | 'modify';
   tier?: 'basic' | 'pro';
   existingSpec?: CustomWidgetSpec;
+  /** Pre-fill the chat input with this text. Used when opening from the analyst action chip. */
+  initialMessage?: string;
   onComplete: (spec: CustomWidgetSpec) => void;
 }
 
@@ -38,9 +50,67 @@ const PRO_EXAMPLE_PROMPT_KEYS = [
 ] as const;
 
 let overlay: HTMLElement | null = null;
+let focusTrap: FocusTrap | null = null;
 let abortController: AbortController | null = null;
 let clientTimeout: ReturnType<typeof setTimeout> | null = null;
+let onlineHandler: (() => void) | null = null;
+let preflightRetry: ReturnType<typeof setTimeout> | null = null;
+/** Clerk token recovery emits no browser event, so an online browser re-checks on a timer. */
+const PREFLIGHT_RETRY_MS = 15_000;
 
+interface BuiltAuthHeaders {
+  headers: Record<string, string>;
+  /** True when the request is authenticated with a tester key (wm-widget-key /
+   *  wm-pro-key / wm-worldmonitor-key) rather than a Clerk JWT. Used to pick
+   *  the right 403 error message — the "Update wm-pro-key" hint is misleading
+   *  for normal paying users who have no tester key. */
+  usedTesterKey: boolean;
+  /** True when a signed-in user has no Clerk token — Clerk could not be
+   *  reached. The server would answer the credential-less request with the
+   *  "Pro subscription required" 403, so the request must not be sent. */
+  sessionUnavailable: boolean;
+}
+
+function reportWidgetEntitlementDesync(
+  status: number,
+  payload: WidgetAgentHealth | null,
+  usedTesterKey: boolean,
+  requestBelief: ClientEntitlementBelief,
+  requestUserId: string | null,
+): void {
+  if (usedTesterKey || (getAuthState().user?.id ?? null) !== requestUserId) return;
+  const verdict = classifyPremiumDenial({
+    status,
+    errorCode: payload?.error ?? null,
+    belief: requestBelief,
+  });
+  if (verdict === 'entitlement_desync') reportEntitlementDesync('widget-chat');
+}
+
+async function buildWidgetAuthHeaders(isPro: boolean): Promise<BuiltAuthHeaders> {
+  const testerKey = getBrowserTesterKey();
+  const widgetKey = getWidgetAgentKey();
+  const proKey = getProWidgetKey();
+  if (testerKey || widgetKey || proKey) {
+    const headers: Record<string, string> = {};
+    if (testerKey) headers['X-WorldMonitor-Key'] = testerKey;
+    if (widgetKey) headers['X-Widget-Key'] = widgetKey;
+    if (isPro && proKey) headers['X-Pro-Key'] = proKey;
+    return { headers, usedTesterKey: true, sessionUnavailable: false };
+  }
+  const token = await getClerkToken();
+  if (token) return { headers: { 'Authorization': `Bearer ${token}` }, usedTesterKey: false, sessionUnavailable: false };
+  return { headers: {}, usedTesterKey: false, sessionUnavailable: getAuthState().user !== null };
+}
+
+/** Copy for a request that cannot reach an entitlement verdict, or null. */
+function connectivityProblem(auth?: BuiltAuthHeaders): string | null {
+  if (!navigator.onLine) return t('connectivity.offlineUnavailable');
+  if (auth?.sessionUnavailable) return t('widgets.preflightUnavailable');
+  return null;
+}
+
+/** Open the widget composer; each submission owns its cancellation and deadline. */
 export function openWidgetChatModal(options: WidgetChatOptions): void {
   closeWidgetChatModal();
   track('widget-ai-open', { panelId: options.existingSpec?.id });
@@ -50,6 +120,10 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
 
   overlay = document.createElement('div');
   overlay.className = 'modal-overlay active';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  declareOverlay(overlay, { reload: 'blocking' });
+  overlay.setAttribute('aria-label', options.mode === 'modify' ? t('widgets.modifyTitle') : t('widgets.chatTitle'));
 
   const modal = document.createElement('div');
   modal.className = 'modal widget-chat-modal';
@@ -58,7 +132,7 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
   const titleText = isModify ? t('widgets.modifyTitle') : t('widgets.chatTitle');
   const proBadgeHtml = isPro ? `<span class="widget-pro-badge">${escapeHtml(t('widgets.proBadge'))}</span>` : '';
 
-  modal.innerHTML = `
+  setTrustedHtml(modal, trustedHtml(`
     <div class="modal-header">
       <span class="modal-title">${escapeHtml(titleText)}${proBadgeHtml}</span>
       <button class="modal-close" aria-label="${escapeHtml(t('common.close'))}">\u2715</button>
@@ -84,7 +158,7 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
       <div class="widget-chat-footer-status"></div>
       <button class="widget-chat-action-btn" disabled>${isModify ? t('widgets.applyChanges') : t('widgets.addToDashboard')}</button>
     </div>
-  `;
+  `, "legacy direct innerHTML migration"));
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
@@ -103,7 +177,11 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
   let currentSessionHtml: string | null = options.existingSpec?.html ?? null;
   let requestInFlight = false;
   let preflightReady = false;
+  let preflightFailures = 0;
+  let preflightGen = 0;
   let pendingSaveSpec: CustomWidgetSpec | null = null;
+
+  if (options.initialMessage) inputEl.value = options.initialMessage;
 
   if (isModify && options.existingSpec) {
     for (const msg of sessionHistory) {
@@ -123,11 +201,18 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
   syncComposerState();
   void runPreflight();
 
+  onlineHandler = () => {
+    if (!preflightReady && !requestInFlight) void runPreflight();
+  };
+  window.addEventListener('online', onlineHandler);
+
   closeBtn.addEventListener('click', closeWidgetChatModal);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeWidgetChatModal(); });
 
   const escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') closeWidgetChatModal(); };
   document.addEventListener('keydown', escHandler);
+  focusTrap = createFocusTrap(overlay);
+  focusTrap.activate();
 
   actionBtn.addEventListener('click', () => {
     if (!pendingSaveSpec) return;
@@ -135,47 +220,73 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
     closeWidgetChatModal();
   });
 
+  function showPreflightError(message: string): void {
+    preflightReady = false;
+    setReadinessState(readinessEl, 'error', message);
+    setFooterStatus(footerStatusEl, message, 'error');
+    if (!currentSessionHtml) renderPreviewState(previewEl, 'error', message);
+    syncComposerState();
+  }
+
   async function runPreflight(): Promise<void> {
+    const gen = ++preflightGen;
+    // A newer check, or closing the modal, supersedes this one.
+    const isStale = () => gen !== preflightGen || !modal.isConnected;
+    if (preflightRetry) { clearTimeout(preflightRetry); preflightRetry = null; }
+    const offline = connectivityProblem();
+    if (offline) return showPreflightError(offline);
     setReadinessState(readinessEl, 'checking', t('widgets.checkingConnection'));
     try {
-      const headers: Record<string, string> = { 'X-Widget-Key': getWidgetAgentKey() };
-      if (isPro) headers['X-Pro-Key'] = getProWidgetKey();
-      const res = await fetch(widgetAgentHealthUrl(), { headers });
+      const auth = await buildWidgetAuthHeaders(isPro);
+      if (isStale()) return;
+      const unreachable = connectivityProblem(auth);
+      if (unreachable) {
+        showPreflightError(unreachable);
+        if (navigator.onLine) preflightRetry = setTimeout(() => void runPreflight(), PREFLIGHT_RETRY_MS);
+        return;
+      }
+      const requestAuthState = getAuthState();
+      const requestUserId = requestAuthState.user?.id ?? null;
+      const requestBelief = readClientEntitlementBelief(requestAuthState);
+      const res = await fetch(widgetAgentHealthUrl(), { signal: createTimeoutSignal(15_000), headers: auth.headers });
       let payload: WidgetAgentHealth | null = null;
-      try { payload = await res.json() as WidgetAgentHealth; } catch { /* ignore */ }
+      try {
+        payload = await res.json() as WidgetAgentHealth;
+      } catch (err) {
+        // A stalled body is not a healthy response; only malformed JSON is ignorable.
+        if (isTimeoutOrAbortError(err)) throw err;
+      }
+      if (isStale()) return;
 
       if (!res.ok) {
-        const message = resolvePreflightMessage(res.status, payload, isPro);
-        preflightReady = false;
-        setReadinessState(readinessEl, 'error', message);
-        setFooterStatus(footerStatusEl, message, 'error');
-        if (!currentSessionHtml) renderPreviewState(previewEl, 'error', message);
-        syncComposerState();
-        return;
+        const message = resolvePreflightMessage(
+          res.status,
+          payload,
+          isPro,
+          auth.usedTesterKey,
+          requestBelief,
+          requestUserId,
+        );
+        return showPreflightError(message);
       }
 
       if (isPro && payload?.proKeyConfigured === false) {
-        const message = t('widgets.preflightProUnavailable');
-        preflightReady = false;
-        setReadinessState(readinessEl, 'error', message);
-        setFooterStatus(footerStatusEl, message, 'error');
-        if (!currentSessionHtml) renderPreviewState(previewEl, 'error', message);
-        syncComposerState();
-        return;
+        return showPreflightError(t('widgets.preflightProUnavailable'));
       }
 
+      preflightFailures = 0;
       preflightReady = true;
       setReadinessState(readinessEl, 'ready', t('widgets.preflightConnected'));
       if (!currentSessionHtml) renderPreviewState(previewEl, 'ready_to_prompt');
       setFooterStatus(footerStatusEl, currentSessionHtml ? t('widgets.modifyHint') : t('widgets.readyToGenerate'));
       syncComposerState();
     } catch {
-      preflightReady = false;
-      const message = t('widgets.preflightUnavailable');
-      setReadinessState(readinessEl, 'error', message);
-      setFooterStatus(footerStatusEl, message, 'error');
-      if (!currentSessionHtml) renderPreviewState(previewEl, 'error', message);
-      syncComposerState();
+      if (isStale()) return;
+      showPreflightError(connectivityProblem() ?? t('widgets.preflightUnavailable'));
+      if (navigator.onLine && preflightFailures < 2) {
+        const wait = Math.round(1000 * 2 ** preflightFailures++ * (0.5 + Math.random() * 0.5));
+        preflightRetry = setTimeout(() => void runPreflight(), wait);
+      }
     }
   }
 
@@ -208,32 +319,59 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
         .map((m) => ({ role: m.role, content: m.content.slice(0, 500) })),
     });
 
-    abortController = new AbortController();
-    const timeoutMs = isPro ? 120_000 : 60_000;
-    clientTimeout = setTimeout(() => {
-      abortController?.abort();
+    const controller = new AbortController();
+    abortController = controller;
+    const isCurrent = () => modal.isConnected && abortController === controller && !controller.signal.aborted;
+    const timeoutMs = isPro ? 200_000 : 170_000;
+    const timeout = setTimeout(() => {
+      if (!isCurrent()) return;
+      controller.abort();
       appendMessage(messagesEl, 'assistant', t('widgets.requestTimedOut'));
       renderPreviewState(previewEl, 'error', t('widgets.requestTimedOut'));
       setFooterStatus(footerStatusEl, t('widgets.requestTimedOut'), 'error');
       requestInFlight = false;
       syncComposerState();
     }, timeoutMs);
+    clientTimeout = timeout;
 
     try {
+      const auth = await buildWidgetAuthHeaders(isPro);
+      if (!isCurrent()) return;
+      const unreachable = connectivityProblem(auth);
+      if (unreachable) throw new Error(unreachable);
+      const requestAuthState = getAuthState();
+      const requestUserId = requestAuthState.user?.id ?? null;
+      const requestBelief = readClientEntitlementBelief(requestAuthState);
       const reqHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
-        'X-Widget-Key': getWidgetAgentKey(),
+        ...auth.headers,
       };
-      if (isPro) reqHeaders['X-Pro-Key'] = getProWidgetKey();
 
       const res = await fetch(widgetAgentUrl(), {
         method: 'POST',
-        signal: abortController.signal,
+        signal: controller.signal,
         headers: reqHeaders,
         body,
       });
+      if (!isCurrent()) {
+        void res.body?.cancel().catch(() => {});
+        return;
+      }
 
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
+        let payload: WidgetAgentHealth | null = null;
+        try { payload = await res.json() as WidgetAgentHealth; } catch { /* ignore */ }
+        if (!isCurrent()) return;
+        reportWidgetEntitlementDesync(
+          res.status,
+          payload,
+          auth.usedTesterKey,
+          requestBelief,
+          requestUserId,
+        );
+        throw new Error(t('widgets.serverError', { status: res.status }));
+      }
+      if (!res.body) {
         throw new Error(t('widgets.serverError', { status: res.status }));
       }
 
@@ -243,7 +381,7 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
       const statusEl = appendMessage(messagesEl, 'assistant', '');
       const radarEl = document.createElement('span');
       radarEl.className = 'widget-chat-radar';
-      radarEl.innerHTML = '<span class="panel-loading-radar"><span class="panel-radar-sweep"></span><span class="panel-radar-dot"></span></span>';
+      setTrustedHtml(radarEl, trustedHtml('<span class="panel-loading-radar"><span class="panel-radar-sweep"></span><span class="panel-radar-dot"></span></span>', "legacy direct innerHTML migration"));
       statusEl.appendChild(radarEl);
 
       const reader = res.body.getReader();
@@ -252,6 +390,10 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
 
       while (true) {
         const { done, value } = await reader.read();
+        if (!isCurrent()) {
+          void reader.cancel().catch(() => {});
+          return;
+        }
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split('\n');
@@ -316,15 +458,22 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
         }
       }
     } catch (err) {
+      if (!isCurrent()) return;
       if (err instanceof DOMException && err.name === 'AbortError') return;
-      const message = err instanceof Error ? err.message : t('widgets.unknownError');
+      const message = connectivityProblem() ?? (err instanceof Error ? err.message : t('widgets.unknownError'));
       appendMessage(messagesEl, 'assistant', `${t('common.error')}: ${message}`);
       renderPreviewState(previewEl, 'error', message);
       setFooterStatus(footerStatusEl, message, 'error');
     } finally {
-      if (clientTimeout) { clearTimeout(clientTimeout); clientTimeout = null; }
-      requestInFlight = false;
-      syncComposerState();
+      // A closed/timed-out request may settle after another modal or send
+      // owns the shared handles. Clear only this request's timer and state.
+      clearTimeout(timeout);
+      if (abortController === controller) {
+        abortController = null;
+        clientTimeout = null;
+        requestInFlight = false;
+        if (modal.isConnected) syncComposerState();
+      }
     }
   };
 
@@ -343,16 +492,20 @@ export function openWidgetChatModal(options: WidgetChatOptions): void {
 export function closeWidgetChatModal(): void {
   if (abortController) { abortController.abort(); abortController = null; }
   if (clientTimeout) { clearTimeout(clientTimeout); clientTimeout = null; }
+  if (onlineHandler) { window.removeEventListener('online', onlineHandler); onlineHandler = null; }
+  if (preflightRetry) { clearTimeout(preflightRetry); preflightRetry = null; }
   if (overlay) {
     const o = overlay as HTMLElement & { _escHandler?: (e: KeyboardEvent) => void };
     if (o._escHandler) document.removeEventListener('keydown', o._escHandler);
+    focusTrap?.deactivate();
+    focusTrap = null;
     overlay.remove();
     overlay = null;
   }
 }
 
 function renderExampleChips(container: HTMLElement, inputEl: HTMLTextAreaElement, isPro: boolean): void {
-  container.innerHTML = '';
+  setTrustedHtml(container, trustedHtml('', "legacy direct innerHTML migration"));
   const keys = isPro ? PRO_EXAMPLE_PROMPT_KEYS : EXAMPLE_PROMPT_KEYS;
   for (const key of keys) {
     const btn = document.createElement('button');
@@ -367,8 +520,30 @@ function renderExampleChips(container: HTMLElement, inputEl: HTMLTextAreaElement
   }
 }
 
-function resolvePreflightMessage(status: number, payload: WidgetAgentHealth | null, isPro: boolean): string {
-  if (status === 403) return isPro ? t('widgets.preflightInvalidProKey') : t('widgets.preflightInvalidKey');
+function resolvePreflightMessage(
+  status: number,
+  payload: WidgetAgentHealth | null,
+  isPro: boolean,
+  usedTesterKey: boolean,
+  requestBelief: ClientEntitlementBelief,
+  requestUserId: string | null,
+): string {
+  if (status === 403) {
+    // Tester-key path: tell the operator to update the wm-*-key they actually have.
+    if (usedTesterKey) return isPro ? t('widgets.preflightInvalidProKey') : t('widgets.preflightInvalidKey');
+    reportWidgetEntitlementDesync(status, payload, usedTesterKey, requestBelief, requestUserId);
+    // Clerk-auth copy stays keyed to the requested widget tier. Telemetry above
+    // separately classifies the account belief so the two concepts cannot be
+    // conflated.
+    //   isPro=true  — the modal requested a Pro widget; a 403 means either
+    //                 (a) they just upgraded (entitlement still propagating)
+    //                 or (b) the entitlement service is degraded. Tell them to
+    //                 refresh / contact support.
+    //   isPro=false — a free user reached a Pro action; "contact support" is
+    //                 wrong, they need to upgrade. Surface a clean upgrade ask
+    //                 without the "just upgraded" language.
+    return isPro ? t('widgets.preflightProSubscriptionRequired') : t('widgets.preflightProRequired');
+  }
   if (status === 503 && payload?.proKeyConfigured === false) return t('widgets.preflightProUnavailable');
   if (payload?.anthropicConfigured === false) return t('widgets.preflightAiUnavailable');
   return t('widgets.preflightUnavailable');
@@ -385,11 +560,13 @@ function setFooterStatus(container: HTMLElement, text: string, tone: 'muted' | '
 }
 
 function renderPreviewState(container: HTMLElement, phase: PreviewPhase, detail = ''): void {
-  const heading = getPreviewHeading(phase);
+  // Web search, page reads and the source check are not WorldMonitor data.
+  const webStep = phase === 'fetching' && /^(search|read|verify):/.test(detail);
+  const heading = webStep ? t('widgets.phaseFetching') : getPreviewHeading(phase);
   const copy = detail || getPreviewCopy(phase);
   const isError = phase === 'error';
 
-  container.innerHTML = `
+  setTrustedHtml(container, trustedHtml(`
     <div class="widget-chat-preview-state is-${phase}">
       <div class="widget-chat-preview-head">
         <div>
@@ -414,7 +591,7 @@ function renderPreviewState(container: HTMLElement, phase: PreviewPhase, detail 
         </div>
       `}
     </div>
-  `;
+  `, "legacy direct innerHTML migration"));
 }
 
 function renderPreviewHtml(
@@ -429,7 +606,7 @@ function renderPreviewHtml(
     ? wrapProWidgetHtml(html)
     : wrapWidgetHtml(html, 'wm-widget-shell-preview');
 
-  container.innerHTML = `
+  setTrustedHtml(container, trustedHtml(`
     <div class="widget-chat-preview-frame">
       <div class="widget-chat-preview-head">
         <div>
@@ -443,7 +620,7 @@ function renderPreviewHtml(
         ${rendered}
       </div>
     </div>
-  `;
+  `, "legacy direct innerHTML migration"));
 }
 
 function getPhaseLabel(phase: PreviewPhase): string {

@@ -1,72 +1,111 @@
+import { getCachedJson } from '../../../_shared/redis';
+import { FUEL_SHORTAGES_KEY } from '../../../_shared/cache-keys';
 import type {
-  ServerContext,
   ListFuelShortagesRequest,
   ListFuelShortagesResponse,
   FuelShortageEntry,
 } from '../../../../src/generated/server/worldmonitor/supply_chain/v1/service_server';
-import { getCachedJson } from '../../../_shared/redis';
 
-const REDIS_KEY = 'energy:fuel-shortages:v1';
-
+/**
+ * Raw Redis payload shape emitted by scripts/seed-fuel-shortages.mjs.
+ * Kept loose because Upstash returns `unknown`; the projection function
+ * below narrows to the proto wire format.
+ */
 interface RawRegistry {
-  shortages?: Record<string, unknown>;
   classifierVersion?: string;
-  fetchedAt?: string;
+  updatedAt?: string;
+  shortages?: Record<string, unknown>;
 }
 
-function projectEntry(raw: Record<string, unknown>): FuelShortageEntry {
+function coerceString(v: unknown, fallback = ''): string {
+  return typeof v === 'string' ? v : fallback;
+}
+
+function coerceNumber(v: unknown, fallback = 0): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+function coerceStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map(t => coerceString(t)).filter(s => s.length > 0);
+}
+
+export function projectFuelShortage(raw: unknown): FuelShortageEntry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || r.id.length === 0) return null;
+
+  const ev = (r.evidence ?? null) as Record<string, unknown> | null;
+  const evidenceSources = Array.isArray(ev?.evidenceSources)
+    ? (ev.evidenceSources as unknown[]).map(s => {
+        const o = (s ?? {}) as Record<string, unknown>;
+        return {
+          authority: coerceString(o.authority),
+          title: coerceString(o.title),
+          url: coerceString(o.url),
+          date: coerceString(o.date),
+          sourceType: coerceString(o.sourceType),
+        };
+      })
+    : [];
+
+  const evidence = ev
+    ? {
+        evidenceSources,
+        firstRegulatorConfirmation: coerceString(ev.firstRegulatorConfirmation),
+        classifierVersion: coerceString(ev.classifierVersion, 'v1'),
+        classifierConfidence: coerceNumber(ev.classifierConfidence, 0),
+        lastEvidenceUpdate: coerceString(ev.lastEvidenceUpdate),
+      }
+    : undefined;
+
   return {
-    id: String(raw.id ?? ''),
-    country: String(raw.country ?? ''),
-    product: String(raw.product ?? ''),
-    severity: String(raw.severity ?? ''),
-    firstSeen: String(raw.firstSeen ?? ''),
-    lastConfirmed: String(raw.lastConfirmed ?? ''),
-    resolvedAt: String(raw.resolvedAt ?? ''),
-    impactTypes: Array.isArray(raw.impactTypes) ? raw.impactTypes.map(String) : [],
-    causeChain: Array.isArray(raw.causeChain) ? raw.causeChain.map(String) : [],
-    shortDescription: String(raw.shortDescription ?? ''),
-    evidence: raw.evidence ? projectEvidence(raw.evidence as Record<string, unknown>) : undefined,
+    id: coerceString(r.id),
+    country: coerceString(r.country),
+    product: coerceString(r.product),
+    severity: coerceString(r.severity, 'watch'),
+    firstSeen: coerceString(r.firstSeen),
+    lastConfirmed: coerceString(r.lastConfirmed),
+    // Proto has no nullable, so empty string = unresolved.
+    resolvedAt: typeof r.resolvedAt === 'string' ? r.resolvedAt : '',
+    impactTypes: coerceStringArray(r.impactTypes),
+    causeChain: coerceStringArray(r.causeChain),
+    shortDescription: coerceString(r.shortDescription),
+    evidence,
   };
 }
 
-function projectEvidence(raw: Record<string, unknown>) {
-  return {
-    evidenceSources: Array.isArray(raw.evidenceSources) ? raw.evidenceSources.map((s: any) => ({
-      authority: String(s?.authority ?? ''),
-      title: String(s?.title ?? ''),
-      url: String(s?.url ?? ''),
-      date: String(s?.date ?? ''),
-      sourceType: String(s?.sourceType ?? ''),
-    })) : [],
-    firstRegulatorConfirmation: String(raw.firstRegulatorConfirmation ?? ''),
-    classifierVersion: String(raw.classifierVersion ?? ''),
-    classifierConfidence: Number(raw.classifierConfidence ?? 0),
-    lastEvidenceUpdate: String(raw.lastEvidenceUpdate ?? ''),
-  };
+function matches(entry: FuelShortageEntry, req: ListFuelShortagesRequest): boolean {
+  if (req.country && entry.country !== req.country) return false;
+  if (req.product && entry.product !== req.product) return false;
+  if (req.severity && entry.severity !== req.severity) return false;
+  return true;
 }
 
 export async function listFuelShortages(
-  _ctx: ServerContext,
+  _ctx: unknown,
   req: ListFuelShortagesRequest,
 ): Promise<ListFuelShortagesResponse> {
-  try {
-    const registry = await getCachedJson(REDIS_KEY, true) as RawRegistry | null;
-    if (!registry?.shortages) return { shortages: [], fetchedAt: '', classifierVersion: '', upstreamUnavailable: true };
-
-    let entries = Object.values(registry.shortages).map(e => projectEntry(e as Record<string, unknown>));
-
-    if (req.country) entries = entries.filter(e => e.country === req.country);
-    if (req.product) entries = entries.filter(e => e.product === req.product);
-    if (req.severity) entries = entries.filter(e => e.severity === req.severity);
-
+  // Seeder writes via raw key (no env-prefix) — match it on read.
+  const raw = (await getCachedJson(FUEL_SHORTAGES_KEY, true)) as RawRegistry | null;
+  if (!raw?.shortages) {
     return {
-      shortages: entries,
-      fetchedAt: registry.fetchedAt ?? '',
-      classifierVersion: registry.classifierVersion ?? '',
-      upstreamUnavailable: false,
+      shortages: [],
+      fetchedAt: new Date().toISOString(),
+      classifierVersion: '',
+      upstreamUnavailable: true,
     };
-  } catch {
-    return { shortages: [], fetchedAt: '', classifierVersion: '', upstreamUnavailable: true };
   }
+
+  const shortages = Object.values(raw.shortages)
+    .map(projectFuelShortage)
+    .filter((s): s is FuelShortageEntry => s != null)
+    .filter(s => matches(s, req));
+
+  return {
+    shortages,
+    fetchedAt: raw.updatedAt ?? new Date().toISOString(),
+    classifierVersion: raw.classifierVersion ?? 'v1',
+    upstreamUnavailable: false,
+  };
 }

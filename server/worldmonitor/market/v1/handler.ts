@@ -2,20 +2,15 @@
  * Market service handler -- thin composition of per-RPC modules.
  *
  * RPCs:
- *   - ListMarketQuotes        (Finnhub + Yahoo Finance for stocks/indices)
- *   - ListCryptoQuotes        (CoinGecko markets API)
- *   - ListCommodityQuotes     (Yahoo Finance for commodity futures)
- *   - GetSectorSummary        (Finnhub for sector ETFs)
- *   - ListStablecoinMarkets   (CoinGecko stablecoin peg health)
- *   - ListEtfFlows            (Yahoo Finance BTC spot ETF flow estimates)
- *   - GetCountryStockIndex    (Yahoo Finance national stock indices)
- *   - ListGulfQuotes          (Yahoo Finance GCC indices, currencies, oil)
- *   - GetFearGreedIndex       (composite sentiment seeded by Railway)
- *   - GetMarketBreadthHistory (S&P breadth % above SMAs seeded by Railway)
- *   - GetCotPositioning       (CFTC COT data seeded by Railway)
- *   - GetGoldIntelligence     (gold multi-source composite seeded by Railway)
- *   - GetHyperliquidFlow      (Hyperliquid 24/7 positioning seeded by Railway)
- *   - ListEarningsCalendar    (earnings dates seeded by Railway)
+ *   - ListMarketQuotes      (Finnhub + Yahoo Finance for stocks/indices)
+ *   - ListCryptoQuotes      (CoinGecko markets API)
+ *   - ListCommodityQuotes   (Yahoo Finance for commodity futures)
+ *   - GetSectorSummary      (Finnhub for sector ETFs)
+ *   - ListStablecoinMarkets (CoinGecko stablecoin peg health)
+ *   - ListEtfFlows          (Yahoo Finance BTC spot ETF flow estimates)
+ *   - GetCountryStockIndex  (Yahoo Finance national stock indices)
+ *   - GetPriceHistory       (Yahoo Finance dated daily closes for tracked symbols)
+ *   - ListGulfQuotes        (Yahoo Finance GCC indices, currencies, oil)
  */
 
 import type { MarketServiceHandler } from '../../../../src/generated/server/worldmonitor/market/v1/service_server';
@@ -26,6 +21,7 @@ import { getSectorSummary } from './get-sector-summary';
 import { listStablecoinMarkets } from './list-stablecoin-markets';
 import { listEtfFlows } from './list-etf-flows';
 import { getCountryStockIndex } from './get-country-stock-index';
+import { getPriceHistory } from './get-price-history';
 import { listGulfQuotes } from './list-gulf-quotes';
 import { analyzeStock } from './analyze-stock';
 import { getStockAnalysisHistory } from './get-stock-analysis-history';
@@ -36,20 +32,26 @@ import { listDefiTokens } from './list-defi-tokens';
 import { listAiTokens } from './list-ai-tokens';
 import { listOtherTokens } from './list-other-tokens';
 import { getFearGreedIndex } from './get-fear-greed-index';
-import { getMarketBreadthHistory } from './get-market-breadth-history';
+import { listEarningsCalendar } from './list-earnings-calendar';
 import { getCotPositioning } from './get-cot-positioning';
+import { getInsiderTransactions } from './get-insider-transactions';
+import { getMarketBreadthHistory } from './get-market-breadth-history';
 import { getGoldIntelligence } from './get-gold-intelligence';
 import { getHyperliquidFlow } from './get-hyperliquid-flow';
-import { listEarningsCalendar } from './list-earnings-calendar';
+import { getPhysicalPremiums } from './get-physical-premiums';
+import { getPhysicalDivergenceIndex } from './get-physical-divergence-index';
 
 export const marketHandler: MarketServiceHandler = {
   listMarketQuotes,
   listCryptoQuotes,
   listCommodityQuotes,
+  getPhysicalPremiums,
+  getPhysicalDivergenceIndex,
   getSectorSummary,
   listStablecoinMarkets,
   listEtfFlows,
   getCountryStockIndex,
+  getPriceHistory,
   listGulfQuotes,
   analyzeStock,
   getStockAnalysisHistory,
@@ -60,9 +62,10 @@ export const marketHandler: MarketServiceHandler = {
   listAiTokens,
   listOtherTokens,
   getFearGreedIndex,
-  getMarketBreadthHistory,
+  listEarningsCalendar,
   getCotPositioning,
+  getInsiderTransactions,
+  getMarketBreadthHistory,
   getGoldIntelligence,
   getHyperliquidFlow,
-  listEarningsCalendar,
 };

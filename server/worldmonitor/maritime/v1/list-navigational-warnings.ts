@@ -6,16 +6,15 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/maritime/v1/service_server';
 
 import { CHROME_UA } from '../../../_shared/constants';
+import { fetchNgaBroadcastWarnings } from '../../../_shared/nga-broadcast-warnings';
 import { cachedFetchJson } from '../../../_shared/redis';
 
-const REDIS_CACHE_KEY = 'maritime:navwarnings:v1';
+const REDIS_CACHE_KEY = 'maritime:navwarnings:v3';
 const REDIS_CACHE_TTL = 3600; // 1 hr — NGA broadcasts update daily
 
 // ========================================================================
 // Helpers
 // ========================================================================
-
-const NGA_WARNINGS_URL = 'https://msi.nga.mil/api/publications/broadcast-warn?output=json&status=A';
 
 function parseNgaDate(dateStr: unknown): number {
   if (!dateStr || typeof dateStr !== 'string') return 0;
@@ -34,19 +33,12 @@ function parseNgaDate(dateStr: unknown): number {
   return Date.UTC(year, month, day, hours, minutes);
 }
 
-async function fetchNgaWarnings(area?: string): Promise<NavigationalWarning[]> {
+async function fetchNgaWarnings(): Promise<NavigationalWarning[] | null> {
   try {
-    const response = await fetch(NGA_WARNINGS_URL, {
-      headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
-      signal: AbortSignal.timeout(15000),
-    });
+    const rawWarnings = await fetchNgaBroadcastWarnings({ userAgent: CHROME_UA, timeoutMs: 15000 });
+    if (rawWarnings === null) return null;
 
-    if (!response.ok) return [];
-
-    const data = await response.json();
-    const rawWarnings: any[] = Array.isArray(data) ? data : (data?.broadcast_warn ?? []);
-
-    let warnings: NavigationalWarning[] = rawWarnings.map((w: any): NavigationalWarning => ({
+    return rawWarnings.map((w): NavigationalWarning => ({
       id: `${w.navArea || ''}-${w.msgYear || ''}-${w.msgNumber || ''}`,
       title: `NAVAREA ${w.navArea || ''} ${w.msgNumber || ''}/${w.msgYear || ''}`,
       text: w.text || '',
@@ -57,18 +49,8 @@ async function fetchNgaWarnings(area?: string): Promise<NavigationalWarning[]> {
       authority: w.authority || '',
     }));
 
-    if (area) {
-      const areaLower = area.toLowerCase();
-      warnings = warnings.filter(
-        (w) =>
-          w.area.toLowerCase().includes(areaLower) ||
-          w.text.toLowerCase().includes(areaLower),
-      );
-    }
-
-    return warnings;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -81,13 +63,19 @@ export async function listNavigationalWarnings(
   req: ListNavigationalWarningsRequest,
 ): Promise<ListNavigationalWarningsResponse> {
   try {
-    const cacheKey = `${REDIS_CACHE_KEY}:${req.area || 'all'}`;
-    const result = await cachedFetchJson<ListNavigationalWarningsResponse>(cacheKey, REDIS_CACHE_TTL, async () => {
-      const warnings = await fetchNgaWarnings(req.area);
-      return warnings.length > 0 ? { warnings, pagination: undefined } : null;
+    const result = await cachedFetchJson<ListNavigationalWarningsResponse>(REDIS_CACHE_KEY, REDIS_CACHE_TTL, async () => {
+      const warnings = await fetchNgaWarnings();
+      return warnings === null
+        ? null
+        : { warnings, pagination: undefined, dataAvailable: true };
     });
-    return result || { warnings: [], pagination: undefined };
+    if (!result) return { warnings: [], pagination: undefined, dataAvailable: false };
+    const area = (req.area || '').toLowerCase();
+    const warnings = area
+      ? result.warnings.filter(w => w.area.toLowerCase().includes(area) || w.text.toLowerCase().includes(area))
+      : result.warnings;
+    return { ...result, warnings, dataAvailable: result.dataAvailable === true };
   } catch {
-    return { warnings: [], pagination: undefined };
+    return { warnings: [], pagination: undefined, dataAvailable: false };
   }
 }

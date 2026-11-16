@@ -1,5 +1,6 @@
 import { before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   createIntervalDiagnostics,
@@ -21,6 +22,8 @@ import {
   fetchRuntimeCacheState,
   parseCachedScorePayload,
   seedResilienceScores,
+  warmLaggardCountries,
+  LAGGARD_WARMUP_BUDGET_MS,
 } from '../scripts/seed-resilience-scores.mjs';
 
 const D6_DOMAINS = [
@@ -385,7 +388,7 @@ describe('cached score interval payload classification', () => {
       const commands = requests[0].body;
       assert.equal(commands.length, listRankableCountries().length + 1);
       assert.ok(commands.every((command) => command[0] !== 'EVAL'));
-      assert.deepEqual(commands[0].slice(0, 2), ['SET', `resilience:intervals:v10:${listRankableCountries()[0]}`]);
+      assert.deepEqual(commands[0].slice(0, 2), ['SET', `resilience:intervals:v12:${listRankableCountries()[0]}`]);
       assert.deepEqual(commands.at(-1).slice(0, 2), ['SET', 'seed-meta:resilience:intervals']);
       const intervalPayload = JSON.parse(commands[0][2]);
       const metadataPayload = JSON.parse(commands.at(-1)[2]);
@@ -478,7 +481,7 @@ describe('cached score interval payload classification', () => {
     const publishedCodes = acceptedIntervalCountryCodes();
     const omittedCodes = allCountryCodes.filter((countryCode) => !publishedCodes.includes(countryCode));
     const redis = new Map([
-      [`resilience:intervals:v10:${omittedCodes[0]}`, JSON.stringify({
+      [`resilience:intervals:v12:${omittedCodes[0]}`, JSON.stringify({
         p05: 10,
         p95: 20,
         _formula: 'd6',
@@ -520,10 +523,10 @@ describe('cached score interval payload classification', () => {
       );
       assert.equal(result.recordCount, RESILIENCE_INTERVAL_MIN_RECORD_COUNT);
       for (const countryCode of omittedCodes) {
-        assert.equal(redis.has(`resilience:intervals:v10:${countryCode}`), false, 'omitted old-state interval must be deleted');
+        assert.equal(redis.has(`resilience:intervals:v12:${countryCode}`), false, 'omitted old-state interval must be deleted');
       }
       for (const countryCode of publishedCodes) {
-        assert.equal(JSON.parse(redis.get(`resilience:intervals:v10:${countryCode}`))._educationState, 'education-on');
+        assert.equal(JSON.parse(redis.get(`resilience:intervals:v12:${countryCode}`))._educationState, 'education-on');
       }
       const meta = JSON.parse(redis.get('seed-meta:resilience:intervals'));
       assert.equal(meta.recordCount, RESILIENCE_INTERVAL_MIN_RECORD_COUNT);
@@ -695,112 +698,35 @@ describe('computeIntervals', () => {
 });
 
 describe('script is self-contained .mjs', () => {
-  it('does not import from ../server/', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
+  // The seeder runs in a bare-node Railway container with no TypeScript loader
+  // and no access to server/, so its import graph is a real deployment
+  // constraint that nothing executable can observe. The diagnostic-identifier
+  // assertions that used to sit alongside these (createIntervalDiagnostics,
+  // intervalClampCount, formulaSkipCount, …) just restated names the seeder
+  // logs; the logging behaviour itself is exercised by the interval and
+  // classification suites above, which run the real functions.
+  const src = readFileSync(
+    new URL('../scripts/seed-resilience-scores.mjs', import.meta.url),
+    'utf8',
+  );
+
+  it('never reaches into server/ or a TypeScript loader', () => {
     assert.equal(src.includes('../server/'), false, 'Must not import from ../server/');
     assert.equal(src.includes('tsx/esm'), false, 'Must not reference tsx/esm');
   });
 
-  it('all imports are local ./ relative paths', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
-    const imports = [...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]);
-    for (const imp of imports) {
+  it('imports only local ./ relative paths', () => {
+    for (const imp of [...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1])) {
       assert.ok(imp.startsWith('./'), `Import "${imp}" must be a local ./ relative path`);
     }
   });
 
-  it('uses the shared resilience interval helper', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
+  it('derives domain weights from the shared interval helper, not a private copy', () => {
     assert.match(src, /from ['"]\.\/_resilience-intervals\.mjs['"]/);
     assert.doesNotMatch(src, /const DOMAIN_WEIGHTS =/);
   });
-
-  it('logs interval active-score clamp diagnostics', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
-    assert.match(src, /createIntervalDiagnostics/);
-    assert.match(src, /intervalClampCount/);
-    assert.match(src, /activeScoreClampMaxDelta/);
-  });
-
-  it('alerts when cached score payloads lack usable interval formula tags', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
-    assert.match(src, /formulaSkipCount/);
-    assert.match(src, /missing\/ambiguous formula tags/);
-    assert.match(src, /intervalFormulaSkipCount/);
-    assert.match(src, /intervalFormulaSkipSamples/);
-  });
-
-  it('reports missing and malformed score payload diagnostics when interval writes are empty', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
-    assert.match(src, /missingScorePayloadCount/);
-    assert.match(src, /staleScorePayloadCount/);
-    assert.match(src, /invalidScorePayloadCount/);
-    assert.match(src, /malformedScorePayloadCount/);
-    assert.match(src, /intervalPayloadSkipCount/);
-    assert.match(src, /intervalFailureReason/);
-  });
-
-  it('gates interval writes on the live runtime formula when available', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
-    assert.match(src, /\/api\/resilience\/v1\/get-runtime-manifest/);
-    assert.match(src, /const \{ expectedFormula, expectedEducationState \} = await runtimeCacheState\(\);/);
-    assert.match(src, /if \(!isKnownScoreFormulaTag\(expectedFormula\) \|\| !isKnownEducationState\(expectedEducationState\)\) \{/);
-    assert.match(src, /const expectedCacheState = \{ expectedFormula, expectedEducationState \};/);
-    assert.match(src, /countCachedFromPipeline\(preResults, expectedCacheState\)/);
-    assert.match(src, /parseCachedScorePayload\(raw, expectedCacheState\)/);
-    assert.match(src, /countCachedFromPipeline\(finalResults, expectedCacheState\)/);
-    assert.match(src, /computeAndWriteIntervals\(url, token, countryCodes, finalResults, expectedCacheState\)/);
-    assert.match(src, /computeAndWriteIntervals\(url, token, countryCodes, refreshedResults, expectedCacheState\)/);
-    assert.match(src, /_formula: options\.expectedFormula/);
-    assert.match(src, /_educationState: options\.expectedEducationState/);
-    assert.match(src, /_intervalMethodology: INTERVAL_METHODOLOGY/);
-    assert.doesNotMatch(src, /currentCacheFormulaLocal/);
-  });
-
-  it('builds intervals only from tagged Redis score payloads', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(join(dir, '..', 'scripts', 'seed-resilience-scores.mjs'), 'utf8');
-    const intervalWriter = src.slice(
-      src.indexOf('async function computeAndWriteIntervals'),
-      src.indexOf('async function seedResilienceScores'),
-    );
-    assert.match(src, /\['GET', `\$\{RESILIENCE_SCORE_CACHE_PREFIX\}\$\{c\}`\]/);
-    assert.match(intervalWriter, /buildIntervalPayloadFromCachedScore\(raw, countryCode, diagnostics, options\)/);
-    assert.doesNotMatch(intervalWriter, /get-resilience-score\?countryCode=/);
-    assert.doesNotMatch(intervalWriter, /allowLegacyFormulaInference:\s*true/);
-  });
 });
+
 
 describe('ensures ranking aggregate is present every cron, with truthful meta', () => {
   // The ranking aggregate has the same 6h TTL as the per-country scores. If we
@@ -883,6 +809,84 @@ describe('ensures ranking aggregate is present every cron, with truthful meta', 
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  describe('one dropped connection to the ranking endpoint', () => {
+    function stubFetch(rankingOutcomes) {
+      const calls = { ranking: 0 };
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (input) => {
+        const href = typeof input === 'string' ? input : input.url;
+        if (href.includes('/api/resilience/v1/get-resilience-ranking')) {
+          const outcome = rankingOutcomes[Math.min(calls.ranking, rankingOutcomes.length - 1)];
+          calls.ranking += 1;
+          if (outcome instanceof Error) throw outcome;
+          if (outcome === 'body-drop') {
+            return new Response(new ReadableStream({ start: (c) => c.error(connectionReset()) }), { status: 200 });
+          }
+          const fetchedAt = outcome === 'cached' ? new Date(Date.now() - 6 * 3600_000) : new Date();
+          return new Response(JSON.stringify({
+            items: [{ countryCode: 'US' }], greyedOut: [], fetchedAt: fetchedAt.toISOString(),
+          }), { status: 200 });
+        }
+        if (href.includes('/strlen/')) return new Response(JSON.stringify({ result: 31_370 }), { status: 200 });
+        if (href.includes('/get/seed-meta:resilience:ranking')) {
+          return new Response(JSON.stringify({
+            result: JSON.stringify({ fetchedAt: Date.now(), recordCount: 196 }),
+          }), { status: 200 });
+        }
+        throw new Error(`Unexpected fetch: ${href}`);
+      });
+      return { calls, restore: () => { globalThis.fetch = originalFetch; } };
+    }
+    const connectionReset = () => Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }),
+    });
+    const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    const refresh = async () => (await import('../scripts/seed-resilience-scores.mjs'))
+      .refreshRankingAggregate({ url: 'https://redis.example', token: 'token', laggardsWarmed: 0 });
+
+    it('completes the refresh when the retry succeeds', async () => {
+      const stub = stubFetch([connectionReset(), 'ok']);
+      try {
+        assert.equal(await refresh(), true, 'a second attempt on a fresh connection must complete the refresh');
+        assert.equal(stub.calls.ranking, 2);
+      } finally { stub.restore(); }
+    });
+
+    it('still fails after a second dropped connection', async () => {
+      const stub = stubFetch([connectionReset(), connectionReset()]);
+      try {
+        await assert.rejects(refresh, /did not complete.*other side closed/i, 'the failure must name the transport cause');
+        assert.equal(stub.calls.ranking, 2, 'one retry, not a loop');
+      } finally { stub.restore(); }
+    });
+
+    it('retries when the connection drops while the body streams', async () => {
+      const stub = stubFetch(['body-drop', 'ok']);
+      try {
+        assert.equal(await refresh(), true);
+        assert.equal(stub.calls.ranking, 2);
+      } finally { stub.restore(); }
+    });
+
+    it('does not count a cached ranking as a completed rebuild', async () => {
+      // The first request may still be rebuilding. The handler then denies the
+      // retry its refresh slot and serves the cached ranking with HTTP 200.
+      const stub = stubFetch([connectionReset(), 'cached']);
+      try {
+        await assert.rejects(refresh, /did not complete.*not a rebuild/i,
+          'intervals must not be published while another rebuild may still be rotating scores');
+      } finally { stub.restore(); }
+    });
+
+    it('does not retry a request that timed out', async () => {
+      const stub = stubFetch([timedOut(), 'ok']);
+      try {
+        await assert.rejects(refresh, /did not complete/i);
+        assert.equal(stub.calls.ranking, 1, 'a 60s timeout means the handler is slow, and a retry doubles the wait');
+      } finally { stub.restore(); }
+    });
   });
 
   it('always triggers the rebuild HTTP call — never short-circuits on "key still present"', () => {
@@ -1045,11 +1049,38 @@ describe('seed-bundle-resilience section interval keeps refresh alive', () => {
   });
 });
 
-// Upstream's "resilience operator docs" suite here asserted against
-// docs/railway-seed-consolidation-runbook.md and post-pr342x-force-refresh.mjs
-// scripts — Railway-cron-specific operator runbooks that don't exist in this
-// fork (self-hosted on a Pi via cron, see [[heimdal-deploy]] memory). Dropped
-// rather than fabricated; not a gap in the ported resilience logic itself.
+describe('resilience operator docs', () => {
+  it('operator force-refresh docs include the required seed refresh key', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const files = [
+      join(dir, '..', 'docs', 'railway-seed-consolidation-runbook.md'),
+      join(dir, '..', 'scripts', 'post-pr3427-force-refresh.mjs'),
+      join(dir, '..', 'scripts', 'post-pr3487-force-refresh.mjs'),
+    ];
+
+    for (const file of files) {
+      const src = readFileSync(file, 'utf8');
+      const scoreWarmCommands = [...src.matchAll(/node scripts\/seed-resilience-scores\.mjs/g)];
+      assert.ok(scoreWarmCommands.length > 0, `${file} must document the score warm command`);
+      for (const match of scoreWarmCommands) {
+        const commandContext = src.slice(Math.max(0, match.index - 240), match.index + match[0].length);
+        assert.match(
+          commandContext,
+          /WORLDMONITOR_SEED_REFRESH_KEY=<seed-refresh-key>/,
+          `${file} must include WORLDMONITOR_SEED_REFRESH_KEY for seed-resilience-scores`,
+        );
+      }
+      assert.doesNotMatch(
+        src,
+        /WORLDMONITOR_API_KEY=<key> node scripts\/seed-resilience-scores\.mjs/,
+        `${file} must not document the pre-refresh-key score warm command`,
+      );
+    }
+  });
+});
 
 describe('handler warm pipeline is chunked', () => {
   // The 222-country pipeline SET payload (~600KB) exceeds the 5s pipeline
@@ -1073,8 +1104,77 @@ describe('handler warm pipeline is chunked', () => {
     );
     assert.match(
       src,
-      /for\s*\([^)]*i\s*\+=\s*SET_BATCH/,
+      /persistRedisCommandsWithRetry\(allSetCommands,\s*SET_BATCH\)/,
       'pipeline SETs must be issued in SET_BATCH-sized chunks',
     );
+  });
+});
+
+describe('laggard warmup aggregate budget (#6562 item 3)', () => {
+  it('LAGGARD_WARMUP_BUDGET_MS stays below the 240s Resilience-Scores section timeout', () => {
+    assert.ok(
+      LAGGARD_WARMUP_BUDGET_MS < 240_000,
+      `budget ${LAGGARD_WARMUP_BUDGET_MS}ms must leave headroom below the 240s section cap`,
+    );
+  });
+
+  it('stops warming once the budget is exhausted and reports the partial count', async () => {
+    const stillMissing = Array.from({ length: 12 }, (_, i) => `C${String(i).padStart(2, '0')}`);
+    const fetched = [];
+    const fetchImpl = async (url) => {
+      fetched.push(String(url));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return new Response('{}', { status: 200 });
+    };
+    const warmed = await warmLaggardCountries(stillMissing, {
+      apiKey: 'test-key',
+      budgetMs: 1,
+      batchSize: 5,
+      fetchImpl,
+    });
+    assert.equal(fetched.length, 5, 'only the first batch may start before the deadline trips');
+    assert.equal(warmed, 5);
+  });
+
+  it('warms every laggard when the budget holds', async () => {
+    const stillMissing = ['US', 'FR', 'DE', 'JP', 'KR', 'BR'];
+    const fetched = [];
+    const fetchImpl = async (url) => {
+      fetched.push(String(url));
+      return new Response('{}', { status: 200 });
+    };
+    const warmed = await warmLaggardCountries(stillMissing, {
+      apiKey: 'test-key',
+      budgetMs: 10_000,
+      batchSize: 5,
+      fetchImpl,
+    });
+    assert.equal(fetched.length, stillMissing.length);
+    assert.equal(warmed, stillMissing.length);
+  });
+
+  it('skips warmup without an API key and fetches nothing', async () => {
+    const warmed = await warmLaggardCountries(['US'], {
+      apiKey: null,
+      fetchImpl: async () => {
+        throw new Error('must not fetch without an API key');
+      },
+    });
+    assert.equal(warmed, 0);
+  });
+
+  it('counts only fulfilled requests toward the warmed total', async () => {
+    const fetchImpl = async (url) => {
+      const cc = new URL(String(url)).searchParams.get('countryCode');
+      if (cc === 'FR') return new Response('{}', { status: 503 });
+      return new Response('{}', { status: 200 });
+    };
+    const warmed = await warmLaggardCountries(['US', 'FR', 'DE'], {
+      apiKey: 'test-key',
+      budgetMs: 10_000,
+      batchSize: 5,
+      fetchImpl,
+    });
+    assert.equal(warmed, 2);
   });
 });

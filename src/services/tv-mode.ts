@@ -1,3 +1,5 @@
+import { safeStorageGet } from '@/utils/safe-storage';
+
 /**
  * TV Mode Controller — ambient fullscreen panel cycling for the happy variant.
  * Drives visual overrides via `document.documentElement.dataset.tvMode` which
@@ -30,7 +32,7 @@ export class TvModeController {
     this.onPanelChange = opts.onPanelChange;
 
     // Read persisted interval or use provided / default
-    const stored = localStorage.getItem(TV_INTERVAL_KEY);
+    const stored = safeStorageGet(TV_INTERVAL_KEY);
     const parsed = stored ? parseInt(stored, 10) : NaN;
     this.intervalMs = clampInterval(
       Number.isFinite(parsed) ? parsed : (opts.intervalMs ?? DEFAULT_INTERVAL)
@@ -97,17 +99,6 @@ export class TvModeController {
       this.exit();
     } else {
       this.enter();
-    }
-  }
-
-  setIntervalMs(ms: number): void {
-    this.intervalMs = clampInterval(ms);
-    localStorage.setItem(TV_INTERVAL_KEY, String(this.intervalMs));
-
-    // Restart cycling if active
-    if (this.intervalId !== null) {
-      this.stopCycling();
-      this.startCycling();
     }
   }
 

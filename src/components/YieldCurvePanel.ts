@@ -1,17 +1,10 @@
-import type { EconomicServiceClient } from '@/generated/client/worldmonitor/economic/v1/service_client';
 import { Panel } from './Panel';
+import { createLazyClient, getRpcBaseUrl, rpcFetch } from '@/services/rpc-client';
+import { EconomicServiceClient } from '@/services/generated-rpc-clients';
 import { t } from '@/services/i18n';
 import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
 
-let _client: EconomicServiceClient | null = null;
-async function getEconomicClient(): Promise<EconomicServiceClient> {
-  if (!_client) {
-    const { EconomicServiceClient } = await import('@/generated/client/worldmonitor/economic/v1/service_client');
-    const { getRpcBaseUrl } = await import('@/services/rpc-client');
-    _client = new EconomicServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
-  }
-  return _client;
-}
+const getEconomicClient = createLazyClient(() => new EconomicServiceClient(getRpcBaseUrl(), { fetch: rpcFetch }));
 
 type Tab = 'curve' | 'rates';
 
@@ -71,7 +64,7 @@ function buildYAxisLabels(yMin: number, yMax: number): string {
     const val = yMin + step * i;
     const y = yPos(val, yMin, yMax);
     labels.push(
-      `<text x="${(MARGIN_L - 4).toFixed(0)}" y="${y.toFixed(2)}" text-anchor="end" fill="rgba(255,255,255,0.35)" font-size="8" alignment-baseline="middle">${val.toFixed(1)}%</text>`
+      `<text x="${(MARGIN_L - 4).toFixed(0)}" y="${y.toFixed(2)}" text-anchor="end" fill="rgba(255,255,255,0.35)" style="font-size:calc(8px * var(--wm-panel-effective-scale, 1))" alignment-baseline="middle">${val.toFixed(1)}%</text>`
     );
     labels.push(
       `<line x1="${MARGIN_L}" y1="${y.toFixed(2)}" x2="${SVG_W - MARGIN_R}" y2="${y.toFixed(2)}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`
@@ -84,7 +77,7 @@ function buildXAxisLabels(count: number): string {
   return TENOR_LABELS.slice(0, count).map((label, i) => {
     const x = xPos(i, count);
     const y = SVG_H - MARGIN_B + 12;
-    return `<text x="${x.toFixed(2)}" y="${y}" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="8">${escapeHtml(label)}</text>`;
+    return `<text x="${x.toFixed(2)}" y="${y}" text-anchor="middle" fill="rgba(255,255,255,0.5)" style="font-size:calc(8px * var(--wm-panel-effective-scale, 1))">${escapeHtml(label)}</text>`;
   }).join('');
 }
 
@@ -98,6 +91,7 @@ function buildCircles(points: YieldPoint[], yMin: number, yMax: number, color: s
 }
 
 // Map ECB tenor labels to X positions on the US curve axis (8 tenors: 1M 3M 6M 1Y 2Y 5Y 10Y 30Y)
+// ECB tenors 1Y 2Y 5Y 10Y map to US indices 3 4 5 6; 20Y is between 10Y and 30Y (idx ~6.5); 30Y = idx 7
 function ecbXPos(tenor: string): number | null {
   const mapping: Record<string, number> = {
     '1Y': 3, '2Y': 4, '5Y': 5, '10Y': 6, '20Y': 6.5, '30Y': 7,
@@ -138,7 +132,7 @@ function renderChart(current: YieldPoint[], prior: YieldPoint[], ecbRates: Recor
   const priorValues = prior.map(p => p.value).filter((v): v is number => v !== null);
   const ecbValues = ecbRates ? Object.values(ecbRates) : [];
   const allValues = [...usValues, ...priorValues, ...ecbValues];
-  if (allValues.length === 0) return '<div style="padding:16px;color:var(--text-dim);font-size:12px">No yield data available.</div>';
+  if (allValues.length === 0) return '<div style="padding:16px;color:var(--text-dim);font-size:calc(12px * var(--wm-panel-effective-scale, 1))">No yield data available.</div>';
 
   const yMin = Math.max(0, Math.min(...allValues) - 0.25);
   const yMax = Math.max(...allValues) + 0.5;
@@ -154,7 +148,7 @@ function renderChart(current: YieldPoint[], prior: YieldPoint[], ecbRates: Recor
   const ecbDots = ecbRates ? buildEcbCircles(ecbRates, yMin, yMax) : '';
 
   return `
-    <svg viewBox="0 0 ${SVG_W} ${SVG_H}" width="100%" style="display:block;overflow:visible">
+    <svg viewBox="0 0 ${SVG_W} ${SVG_H}" width="100%" role="img" aria-label="Treasury yield curve by maturity" style="display:block;overflow:visible">
       ${buildYAxisLabels(yMin, yMax)}
       ${buildXAxisLabels(current.length)}
       ${priorLine}
@@ -165,15 +159,15 @@ function renderChart(current: YieldPoint[], prior: YieldPoint[], ecbRates: Recor
     </svg>`;
 }
 
-function renderTable(points: YieldPoint[]): string {
-  const headers = points.map(p => `<th style="font-size:9px;font-weight:600;color:var(--text-dim);padding:4px 6px;text-align:center">${escapeHtml(p.tenor)}</th>`).join('');
+function renderTable(points: YieldPoint[], labelledBy: string): string {
+  const headers = points.map(p => `<th scope="col" style="text-align:center">${escapeHtml(p.tenor)}</th>`).join('');
   const cells = points.map(p => {
     const val = p.value !== null ? `${p.value.toFixed(2)}%` : 'N/A';
-    return `<td style="font-size:11px;color:var(--text);padding:4px 6px;text-align:center">${escapeHtml(val)}</td>`;
+    return `<td style="text-align:center">${escapeHtml(val)}</td>`;
   }).join('');
   return `
-    <div style="overflow-x:auto;margin-top:8px">
-      <table style="width:100%;border-collapse:collapse">
+    <div class="table-scroll" role="group" tabindex="0" aria-labelledby="${escapeHtml(labelledBy)}" style="margin-top:8px">
+      <table class="wm-table">
         <thead><tr>${headers}</tr></thead>
         <tbody><tr>${cells}</tr></tbody>
       </table>
@@ -198,12 +192,12 @@ function miniRateSparkline(obs: RateObs[], color: string, w = 80, h = 22): strin
     const y = h - ((v - min) / range) * (h - 2) - 1;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
-  return `<svg width="${w}" height="${h}" style="display:inline-block;vertical-align:middle"><polyline points="${pts}" fill="none" stroke="${escapeHtml(color)}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<svg width="${w}" height="${h}" aria-hidden="true" style="display:inline-block;vertical-align:middle"><polyline points="${pts}" fill="none" stroke="${escapeHtml(color)}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
 function renderRatesTab(rows: RateRow[]): string {
   const hasAny = rows.some(r => r.obs.length > 0);
-  if (!hasAny) return '<div style="padding:16px;color:var(--text-dim);font-size:12px">ECB rate data unavailable</div>';
+  if (!hasAny) return '<div style="padding:16px;color:var(--text-dim);font-size:calc(12px * var(--wm-panel-effective-scale, 1))">ECB rate data unavailable</div>';
 
   const items = rows.map(row => {
     const latest = row.obs[row.obs.length - 1];
@@ -213,16 +207,16 @@ function renderRatesTab(rows: RateRow[]): string {
     const changeStr = change !== null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '';
     const changeColor = change === null ? '' : change >= 0 ? '#e74c3c' : '#27ae60';
     return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
-      <div style="width:90px;font-size:10px;color:var(--text-dim)">${escapeHtml(row.label)}</div>
+      <div style="width:90px;font-size:calc(10px * var(--wm-panel-effective-scale, 1));color:var(--text-dim)">${escapeHtml(row.label)}</div>
       ${miniRateSparkline(row.obs.slice(-24), row.color)}
-      <div style="min-width:44px;text-align:right;font-size:13px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums">${escapeHtml(latest.value.toFixed(2))}%</div>
-      ${changeStr ? `<div style="font-size:10px;color:${changeColor}">${escapeHtml(changeStr)}</div>` : ''}
-      <div style="font-size:9px;color:var(--text-dim);margin-left:auto">${escapeHtml(latest.date)}</div>
+      <div style="min-width:44px;text-align:right;font-size:calc(13px * var(--wm-panel-effective-scale, 1));font-weight:600;color:var(--text);font-variant-numeric:tabular-nums">${escapeHtml(latest.value.toFixed(2))}%</div>
+      ${changeStr ? `<div style="font-size:calc(10px * var(--wm-panel-effective-scale, 1));color:${changeColor}">${escapeHtml(changeStr)}</div>` : ''}
+      <div style="font-size:calc(9px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);margin-left:auto">${escapeHtml(latest.date)}</div>
     </div>`;
   }).join('');
 
   return `<div style="padding:4px 0">${items}</div>
-    <div style="margin-top:8px;font-size:9px;color:var(--text-dim)">Source: ECB</div>`;
+    <div style="margin-top:8px;font-size:calc(9px * var(--wm-panel-effective-scale, 1));color:var(--text-dim)">Source: ECB</div>`;
 }
 
 export class YieldCurvePanel extends Panel {
@@ -248,7 +242,7 @@ export class YieldCurvePanel extends Panel {
   public async fetchData(): Promise<boolean> {
     this.showLoading();
     try {
-      const client = await getEconomicClient();
+      const client = getEconomicClient();
       const [fredResp, ecbResp] = await Promise.allSettled([
         client.getFredSeriesBatch({
           seriesIds: [...SERIES_IDS, 'ESTR', 'EURIBOR3M', 'EURIBOR6M', 'EURIBOR1Y'],
@@ -273,7 +267,7 @@ export class YieldCurvePanel extends Panel {
         : null;
 
       this._rateRows = [
-        { id: 'ESTR', label: '€STR', obs: results['ESTR']?.observations ?? [], color: '#2ecc71' },
+        { id: 'ESTR', label: 'Euro short-term rate', obs: results['ESTR']?.observations ?? [], color: '#2ecc71' },
         { id: 'EURIBOR3M', label: 'EURIBOR 3M', obs: results['EURIBOR3M']?.observations ?? [], color: '#3498db' },
         { id: 'EURIBOR6M', label: 'EURIBOR 6M', obs: results['EURIBOR6M']?.observations ?? [], color: '#9b59b6' },
         { id: 'EURIBOR1Y', label: 'EURIBOR 1Y', obs: results['EURIBOR1Y']?.observations ?? [], color: '#e67e22' },
@@ -296,12 +290,12 @@ export class YieldCurvePanel extends Panel {
 
   private _render(): void {
     const tabBar = `<div style="display:flex;gap:4px;margin-bottom:6px">
-      <button class="panel-tab${this._tab === 'curve' ? ' active' : ''}" data-tab="curve" style="font-size:11px;padding:3px 10px">US Curve</button>
-      <button class="panel-tab${this._tab === 'rates' ? ' active' : ''}" data-tab="rates" style="font-size:11px;padding:3px 10px">ECB Rates</button>
+      <button class="panel-tab${this._tab === 'curve' ? ' active' : ''}" data-tab="curve" style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));padding:3px 10px">US Curve</button>
+      <button class="panel-tab${this._tab === 'rates' ? ' active' : ''}" data-tab="rates" style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));padding:3px 10px">ECB Rates</button>
     </div>`;
 
     if (this._tab === 'rates') {
-      this.setSafeContent(unsafeRawHtml(`<div style="padding:10px 14px 6px">${tabBar}${renderRatesTab(this._rateRows)}</div>`, 'RPC data escaped at each interpolation point'));
+      this.setSafeContent(unsafeRawHtml(`<div style="padding:10px 14px 6px">${tabBar}${renderRatesTab(this._rateRows)}</div>`, 'legacy Panel.setContent() migration'));
       return;
     }
 
@@ -312,11 +306,11 @@ export class YieldCurvePanel extends Panel {
     const spreadSign = spreadBps !== null ? (Number(spreadBps) >= 0 ? '+' : '') : '';
 
     const statusBadge = isInverted
-      ? `<span style="background:#e74c3c;color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.08em">INVERTED</span>`
-      : `<span style="background:#2ecc71;color:#000;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.08em">NORMAL</span>`;
+      ? `<span style="background:#e74c3c;color:#fff;font-size:calc(9px * var(--wm-panel-effective-scale, 1));font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.08em">INVERTED</span>`
+      : `<span style="background:#2ecc71;color:#000;font-size:calc(9px * var(--wm-panel-effective-scale, 1));font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:0.08em">NORMAL</span>`;
 
     const spreadHtml = spreadBps !== null
-      ? `<span style="font-size:11px;color:var(--text-dim);margin-left:10px">2Y-10Y Spread: <span style="color:${isInverted ? '#e74c3c' : '#2ecc71'}">${escapeHtml(spreadSign + spreadBps)}bps</span></span>`
+      ? `<span style="font-size:calc(11px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);margin-left:10px">2Y-10Y Spread: <span style="color:${isInverted ? '#e74c3c' : '#2ecc71'}">${escapeHtml(spreadSign + spreadBps)}bps</span></span>`
       : '';
 
     const ecbLegend = this._ecbRates
@@ -330,13 +324,13 @@ export class YieldCurvePanel extends Panel {
           ${statusBadge}${spreadHtml}
         </div>
         <div style="margin:0 -4px">${renderChart(this._current, this._prior, this._ecbRates)}</div>
-        ${renderTable(this._current)}
-        <div style="margin-top:8px;font-size:9px;color:var(--text-dim);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        ${renderTable(this._current, `${this.panelId}Title`)}
+        <div style="margin-top:8px;font-size:calc(9px * var(--wm-panel-effective-scale, 1));color:var(--text-dim);display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <span><svg width="20" height="4" style="vertical-align:middle"><line x1="0" y1="2" x2="20" y2="2" stroke="#3498db" stroke-width="2"/></svg> US (Current)</span>
           <span><svg width="20" height="4" style="vertical-align:middle"><line x1="0" y1="2" x2="20" y2="2" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-dasharray="4,3"/></svg> US (Prior)</span>
           ${ecbLegend}
           <span style="margin-left:auto">Source: FRED / ECB</span>
         </div>
-      </div>`, 'RPC data escaped at each interpolation point via escapeHtml'));
+      </div>`, 'legacy Panel.setContent() migration'));
   }
 }

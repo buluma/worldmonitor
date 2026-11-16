@@ -1,5 +1,10 @@
 // Shared formatter for the energy-disruption timeline used by
 // PipelineStatusPanel and StorageFacilityMapPanel drawers.
+//
+// Kept dependency-free (no generated type imports, no DOM) so the panels
+// can assemble HTML with their existing escape/sanitize helpers. Both
+// drawers call renderDisruptionList on the same shape and get a
+// consistent UI.
 
 export interface DisruptionSourceInput {
   authority?: string;

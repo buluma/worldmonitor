@@ -20,7 +20,7 @@ function makeRequest(url, opts = {}) {
   return new Request(url, {
     method: opts.method || 'GET',
     headers: new Headers({
-      Origin: 'https://wm.opsio.space',
+      Origin: 'https://worldmonitor.app',
       ...opts.headers,
     }),
   });
@@ -131,6 +131,32 @@ describe('fetchWithTimeout', () => {
 });
 
 describe('createRelayHandler', () => {
+  it('serves OREF success publicly and keeps unavailable responses out of caches', async () => {
+    const { default: handler } = await import('../api/oref-alerts.js');
+    mockFetchOk();
+    const response = await handler(makeRequest('https://worldmonitor.app/api/oref-alerts'));
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.equal(response.headers.get('access-control-allow-credentials'), null);
+    assert.match(response.headers.get('cache-control'), /public/);
+    mockFetchStatus(503);
+    const failed = await handler(makeRequest('https://worldmonitor.app/api/oref-alerts'));
+    assert.equal(failed.status, 503);
+    assert.equal(failed.headers.get('cache-control'), 'no-store');
+  });
+  it('uses public CORS only on successful public relay responses', async () => {
+    process.env.WS_RELAY_URL = 'wss://relay.example.com';
+    mockFetchOk();
+    const handler = createRelayHandler({ relayPath: '/test', publicCors: true });
+    const response = await handler(makeRequest('https://worldmonitor.app/api/test'));
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.equal(response.headers.get('access-control-allow-credentials'), null);
+    assert.equal(response.headers.get('vary'), null);
+    mockFetchStatus(503);
+    const failed = await handler(makeRequest('https://worldmonitor.app/api/test'));
+    assert.notEqual(failed.headers.get('access-control-allow-origin'), '*');
+    const denied = await handler(makeRequest('https://worldmonitor.app/api/test', { headers: { Origin: 'https://evil.example' } }));
+    assert.equal(denied.status, 403);
+  });
   beforeEach(() => {
     process.env.WS_RELAY_URL = 'wss://relay.example.com';
     process.env.RELAY_SHARED_SECRET = 'test-secret';
@@ -143,20 +169,20 @@ describe('createRelayHandler', () => {
   it('returns CORS headers on every response', async () => {
     mockFetchOk();
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.ok(res.headers.get('access-control-allow-origin'));
     assert.ok(res.headers.get('vary'));
   });
 
   it('responds 204 to OPTIONS', async () => {
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test', { method: 'OPTIONS' }));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test', { method: 'OPTIONS' }));
     assert.equal(res.status, 204);
   });
 
   it('responds 403 to disallowed origin', async () => {
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test', {
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test', {
       headers: { Origin: 'https://evil.com' },
     }));
     assert.equal(res.status, 403);
@@ -166,14 +192,14 @@ describe('createRelayHandler', () => {
 
   it('responds 405 to non-GET', async () => {
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test', { method: 'POST' }));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test', { method: 'POST' }));
     assert.equal(res.status, 405);
   });
 
   it('responds 401 when requireApiKey and no valid key', async () => {
     process.env.WORLDMONITOR_VALID_KEYS = 'real-key-123';
     const handler = createRelayHandler({ relayPath: '/test', requireApiKey: true });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test', {
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test', {
       headers: { Origin: 'https://tauri.localhost', 'X-WorldMonitor-Key': 'wrong-key' },
     }));
     assert.equal(res.status, 401);
@@ -185,7 +211,7 @@ describe('createRelayHandler', () => {
     process.env.WORLDMONITOR_VALID_KEYS = 'real-key-123';
     mockFetchOk();
     const handler = createRelayHandler({ relayPath: '/test', requireApiKey: true });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test', {
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test', {
       headers: { Origin: 'https://tauri.localhost', 'X-WorldMonitor-Key': 'real-key-123' },
     }));
     assert.equal(res.status, 200);
@@ -194,7 +220,7 @@ describe('createRelayHandler', () => {
   it('responds 503 when WS_RELAY_URL not set', async () => {
     delete process.env.WS_RELAY_URL;
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     const body = await res.json();
     assert.equal(body.error, 'WS_RELAY_URL is not configured');
@@ -203,7 +229,7 @@ describe('createRelayHandler', () => {
   it('proxies relay response with correct status and body', async () => {
     mockFetchOk('{"items":[1,2,3]}');
     const handler = createRelayHandler({ relayPath: '/data' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/data'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/data'));
     assert.equal(res.status, 200);
     assert.equal(await res.text(), '{"items":[1,2,3]}');
   });
@@ -215,7 +241,7 @@ describe('createRelayHandler', () => {
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
     const handler = createRelayHandler({ relayPath: '/test' });
-    await handler(makeRequest('https://wm.opsio.space/api/test?foo=bar&baz=1'));
+    await handler(makeRequest('https://worldmonitor.app/api/test?foo=bar&baz=1'));
     assert.ok(capturedUrl.includes('?foo=bar&baz=1'));
   });
 
@@ -226,7 +252,7 @@ describe('createRelayHandler', () => {
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
     });
     const handler = createRelayHandler({ relayPath: '/test', forwardSearch: false });
-    await handler(makeRequest('https://wm.opsio.space/api/test?foo=bar'));
+    await handler(makeRequest('https://worldmonitor.app/api/test?foo=bar'));
     assert.ok(!capturedUrl.includes('?foo=bar'));
   });
 
@@ -243,7 +269,7 @@ describe('createRelayHandler', () => {
       },
       forwardSearch: false,
     });
-    await handler(makeRequest('https://wm.opsio.space/api/oref?endpoint=history'));
+    await handler(makeRequest('https://worldmonitor.app/api/oref?endpoint=history'));
     assert.ok(capturedUrl.endsWith('/oref/history'));
   });
 
@@ -255,7 +281,7 @@ describe('createRelayHandler', () => {
         'Cache-Control': ok ? 'public, max-age=60' : 'max-age=10',
       }),
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.headers.get('cache-control'), 'public, max-age=60');
   });
 
@@ -267,7 +293,7 @@ describe('createRelayHandler', () => {
         'Cache-Control': ok ? 'public, max-age=60' : 'max-age=10',
       }),
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 500);
     assert.equal(res.headers.get('cache-control'), 'max-age=10');
   });
@@ -284,7 +310,7 @@ describe('createRelayHandler', () => {
         return xc ? { 'X-Cache': xc } : {};
       },
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.headers.get('x-cache'), 'HIT');
   });
 
@@ -297,20 +323,41 @@ describe('createRelayHandler', () => {
       });
     }));
     const handler = createRelayHandler({ relayPath: '/test', timeout: 50 });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 504);
     const body = await res.json();
-    assert.equal(body.error, 'Relay timeout');
+    assert.deepEqual(body, { error: 'Relay timeout' });
   });
 
   it('returns 502 on network error', async () => {
-    mockFetchError('Connection refused');
+    mockFetchError('Connection refused at https://relay.internal/?key=synthetic-secret');
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     const body = await res.json();
-    assert.equal(body.error, 'Relay request failed');
-    assert.equal(body.details, 'Connection refused');
+    assert.deepEqual(body, { error: 'Relay request failed' });
+  });
+
+  // Keeping the failure OUT of the response body is only half the fix: the two
+  // routes with no cfg.fallback (api/opensky.js, api/polymarket.js) would then
+  // answer an outage with a bare 502 and leave no trace anywhere. Pin the
+  // server-side record so the body assertions above cannot lock in silence.
+  it('records the cause server-side even though the body stays generic', async () => {
+    const warnings = [];
+    const realWarn = console.warn;
+    console.warn = (...args) => { warnings.push(args.map(String).join(' ')); };
+    try {
+      mockFetchError('Connection refused at https://relay.internal/?key=synthetic-secret');
+      const handler = createRelayHandler({ relayPath: '/test' });
+      const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
+      assert.equal(res.status, 502);
+      assert.deepEqual(await res.json(), { error: 'Relay request failed' });
+      const logged = warnings.find(line => line.includes('[relay]'));
+      assert.ok(logged, `expected a [relay] warning, got ${JSON.stringify(warnings)}`);
+      assert.match(logged, /Connection refused at https:\/\/relay\.internal/);
+    } finally {
+      console.warn = realWarn;
+    }
   });
 
   it('calls fallback when relay unavailable', async () => {
@@ -322,7 +369,7 @@ describe('createRelayHandler', () => {
         headers: { 'Content-Type': 'application/json', ...cors },
       }),
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     const body = await res.json();
     assert.equal(body.fallback, true);
@@ -337,7 +384,7 @@ describe('createRelayHandler', () => {
         headers: { 'Content-Type': 'application/json', ...cors },
       }),
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     const body = await res.json();
     assert.equal(body.fallback, true);
@@ -353,7 +400,7 @@ describe('createRelayHandler', () => {
         headers: { 'Content-Type': 'application/json', ...cors },
       }),
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     const body = await res.json();
     assert.equal(body.fallback, true);
@@ -362,7 +409,7 @@ describe('createRelayHandler', () => {
   it('passes through non-2xx when onlyOk is false', async () => {
     mockFetchStatus(502, '{"upstream":"error"}');
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(await res.text(), '{"upstream":"error"}');
   });
@@ -374,7 +421,7 @@ describe('createRelayHandler', () => {
       { status: 502, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -388,7 +435,7 @@ describe('createRelayHandler', () => {
       { status: 503, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -399,7 +446,7 @@ describe('createRelayHandler', () => {
   it('preserves JSON error responses as-is', async () => {
     mockFetchStatus(502, '{"upstream":"error"}');
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     assert.equal(await res.text(), '{"upstream":"error"}');
@@ -412,7 +459,7 @@ describe('createRelayHandler', () => {
       { status: 200, headers: { 'Content-Type': 'application/xml' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/xml');
     assert.equal(await res.text(), '<rss><channel></channel></rss>');
@@ -421,7 +468,7 @@ describe('createRelayHandler', () => {
   it('wraps error response with no content-type in JSON envelope', async () => {
     mockFetch(async () => new Response('bad gateway', { status: 502, headers: {} }));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -436,7 +483,7 @@ describe('createRelayHandler', () => {
       { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -450,7 +497,7 @@ describe('createRelayHandler', () => {
       { status: 400, headers: { 'Content-Type': 'APPLICATION/JSON' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 400);
     const body = await res.json();
     assert.equal(body.detail, 'bad request');
@@ -462,7 +509,7 @@ describe('createRelayHandler', () => {
       { status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 404);
     const text = await res.text();
     assert.equal(text, '{"message":"not found"}');
@@ -475,7 +522,7 @@ describe('createRelayHandler', () => {
       { status: 500, headers: { 'Content-Type': 'application/vnd.api+json' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 500);
     assert.equal(res.headers.get('content-type'), 'application/vnd.api+json');
     const body = await res.json();
@@ -492,7 +539,7 @@ describe('createRelayHandler', () => {
       });
     });
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 500);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -506,7 +553,7 @@ describe('createRelayHandler', () => {
       { status: 502, headers: { 'Content-Type': 'multipart/form-data' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -520,7 +567,7 @@ describe('createRelayHandler', () => {
       { status: 500, headers: { 'Content-Type': 'Application/Json' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 500);
     const text = await res.text();
     assert.equal(text, '{"err":"server error"}');
@@ -534,7 +581,7 @@ describe('createRelayHandler', () => {
       { status: 400, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 400);
     const body = await res.json();
     assert.ok(body.error.startsWith('Upstream error'), `unexpected error: ${body.error}`);
@@ -547,7 +594,7 @@ describe('createRelayHandler', () => {
       { status: 401, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 401);
     const body = await res.json();
     assert.ok(body.error.startsWith('Upstream error'), `unexpected error: ${body.error}`);
@@ -560,7 +607,7 @@ describe('createRelayHandler', () => {
       { status: 403, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 403);
     const body = await res.json();
     assert.ok(body.error.startsWith('Upstream error'), `unexpected error: ${body.error}`);
@@ -573,7 +620,7 @@ describe('createRelayHandler', () => {
       { status: 404, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 404);
     const body = await res.json();
     assert.ok(body.error.startsWith('Upstream error'), `unexpected error: ${body.error}`);
@@ -586,7 +633,7 @@ describe('createRelayHandler', () => {
       { status: 499, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 499);
     const body = await res.json();
     assert.ok(body.error.startsWith('Upstream error'), `unexpected error: ${body.error}`);
@@ -599,7 +646,7 @@ describe('createRelayHandler', () => {
       { status: 500, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 500);
     const body = await res.json();
     assert.ok(body.error.startsWith('Upstream error'), `unexpected error: ${body.error}`);
@@ -612,7 +659,7 @@ describe('createRelayHandler', () => {
       { status: 504, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 504);
     const body = await res.json();
     assert.ok(body.error.startsWith('Upstream error'), `unexpected error: ${body.error}`);
@@ -625,7 +672,7 @@ describe('createRelayHandler', () => {
       { status: 200, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'text/html');
     assert.equal(await res.text(), '<html>OK page</html>');
@@ -637,7 +684,7 @@ describe('createRelayHandler', () => {
       { status: 201, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 201);
     assert.equal(res.headers.get('content-type'), 'text/plain');
     assert.equal(await res.text(), 'Created');
@@ -649,7 +696,7 @@ describe('createRelayHandler', () => {
       { status: 299, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 299);
     assert.equal(res.headers.get('content-type'), 'text/plain');
     assert.equal(await res.text(), 'success boundary');
@@ -661,7 +708,7 @@ describe('createRelayHandler', () => {
       { status: 300, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 300);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -677,7 +724,7 @@ describe('createRelayHandler', () => {
       { status: 502, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -692,7 +739,7 @@ describe('createRelayHandler', () => {
       { status: 502, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -710,7 +757,7 @@ describe('createRelayHandler', () => {
       { status: 500, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 500);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -726,7 +773,7 @@ describe('createRelayHandler', () => {
       { status: 503, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -755,7 +802,7 @@ describe('createRelayHandler', () => {
         });
       },
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(fallbackCalled, true);
     assert.equal(res.status, 503);
     const body = await res.json();
@@ -773,7 +820,7 @@ describe('createRelayHandler', () => {
       onlyOk: true,
       // no fallback
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();
@@ -792,7 +839,7 @@ describe('createRelayHandler', () => {
         return new Response('{}', { status: 200 });
       },
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(fallbackCalled, false);
     assert.equal(res.status, 502);
     assert.equal(await res.text(), '{"upstream":"error"}');
@@ -812,7 +859,7 @@ describe('createRelayHandler', () => {
         return xc ? { 'X-Cache': xc } : {};
       },
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.equal(res.headers.get('content-type'), 'application/json');
     assert.equal(res.headers.get('x-cache'), 'MISS');
@@ -831,7 +878,7 @@ describe('createRelayHandler', () => {
         'Cache-Control': ok ? 'public, max-age=60' : 'no-store',
       }),
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     assert.equal(res.headers.get('content-type'), 'application/json');
     assert.equal(res.headers.get('cache-control'), 'no-store');
@@ -853,7 +900,7 @@ describe('createRelayHandler', () => {
         'X-Request-Id': response.headers.get('x-request-id') || '',
       }),
     });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 503);
     assert.equal(res.headers.get('content-type'), 'application/json');
     assert.equal(res.headers.get('cache-control'), 'no-cache');
@@ -869,7 +916,7 @@ describe('createRelayHandler', () => {
       { status: 502, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 502);
     assert.ok(res.headers.get('access-control-allow-origin'));
     assert.ok(res.headers.get('vary'));
@@ -885,7 +932,7 @@ describe('createRelayHandler', () => {
         { status, headers: { 'Content-Type': 'text/html' } },
       ));
       const handler = createRelayHandler({ relayPath: '/test' });
-      const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+      const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
       assert.equal(res.status, status, `Status mismatch for ${status}`);
       const text = await res.text();
       let parsed;
@@ -902,7 +949,7 @@ describe('createRelayHandler', () => {
       { status: 502, headers: { 'Content-Type': 'text/html' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     const text = await res.text();
     const parsed = JSON.parse(text);
     assert.ok(parsed.error.startsWith('Upstream error'));
@@ -917,7 +964,7 @@ describe('createRelayHandler', () => {
       { status: 200, headers: { 'Content-Type': 'application/xml' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/xml');
     assert.equal(await res.text(), '<?xml version="1.0"?><data/>');
@@ -929,7 +976,7 @@ describe('createRelayHandler', () => {
       { status: 200, headers: { 'Content-Type': 'text/csv' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'text/csv');
     assert.equal(await res.text(), 'name,value\nfoo,1\nbar,2');
@@ -941,7 +988,7 @@ describe('createRelayHandler', () => {
       { status: 200, headers: { 'Content-Type': 'application/octet-stream' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/octet-stream');
     assert.equal(await res.text(), 'binary-ish-data');
@@ -953,7 +1000,7 @@ describe('createRelayHandler', () => {
       { status: 200, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'text/plain');
     assert.equal(await res.text(), 'just plain text');
@@ -965,7 +1012,7 @@ describe('createRelayHandler', () => {
       { status: 200, headers: { 'Content-Type': 'application/vnd.api+json' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/vnd.api+json');
     assert.equal(await res.text(), '{"data":{"type":"articles","id":"1"}}');
@@ -977,7 +1024,7 @@ describe('createRelayHandler', () => {
     // `|| 'application/json'` fallback in buildRelayResponse never fires.
     mockFetch(async () => new Response('{"ok":true}', { status: 200, headers: {} }));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 200);
     assert.ok(res.headers.get('content-type').includes('text/plain'));
     assert.equal(await res.text(), '{"ok":true}');
@@ -993,7 +1040,7 @@ describe('createRelayHandler', () => {
       { status: 199, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     // The RangeError from Response constructor is caught by the handler
     assert.equal(res.status, 502);
     const body = await res.json();
@@ -1006,7 +1053,7 @@ describe('createRelayHandler', () => {
       { status: 599, headers: { 'Content-Type': 'text/plain' } },
     ));
     const handler = createRelayHandler({ relayPath: '/test' });
-    const res = await handler(makeRequest('https://wm.opsio.space/api/test'));
+    const res = await handler(makeRequest('https://worldmonitor.app/api/test'));
     assert.equal(res.status, 599);
     assert.equal(res.headers.get('content-type'), 'application/json');
     const body = await res.json();

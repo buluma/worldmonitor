@@ -2,18 +2,47 @@
 // rebuild-trigger: 2026-04-23
 
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { flushPendingLlmEvents } from './lib/llm-telemetry.cjs';
 
 import { buildEnvelope, unwrapEnvelope } from './_seed-envelope-source.mjs';
+import { MAX_DECODED_PAYLOAD_BYTES, encodeGzipPayload, parseStoredSeedJson } from './_seed-payload-codec.mjs';
 import { resolveRecordCount } from './_seed-contract.mjs';
+// scripts/shared mirror, not ../shared: seeders deploy with rootDirectory=scripts.
+import { COMPARE_AND_DELETE_SCRIPT } from './shared/compare-and-delete-script.cjs';
+// Re-exported: 149 seeders import loadEnvFile from here, and the digest cron
+// imports the leaf module directly so its image does not need the seed kernel.
+import { isTestRuntime, loadEnvFile } from './_env-file.mjs';
+
+export { isTestRuntime, loadEnvFile };
+
+// process.exit does not drain in-flight promises — drain any fire-and-forget
+// llm_call telemetry first (bounded by its 1.5s fetch timeout; a no-op when
+// nothing is pending). Used by every runSeed exit reachable after fetchFn,
+// where seeder LLM calls may have emitted events (#4954 review).
+async function exitAfterTelemetryFlush(code) {
+  activeLockHeartbeat?.stop();
+  try { await flushPendingLlmEvents(); } catch { /* never block exit */ }
+  process.exit(code);
+}
 
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
 const MAX_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5MB per key
+const MAX_REDIS_REQUEST_BYTES = 10_000_000;
+export const SEED_REDIS_COMMAND_TIMEOUT_MS = 15_000;
+export const SEED_REDIS_RETRY_ATTEMPTS = 3;
+export const SEED_REDIS_RETRY_BASE_MS = 1_000;
+export const SEED_EXTRA_KEY_COMMAND_TIMEOUT_MS = 10_000;
+export const SEED_VERIFY_COMMAND_TIMEOUT_MS = 5_000;
+export const SEED_VERIFY_ATTEMPTS = 2;
+export const SEED_VERIFY_RETRY_DELAY_MS = 500;
 
 const __seed_dirname = dirname(fileURLToPath(import.meta.url));
 
-export { CHROME_UA };
+export { CHROME_UA, MAX_PAYLOAD_BYTES };
 
 /**
  * Resolve the CoinGecko base URL + auth header for the configured key tier.
@@ -47,6 +76,53 @@ export function coingeckoEndpoint(extraHeaders = {}) {
     return { baseUrl: 'https://api.coingecko.com/api/v3', headers, tier: 'demo' };
   }
   return { baseUrl: 'https://api.coingecko.com/api/v3', headers, tier: 'keyless' };
+}
+
+/**
+ * Fetch a CoinGecko URL, retrying 429s only while the whole phase still fits
+ * `budgetMs`.
+ *
+ * The budget is a ceiling on the phase, in-flight request included: before
+ * each backoff sleep the next attempt's full request timeout is charged
+ * alongside the sleep, and the loop gives up when they would not fit. A seeder
+ * run as a bundle section can therefore size `budgetMs` so its CoinPaprika
+ * fallback still fits the section's timeoutMs (tests/seed-fetch-budget.test.mjs
+ * gates that arithmetic). Retrying by attempt count instead let identical
+ * copies of this loop sleep 150s into a 120s section (2026-04-14, 2026-09-20).
+ *
+ * @param {string} url
+ * @param {{ headers?: Record<string, string>, requestTimeoutMs: number, budgetMs: number, fetchFn?: typeof fetch, sleepFn?: (ms: number) => Promise<void>, now?: () => number }} options
+ * @returns {Promise<Response>} the first OK response; any non-429 error status throws
+ */
+export async function fetchCoinGeckoWithRetryBudget(url, {
+  headers = { Accept: 'application/json', 'User-Agent': CHROME_UA },
+  requestTimeoutMs,
+  budgetMs,
+  fetchFn = fetch,
+  sleepFn = sleep,
+  now = Date.now,
+}) {
+  // An undefined budget would compare NaN and retry forever, which is the
+  // failure this helper exists to rule out.
+  for (const [name, value] of Object.entries({ requestTimeoutMs, budgetMs })) {
+    if (!Number.isFinite(value) || value <= 0) throw new TypeError(`fetchCoinGeckoWithRetryBudget: ${name} must be a positive number, got ${value}`);
+  }
+  const startedAt = now();
+  for (let attempt = 1; ; attempt++) {
+    const resp = await fetchFn(url, { headers, signal: AbortSignal.timeout(requestTimeoutMs) });
+    if (resp.status === 429) {
+      const elapsed = now() - startedAt;
+      const wait = Math.min(5_000 * 2 ** (attempt - 1), 60_000);
+      if (elapsed + wait + requestTimeoutMs > budgetMs) {
+        throw new Error(`CoinGecko rate limit exceeded after ${attempt} attempt(s) in ${Math.round(elapsed / 1000)}s (${budgetMs / 1000}s retry budget)`);
+      }
+      console.warn(`  CoinGecko 429 — waiting ${wait / 1000}s (attempt ${attempt}, ${Math.round(elapsed / 1000)}s of ${budgetMs / 1000}s budget)`);
+      await sleepFn(wait);
+      continue;
+    }
+    if (!resp.ok) throw new Error(`CoinGecko HTTP ${resp.status}`);
+    return resp;
+  }
 }
 
 /**
@@ -116,10 +192,14 @@ export async function fetchCoinPaprikaTickersById(paprikaIds, options = {}) {
   return tickers;
 }
 
-async function allSettledWithConcurrency(items, concurrency, mapper) {
+export async function allSettledWithConcurrency(items, concurrency, mapper) {
   const results = new Array(items.length);
   let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
+  // Clamp to a finite integer ≥1 so an invalid concurrency (0, NaN, negative, float)
+  // can't spin up zero workers and silently return a sparse, all-unprocessed array —
+  // it degrades to sequential instead. (items.length===0 → 0 workers → empty result.)
+  const safe = Number.isFinite(concurrency) && concurrency >= 1 ? Math.floor(concurrency) : 1;
+  const workerCount = Math.min(safe, items.length);
 
   await Promise.all(Array.from({ length: workerCount }, async () => {
     while (nextIndex < items.length) {
@@ -168,8 +248,9 @@ export function getBundleRunStartedAtMs() {
   return Number.isFinite(raw) && raw > 0 ? raw : null;
 }
 
-// Canonical FX fallback rates — used when Yahoo Finance returns null/zero.
-// Single source of truth shared by seed-bigmac, seed-grocery-basket, seed-fx-rates.
+// Point-of-use FX recovery constants — used by conversion seeds when Yahoo fails
+// or a gap cannot be retried in budget. Canonical seed-fx-rates must NOT fill
+// shared:fx-rates:v1 with these values (publish nulls + fallbackCurrencies instead).
 // EGP: 0.0192 is the most recently observed live rate (2026-03-21 seed run).
 export const SHARED_FX_FALLBACKS = {
   USD: 1, GBP: 1.2700, EUR: 1.0850, JPY: 0.0067, CHF: 1.1300,
@@ -180,6 +261,8 @@ export const SHARED_FX_FALLBACKS = {
   HUF: 0.0028, RON: 0.2200, PHP: 0.0173, VND: 0.000040, MYR: 0.2250,
   PKR: 0.0036, ILS: 0.2750, ARS: 0.00084, COP: 0.000240, CLP: 0.00108,
   UAH: 0.0240, NGN: 0.00062, KES: 0.0077,
+  // Fuel-price countries (#10051); XOF is pegged at 655.957 per EUR.
+  ZMW: 0.0495, GHS: 0.0860, XOF: 0.00165, UYU: 0.0249,
   AED: 0.2723, SAR: 0.2666, QAR: 0.2747, KWD: 3.2520,
   BHD: 2.6525, OMR: 2.5974, JOD: 1.4104, EGP: 0.0192, LBP: 0.0000112,
 };
@@ -192,32 +275,36 @@ export function loadSharedConfig(filename) {
   throw new Error(`Cannot find shared/${filename} — checked ../shared/ and ./shared/`);
 }
 
-export function loadEnvFile(metaUrl) {
-  const __dirname = metaUrl ? dirname(fileURLToPath(metaUrl)) : process.cwd();
-  const candidates = [
-    join(__dirname, '..', '.env.local'),
-    join(__dirname, '..', '..', '.env.local'),
-  ];
-  if (process.env.HOME) {
-    candidates.push(join(process.env.HOME, 'Documents/GitHub/worldmonitor', '.env.local'));
-  }
-  for (const envPath of candidates) {
-    if (!existsSync(envPath)) continue;
-    const lines = readFileSync(envPath, 'utf8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx === -1) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      let val = trimmed.slice(eqIdx + 1).trim();
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      if (!process.env[key]) process.env[key] = val;
-    }
-    return;
-  }
+/**
+ * Load the checkout's `.env.local` into process.env.
+ *
+ * `only` restricts the import to the named keys, for callers that want their
+ * two credentials rather than every variable in the file. It exists so those
+ * callers do not need a private loader — a private loader silently opts out of
+ * the test-runtime guard and the checkout scoping, which is exactly how #5767
+ * survived in two files.
+ */
+/**
+ * Resolve the Convex HTTP-actions origin from an env bag.
+ *
+ * `CONVEX_URL` is the client/websocket origin (`*.convex.cloud`); HTTP actions
+ * — every `/relay/*` route — are served from the sibling `*.convex.site`. The
+ * mapping is a one-line string swap, but it is a one-line string swap that
+ * three callers were each carrying their own copy of, and a caller that gets
+ * it wrong silently POSTs to a host that does not route the request.
+ * Returns '' when neither variable is set, so callers can report what is
+ * missing rather than building a URL against `undefined`.
+ *
+ * @param {Record<string, string | undefined>} env
+ */
+export function resolveConvexSiteUrl(env) {
+  const raw = env.CONVEX_SITE_URL || (env.CONVEX_URL ?? '').replace('.convex.cloud', '.convex.site');
+  return raw ? raw.replace(/\/+$/, '') : '';
+}
+
+// The commit a seeder was deployed from: Railway, then Vercel, then Actions.
+export function getDeployRevision(env = process.env) {
+  return env.RAILWAY_GIT_COMMIT_SHA || env.VERCEL_GIT_COMMIT_SHA || env.GITHUB_SHA || '';
 }
 
 export function maskToken(token) {
@@ -235,16 +322,11 @@ export function getRedisCredentials() {
   return { url, token };
 }
 
-async function redisCommand(url, token, command) {
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-    signal: AbortSignal.timeout(15_000),
-  });
+export async function parseRedisCommandResponse(resp, label = 'Redis command') {
   if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    const err = new Error(`Redis command failed: HTTP ${resp.status} — ${text.slice(0, 200)}`);
+    const text = typeof resp.text === 'function' ? await resp.text().catch(() => '') : '';
+    const detail = text ? ` — ${text.slice(0, 200)}` : '';
+    const err = new Error(`${label} failed: HTTP ${resp.status}${detail}`);
     // Tag errors so callers wrapping in withRetry know whether to back off.
     // Permanent 4xx (auth, payload-too-large, etc.) won't recover on retry —
     // mark non-retryable so withRetry exits the loop in ~10ms instead of
@@ -255,28 +337,94 @@ async function redisCommand(url, token, command) {
     if (PERMANENT_4XX_STATUSES.has(resp.status)) {
       err.nonRetryable = true;
     } else if (resp.status === 429) {
-      const retryAfterMs = parseRetryAfterMs(resp.headers.get('retry-after'));
-      if (retryAfterMs != null) err.retryAfterMs = retryAfterMs;
+      const retryAfterMs = parseRetryAfterUncappedMs(getResponseHeader(resp.headers, 'Retry-After'));
+      if (retryAfterMs != null) {
+        err.retryAfterMs = retryAfterMs;
+        // A bounded Redis operation cannot wait out a longer cooldown.
+        if (retryAfterMs > MAX_RETRY_AFTER_MS) err.nonRetryable = true;
+      }
     }
     err.httpStatus = resp.status;
     throw err;
   }
-  return resp.json();
+  let body;
+  try {
+    body = await resp.json();
+  } catch (cause) {
+    throw Object.assign(new Error(`${label} returned invalid JSON (HTTP ${resp.status})`), { cause });
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error(`${label} returned an unexpected Upstash response`);
+  }
+  if (body.error != null) {
+    throw new Error(`${label} rejected by Upstash: ${String(body.error)}`);
+  }
+  if (!Object.hasOwn(body, 'result')) {
+    throw new Error(`${label} returned an Upstash response without a result`);
+  }
+  return body;
 }
 
-async function redisGet(url, token, key) {
-  const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(5_000),
+export async function redisCommand(url, token, command, options = {}) {
+  const commandName = String(command?.[0] || 'command').toUpperCase();
+  const label = options.label || `Redis ${commandName}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': CHROME_UA },
+    body: JSON.stringify(command),
+    signal: AbortSignal.timeout(options.timeoutMs ?? SEED_REDIS_COMMAND_TIMEOUT_MS),
   });
-  if (!resp.ok) return null;
-  const data = await resp.json();
+  return parseRedisCommandResponse(resp, label);
+}
+
+async function redisGet(url, token, key, options = {}) {
+  // Retry transient failures (timeout / network tear / 5xx / 429) with the
+  // redisCommand tagging contract. A single unretried blip here silently read
+  // as "key missing", which killed seed-gdelt-intel's cache-merge fallback for
+  // 21h while the canonical key was healthy (issue #5437). The external
+  // contract is unchanged: HTTP failures still degrade to null (now loudly),
+  // thrown failures still propagate — both only after retries.
+  //
+  // `options.strict` opts a single caller out of the HTTP degrade. Degrading is
+  // right for a cache-merge reader that can proceed without the value, and
+  // wrong for one whose next step reads "no value" as a first run — the arms
+  // sweep republished a 56-row slice over its ~200-row canonical key that way.
+  // Default false keeps every existing caller byte-identical.
+  let data;
+  try {
+    data = await withRetry(async () => {
+      const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(SEED_VERIFY_COMMAND_TIMEOUT_MS),
+      });
+      if (!resp.ok) {
+        const err = new Error(`Redis GET ${key} failed: HTTP ${resp.status}`);
+        if (PERMANENT_4XX_STATUSES.has(resp.status)) {
+          err.nonRetryable = true;
+        } else if (resp.status === 429) {
+          const retryAfterMs = parseRetryAfterUncappedMs(getResponseHeader(resp.headers, 'Retry-After'));
+          if (retryAfterMs != null) {
+            err.retryAfterMs = retryAfterMs;
+            // A bounded Redis operation cannot wait out a longer cooldown.
+            if (retryAfterMs > MAX_RETRY_AFTER_MS) err.nonRetryable = true;
+          }
+        }
+        err.httpStatus = resp.status;
+        throw err;
+      }
+      return resp.json();
+    }, SEED_REDIS_RETRY_ATTEMPTS - 1, SEED_REDIS_RETRY_BASE_MS);
+  } catch (err) {
+    if (err.httpStatus == null || options.strict) throw err;
+    console.warn(`  Redis GET ${key}: degraded to null (${err.message})`);
+    return null;
+  }
   if (!data.result) return null;
   // Envelope-aware: returns inner `data` for seeded keys written in contract
   // mode, passes through legacy (bare-shape) values unchanged. Fixes WoW/cross-
   // seed reads that were silently getting `{_seed, data}` after PR 2a enveloped
   // the writer side of 91 canonical keys.
-  return unwrapEnvelope(JSON.parse(data.result)).data;
+  return unwrapEnvelope(parseStoredSeedJson(data.result)).data;
 }
 
 async function redisSet(url, token, key, value, ttlSeconds) {
@@ -312,7 +460,11 @@ export async function acquireLock(domain, runId, ttlMs) {
 export async function acquireLockSafely(domain, runId, ttlMs, opts = {}) {
   const label = opts.label || domain;
   try {
-    const locked = await withRetry(() => acquireLock(domain, runId, ttlMs), opts.maxRetries ?? 2, opts.delayMs ?? 1000);
+    const locked = await withRetry(
+      () => acquireLock(domain, runId, ttlMs),
+      opts.maxRetries ?? SEED_REDIS_RETRY_ATTEMPTS - 1,
+      opts.delayMs ?? SEED_REDIS_RETRY_BASE_MS,
+    );
     return { locked, skipped: false, reason: null };
   } catch (err) {
     if (isTransientRedisError(err)) {
@@ -326,12 +478,145 @@ export async function acquireLockSafely(domain, runId, ttlMs, opts = {}) {
 export async function releaseLock(domain, runId) {
   const { url, token } = getRedisCredentials();
   const lockKey = `seed-lock:${domain}`;
-  const script = `if redis.call("get",KEYS[1]) == ARGV[1] then return redis.call("del",KEYS[1]) else return 0 end`;
   try {
-    await redisCommand(url, token, ['EVAL', script, 1, lockKey, runId]);
-  } catch {
-    // Best-effort release; lock will expire via TTL
+    await redisCommand(url, token, ['EVAL', COMPARE_AND_DELETE_SCRIPT, 1, lockKey, runId]);
+  } catch (err) {
+    // Best-effort release; the lock still expires via TTL. Log the failure:
+    // an empty catch hid a pinned-script mismatch until the TTL (#8490).
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`  releaseLock failed for ${lockKey}: ${message}`);
   }
+}
+
+// ─── Seed lock fencing (SM-122) ───
+// runSeed's fetch may run past lockTtlMs, so ownership is re-checked inside
+// Redis at every publish point. Both scripts return {1, ''} when KEYS[1] still
+// holds ARGV[1] (and renew it for ARGV[2] ms), or {0, <current holder or ''>}
+// when the lock is gone, so the caller can tell a takeover from an expiry.
+// The redis-rest proxy pins both texts byte for byte
+// (docker/redis-rest-proxy.mjs, tests/redis-rest-proxy-command-parity.test.mjs).
+export const SEED_LOCK_RENEW_SCRIPT = [
+  "local current = redis.call('GET', KEYS[1])",
+  'if current ~= ARGV[1] then',
+  "  return {0, current or ''}",
+  'end',
+  "redis.call('PEXPIRE', KEYS[1], ARGV[2])",
+  "return {1, ''}",
+].join('\n');
+
+// Fenced SET: writes KEYS[2] = ARGV[3] (with EX ARGV[4] unless it is '') only
+// while KEYS[1] still holds ARGV[1].
+export const SEED_LOCK_FENCED_SET_SCRIPT = [
+  "local current = redis.call('GET', KEYS[1])",
+  'if current ~= ARGV[1] then',
+  "  return {0, current or ''}",
+  'end',
+  "redis.call('PEXPIRE', KEYS[1], ARGV[2])",
+  "if ARGV[4] == '' then",
+  "  redis.call('SET', KEYS[2], ARGV[3])",
+  'else',
+  "  redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[4])",
+  'end',
+  "return {1, ''}",
+].join('\n');
+
+export class SeedLockLostError extends Error {
+  constructor(lockKey, holder) {
+    super(holder
+      ? `seed lock ${lockKey} is now held by run ${holder}`
+      : `seed lock ${lockKey} expired and is held by no run`);
+    this.name = 'SeedLockLostError';
+    this.lockKey = lockKey;
+    this.holder = holder || null;
+    // A lost lock never comes back by retrying the same write.
+    this.nonRetryable = true;
+  }
+}
+
+export function isSeedLockLostError(err) {
+  return err instanceof SeedLockLostError;
+}
+
+/**
+ * Throw SeedLockLostError unless an EVAL reply from one of the fence scripts
+ * says the lock is still ours. Any other reply shape is a protocol error.
+ */
+function assertFenceReply(reply, lockKey) {
+  const result = reply?.result;
+  if (!Array.isArray(result) || (result[0] !== 1 && result[0] !== 0)) {
+    throw new Error(`Seed lock fence for ${lockKey} returned an unexpected reply: ${JSON.stringify(result)}`);
+  }
+  if (result[0] === 0) throw new SeedLockLostError(lockKey, typeof result[1] === 'string' ? result[1] : '');
+}
+
+/**
+ * Renew `seed-lock:<domain>` for ttlMs if runId still holds it. Throws
+ * SeedLockLostError when it does not; Redis failures propagate after retries.
+ */
+export async function renewLockIfHeld(domain, runId, ttlMs) {
+  const { url, token } = getRedisCredentials();
+  const lockKey = `seed-lock:${domain}`;
+  const reply = await withRetry(
+    () => redisCommand(url, token, ['EVAL', SEED_LOCK_RENEW_SCRIPT, 1, lockKey, runId, ttlMs], {
+      label: `Seed lock renew ${lockKey}`,
+    }),
+    SEED_REDIS_RETRY_ATTEMPTS - 1,
+    SEED_REDIS_RETRY_BASE_MS,
+  );
+  assertFenceReply(reply, lockKey);
+}
+
+function fencedSetCommand(lockFence, key, payload, ttlSeconds) {
+  return [
+    'EVAL', SEED_LOCK_FENCED_SET_SCRIPT, 2, lockFence.lockKey, key,
+    lockFence.runId, lockFence.ttlMs, payload, ttlSeconds ? ttlSeconds : '',
+  ];
+}
+
+// The heartbeat of the lock runSeed currently holds. exitAfterTelemetryFlush
+// stops it so a test harness that traps process.exit leaves no live timer.
+let activeLockHeartbeat = null;
+
+/**
+ * Keep renewing a held seed lock every ttlMs/3 so a legitimately long fetch
+ * does not lose it. Stops for good once Redis reports the lock gone; a
+ * transient Redis error is logged and the next tick tries again.
+ */
+function startLockHeartbeat(domain, runId, ttlMs) {
+  const state = { lost: null, timer: null, inFlight: false };
+  const intervalMs = Math.max(250, Math.floor(ttlMs / 3));
+  const stop = () => {
+    if (state.timer) clearInterval(state.timer);
+    state.timer = null;
+    if (activeLockHeartbeat === heartbeat) activeLockHeartbeat = null;
+  };
+  const tick = async () => {
+    if (state.inFlight || state.lost) return;
+    state.inFlight = true;
+    try {
+      const { url, token } = getRedisCredentials();
+      const lockKey = `seed-lock:${domain}`;
+      const reply = await redisCommand(url, token, ['EVAL', SEED_LOCK_RENEW_SCRIPT, 1, lockKey, runId, ttlMs], {
+        label: `Seed lock renew ${lockKey}`,
+      });
+      assertFenceReply(reply, lockKey);
+    } catch (err) {
+      if (isSeedLockLostError(err)) {
+        state.lost = err;
+        stop();
+        console.warn(`  [${domain}] ${err.message} — this run will not publish`);
+      } else {
+        console.warn(`  [${domain}] seed lock renewal failed (will retry): ${err?.message || err}`);
+      }
+    } finally {
+      state.inFlight = false;
+    }
+  };
+  state.timer = setInterval(tick, intervalMs);
+  state.timer.unref?.();
+  const heartbeat = { state, stop };
+  activeLockHeartbeat = heartbeat;
+  return heartbeat;
 }
 
 export async function atomicPublish(canonicalKey, data, validateFn, ttlSeconds, options = {}) {
@@ -344,6 +629,14 @@ export async function atomicPublish(canonicalKey, data, validateFn, ttlSeconds, 
     }
   }
 
+  // Some seeds publish a cohort of source-health records that must succeed
+  // before the canonical archive becomes visible. Keep that work outside the
+  // Redis retry loop: the callback's own writes own their retry policy, and a
+  // failure must abort before the staging/canonical SET sequence begins.
+  if (options.beforePublish) {
+    await options.beforePublish(data);
+  }
+
   // When the seeder opts into the contract (options.envelopeMeta provided), wrap
   // the payload in the seed envelope before publishing so the data key and its
   // freshness metadata share one lifecycle. Legacy seeders pass no envelopeMeta
@@ -352,10 +645,19 @@ export async function atomicPublish(canonicalKey, data, validateFn, ttlSeconds, 
   const payloadValue = options.envelopeMeta && shouldEnvelopeKey(canonicalKey)
     ? buildEnvelope({ ...options.envelopeMeta, data })
     : data;
-  const payload = JSON.stringify(payloadValue);
+  const json = JSON.stringify(payloadValue);
+  // Readers stop inflating at MAX_DECODED_PAYLOAD_BYTES; never publish what they cannot read.
+  if (options.compressPayload && Buffer.byteLength(json, 'utf8') > MAX_DECODED_PAYLOAD_BYTES) {
+    throw new Error(`Payload too large: ${(Buffer.byteLength(json, 'utf8') / 1024 / 1024).toFixed(1)}MB decoded > ${MAX_DECODED_PAYLOAD_BYTES / 1024 / 1024}MB decode limit`);
+  }
+  const payload = options.compressPayload ? encodeGzipPayload(json) : json;
   const payloadBytes = Buffer.byteLength(payload, 'utf8');
-  if (payloadBytes > MAX_PAYLOAD_BYTES) {
-    throw new Error(`Payload too large: ${(payloadBytes / 1024 / 1024).toFixed(1)}MB > 5MB limit`);
+  const maxPayloadBytes = options.maxPayloadBytes ?? MAX_PAYLOAD_BYTES;
+  if (!Number.isSafeInteger(maxPayloadBytes) || maxPayloadBytes < 1 || maxPayloadBytes > MAX_SEEDED_VALUE_BYTES) {
+    throw new Error(`Invalid maxPayloadBytes: expected an integer from 1 to ${MAX_SEEDED_VALUE_BYTES}`);
+  }
+  if (payloadBytes > maxPayloadBytes) {
+    throw new Error(`Payload too large: ${(payloadBytes / 1024 / 1024).toFixed(1)}MB > ${maxPayloadBytes / 1024 / 1024}MB limit`);
   }
 
   // Retry the entire 3-call publish unit on transient Upstash failures.
@@ -373,17 +675,52 @@ export async function atomicPublish(canonicalKey, data, validateFn, ttlSeconds, 
   // orphaned stagings naturally.
   return await withRetry(
     async () => {
+      if (options.publishAtomically) {
+        // A custom atomic publisher owns its Redis writes, so the fence can
+        // only be checked (and the lease renewed) just before it runs.
+        if (options.lockFence) await options.lockFence.renew();
+        await options.publishAtomically({
+          canonicalKey,
+          payload,
+          payloadValue,
+          ttlSeconds,
+        });
+        return { payloadBytes, recordCount: Array.isArray(data) ? data.length : null };
+      }
+
       const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const stagingKey = `${canonicalKey}:staging:${runId}`;
+      // With a lock fence, the canonical SET runs inside Redis only while this
+      // run still holds the seed lock (SM-122).
+      const canonicalCommand = options.lockFence
+        ? fencedSetCommand(options.lockFence, canonicalKey, payload, ttlSeconds)
+        : ttlSeconds
+          ? ['SET', canonicalKey, payload, 'EX', ttlSeconds]
+          : ['SET', canonicalKey, payload];
+      if (maxPayloadBytes > MAX_PAYLOAD_BYTES) {
+        const requestBytes = Math.max(
+          Buffer.byteLength(JSON.stringify(canonicalCommand), 'utf8'),
+          Buffer.byteLength(JSON.stringify(['SET', stagingKey, payload, 'EX', 300]), 'utf8'),
+        );
+        if (requestBytes > MAX_REDIS_REQUEST_BYTES) {
+          const error = new Error(`Redis publish request too large: ${requestBytes} bytes > ${MAX_REDIS_REQUEST_BYTES}-byte limit`);
+          error.nonRetryable = true;
+          throw error;
+        }
+      }
 
       // Write to staging key
-      await redisSet(url, token, stagingKey, payloadValue, 300); // 5 min staging TTL
+      await redisCommand(url, token, ['SET', stagingKey, payload, 'EX', 300]); // 5 min staging TTL
 
       // Overwrite canonical key
-      if (ttlSeconds) {
-        await redisCommand(url, token, ['SET', canonicalKey, payload, 'EX', ttlSeconds]);
-      } else {
-        await redisCommand(url, token, ['SET', canonicalKey, payload]);
+      const canonicalReply = await redisCommand(url, token, canonicalCommand);
+      if (options.lockFence) {
+        try {
+          assertFenceReply(canonicalReply, options.lockFence.lockKey);
+        } catch (err) {
+          await redisDel(url, token, stagingKey).catch(() => {});
+          throw err;
+        }
       }
 
       // Cleanup staging
@@ -391,14 +728,71 @@ export async function atomicPublish(canonicalKey, data, validateFn, ttlSeconds, 
 
       return { payloadBytes, recordCount: Array.isArray(data) ? data.length : null };
     },
-    2,    // 2 retries (3 attempts total) — sufficient for transient blips
-    1000, // 1s base delay; exponential backoff → 1s + 2s = ~3s worst-case
+    SEED_REDIS_RETRY_ATTEMPTS - 1,
+    SEED_REDIS_RETRY_BASE_MS,
           // cumulative wait between attempts. Plus per-attempt fetch time
           // (15s timeout each) means total worst-case before propagating ≈ 48s.
   );
 }
 
-export async function writeFreshnessMetadata(domain, resource, count, source, ttlSeconds, fetchedAtOverride, contentAge) {
+// Fields the shared seed-meta writer owns. afterPublish freshnessMetaPatch
+// (and any preserve-on-skip merge) may add other diagnostics, but never
+// re-anchor these — they come from the current runSeed outcome only.
+export const FRESHNESS_META_RESERVED_FIELDS = Object.freeze([
+  'fetchedAt',
+  'recordCount',
+  'sourceVersion',
+  'newestItemAt',
+  'oldestItemAt',
+  'maxContentAgeMin',
+]);
+
+/**
+ * Strip reserved freshness fields from an existing seed-meta object so the
+ * remainder can be re-applied as a freshnessMetaPatch. Used when a validation
+ * skip rewrites seed-meta while preserving last-good data — without this,
+ * diagnostics such as prediction poolCounts are wiped and fail-closed health
+ * false-alarms (#5875 review).
+ */
+export function freshnessMetaDiagnosticsPatch(existingMeta) {
+  if (!existingMeta || typeof existingMeta !== 'object' || Array.isArray(existingMeta)) {
+    return null;
+  }
+  const reserved = new Set(FRESHNESS_META_RESERVED_FIELDS);
+  const patch = {};
+  for (const [key, value] of Object.entries(existingMeta)) {
+    if (!reserved.has(key)) patch[key] = value;
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
+ * Best-effort read of the current seed-meta value for a domain/resource.
+ * Returns the bare meta object, or null when missing / unreadable. Never throws.
+ */
+export async function readExistingSeedMeta(domain, resource) {
+  try {
+    const { url, token } = getRedisCredentials();
+    const metaKey = `seed-meta:${domain}:${resource}`;
+    const value = await redisGet(url, token, metaKey);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeFreshnessMetadata(
+  domain,
+  resource,
+  count,
+  source,
+  ttlSeconds,
+  fetchedAtOverride,
+  contentAge,
+  metaPatch,
+  options = {},
+) {
   const { url, token } = getRedisCredentials();
   const metaKey = `seed-meta:${domain}:${resource}`;
   const meta = {
@@ -419,11 +813,72 @@ export async function writeFreshnessMetadata(domain, resource, count, source, tt
     meta.oldestItemAt = contentAge.oldestItemAt ?? null;
     meta.maxContentAgeMin = contentAge.maxContentAgeMin;
   }
+  if (metaPatch && typeof metaPatch === 'object') {
+    // Hooks may add bounded diagnostics, but the shared writer owns freshness
+    // and record-count truth. Never let a hook silently re-anchor those fields.
+    const reservedFields = new Set(FRESHNESS_META_RESERVED_FIELDS);
+    for (const [key, value] of Object.entries(metaPatch)) {
+      if (!reservedFields.has(key)) meta[key] = value;
+    }
+  }
   // Use the data TTL if it exceeds 7 days so monthly/annual seeds don't lose
   // their meta key before the health check maxStaleMin threshold is reached.
-  const metaTtl = Math.max(86400 * 7, ttlSeconds || 0);
-  await redisSet(url, token, metaKey, meta, metaTtl);
+  const metaTtl = resolveSeedMetaTtl(undefined, ttlSeconds);
+  // Retry transient Redis failures: this SET runs bare on runSeed's
+  // validate-skip path, where an unretried Upstash abort escaped to the
+  // seeder's top-level catch as `FATAL: The operation was aborted due to
+  // timeout` → exit 1 (seed-gdelt-intel, issue #5437). redisCommand tags
+  // permanent 4xx nonRetryable and 429 with Retry-After; withRetry honors both.
+  //
+  // options.lockFence (runSeed only) makes the SET conditional on the run
+  // still holding its seed lock, so a run that lost the lock cannot stamp
+  // fetchedAt=now over the newer owner's seed-meta (SM-122).
+  const lockFence = options?.lockFence;
+  await withRetry(
+    async () => {
+      if (!lockFence) return redisSet(url, token, metaKey, meta, metaTtl);
+      const reply = await redisCommand(
+        url,
+        token,
+        fencedSetCommand(lockFence, metaKey, JSON.stringify(meta), metaTtl),
+        { label: `seed-meta ${metaKey}` },
+      );
+      assertFenceReply(reply, lockFence.lockKey);
+      return reply;
+    },
+    SEED_REDIS_RETRY_ATTEMPTS - 1,
+    SEED_REDIS_RETRY_BASE_MS,
+  );
   return meta;
+}
+
+/**
+ * writeFreshnessMetadata for runSeed's OWN bookkeeping call sites: degrades to
+ * null (loudly) instead of throwing when Redis stays down past the retry
+ * budget. By the time runSeed writes seed-meta, the run's outcome is already
+ * decided — the canonical publish succeeded, or the skip path preserved
+ * last-good — so letting a metadata SET escape as a throw converts a Redis
+ * blip into `FATAL: … exit 1` + a "Deploy Crashed!" alert over pure
+ * bookkeeping (seed-gdelt-intel 2026-07-23, issue #5478; the #5438 retry
+ * alone was insufficient under the sustained brownout contention window).
+ * The degraded write leaves the OLD seed-meta in place, which ages naturally
+ * — /api/health STALE_SEED is the durable alarm for a persistent failure.
+ *
+ * External callers keep using writeFreshnessMetadata directly: its
+ * throw-after-retries contract is intentional and pinned by tests.
+ */
+export async function writeFreshnessMetadataSafely(domain, resource, ...rest) {
+  try {
+    return await writeFreshnessMetadata(domain, resource, ...rest);
+  } catch (err) {
+    // Losing the seed lock is an ownership decision, not a bookkeeping blip.
+    if (isSeedLockLostError(err)) throw err;
+    console.warn(
+      `  WARNING: seed-meta write for ${domain}:${resource} failed after retries (${err?.message || err}) — `
+      + `continuing; seed-meta will age and /api/health STALE_SEED is the alarm if this persists`,
+    );
+    return null;
+  }
 }
 
 /**
@@ -443,15 +898,34 @@ export async function writeFreshnessMetadata(domain, resource, count, source, tt
 export async function readCanonicalEnvelopeMeta(canonicalKey) {
   try {
     const { url, token } = getRedisCredentials();
-    const resp = await fetch(`${url}/get/${encodeURIComponent(canonicalKey)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
+    // Retry transient failures before degrading: a blip here is worse than a
+    // crash — the caller falls back to writing recordCount=0 with
+    // fetchedAt=NOW, resetting the freshness clock over real staleness
+    // (issue #5437). Outer catch preserves the never-throws contract.
+    const data = await withRetry(async () => {
+      const resp = await fetch(`${url}/get/${encodeURIComponent(canonicalKey)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!resp.ok) {
+        const err = new Error(`Canonical meta GET ${canonicalKey} failed: HTTP ${resp.status}`);
+        if (PERMANENT_4XX_STATUSES.has(resp.status)) {
+          err.nonRetryable = true;
+        } else if (resp.status === 429) {
+          const retryAfterMs = parseRetryAfterUncappedMs(getResponseHeader(resp.headers, 'Retry-After'));
+          if (retryAfterMs != null) {
+            err.retryAfterMs = retryAfterMs;
+            // A bounded Redis operation cannot wait out a longer cooldown.
+            if (retryAfterMs > MAX_RETRY_AFTER_MS) err.nonRetryable = true;
+          }
+        }
+        throw err;
+      }
+      return resp.json();
+    }, 2, 1000);
     if (!data || !data.result) return null;
     let parsed;
-    try { parsed = JSON.parse(data.result); } catch { return null; }
+    try { parsed = parseStoredSeedJson(data.result); } catch { return null; }
     if (!parsed || typeof parsed !== 'object') return null;
     const seed = parsed._seed;
     if (!seed || typeof seed !== 'object') return null;
@@ -484,18 +958,52 @@ export async function readCanonicalEnvelopeMeta(canonicalKey) {
 // caller's request shape, not server load:
 //   400 malformed query   401 bad auth      403 forbidden
 //   404 missing path      410 permanently gone
-//   422 semantic error    451 legal block
+//   413 payload too large 422 semantic error    451 legal block
 // 408 Request Timeout and 429 Too Many Requests are deliberately excluded —
 // both are explicit "back off and retry" signals, often paired with a
 // Retry-After header. Tagging them nonRetryable would convert transient
 // rate-limits into immediate seed failures (especially under parallel
 // fetches like seed-imf-* WEO bundles).
-export const PERMANENT_4XX_STATUSES = new Set([400, 401, 403, 404, 410, 422, 451]);
+export const PERMANENT_4XX_STATUSES = new Set([400, 401, 403, 404, 410, 413, 422, 451]);
 
 // sysexits.h EX_TEMPFAIL: fetch failed, last-good TTL was extended, and the
 // bundle runner should retry/report non-OK without treating the seeder as a
 // generic crash.
 export const GRACEFUL_FETCH_FAILURE_EXIT_CODE = 75;
+
+/**
+ * Tag a fetch error as an upstream outage the seeder may ride out on last-good
+ * data. Only tagged errors are eligible for runSeed's
+ * allowPreservedFetchFailure exit-0 path; configuration errors and code bugs
+ * stay untagged and keep exiting 75 so Railway still surfaces them.
+ *
+ * @param {Error} err
+ * @returns {Error}
+ */
+export function markPreservableFetchFailure(err) {
+  err.preservableFetchFailure = true;
+  return err;
+}
+
+// Age in minutes of the retained seed-meta, or null when it cannot be read or
+// trusted. Callers treat null as "not fresh" so an unreadable meta fails closed.
+async function readSeedMetaAgeMin(metaKey) {
+  try {
+    const meta = await readCanonicalValue(metaKey);
+    const fetchedAt = meta?.fetchedAt;
+    if (typeof fetchedAt !== 'number' || !Number.isFinite(fetchedAt)) return null;
+    const ageMin = (Date.now() - fetchedAt) / 60_000;
+    return ageMin >= 0 ? ageMin : null;
+  } catch {
+    return null;
+  }
+}
+
+// #6396: the seeder fetched its data but its coverage gate refused to publish
+// (and preserved the last-good TTL instead). Distinct from EX_TEMPFAIL so the
+// bundle runner can report PUBLISH_BLOCKED rather than OK for a section whose
+// entire purpose — writing the seed keys — did not happen.
+export const PUBLISH_BLOCKED_EXIT_CODE = 76;
 
 // Cap upstream Retry-After hints so a stuck/abusive header can't park the
 // bundle past its section timeoutMs. Mirrors _yahoo-fetch.mjs convention.
@@ -508,19 +1016,36 @@ const MAX_RETRY_AFTER_MS = 60_000;
  * those predate this helper; consolidating them is a separate refactor.
  */
 export function parseRetryAfterMs(value) {
+  const parsed = parseRetryAfterUncappedMs(value);
+  return parsed == null ? null : Math.min(parsed, MAX_RETRY_AFTER_MS);
+}
+
+/**
+ * #6110: the same parse WITHOUT the `MAX_RETRY_AFTER_MS` cap.
+ *
+ * The cap exists so a stuck header cannot park a bundle past its timeout — it
+ * bounds how long we SLEEP. But it also erases how far out the server actually
+ * pushed us, and that magnitude is exactly what tells us a retry is pointless:
+ * a provider's daily-quota 429 asked for 1213s, which the cap flattens to 60s. Judging
+ * futility on the capped value silently reinstates the bug for any caller whose
+ * remaining budget is >= 60s.
+ *
+ * So: sleep on the capped value, judge on the uncapped one.
+ */
+function parseRetryAfterUncappedMs(value) {
   if (!value) return null;
   const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds > 0) {
-    return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
-  }
+  if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
   const retryAt = Date.parse(value);
-  if (Number.isFinite(retryAt)) {
-    return Math.min(Math.max(retryAt - Date.now(), 1000), MAX_RETRY_AFTER_MS);
-  }
+  if (Number.isFinite(retryAt)) return Math.max(retryAt - Date.now(), 1000);
   return null;
 }
 
 export async function withRetry(fn, maxRetries = 3, delayMs = 1000) {
+  if (!Number.isInteger(maxRetries) || maxRetries < 0 || maxRetries > 10
+      || !Number.isFinite(delayMs) || delayMs < 0) {
+    throw new RangeError('withRetry requires 0-10 retries and a finite non-negative delay');
+  }
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -536,11 +1061,29 @@ export async function withRetry(fn, maxRetries = 3, delayMs = 1000) {
         // (typically 429 / 503). Take whichever is longer — the upstream
         // hint OR the exponential backoff — so a generous server hint
         // isn't undercut, and a missing/short hint still gets back-off.
-        const baseWait = delayMs * 2 ** attempt;
-        const wait = err?.retryAfterMs ? Math.max(baseWait, err.retryAfterMs) : baseWait;
+        const capMs = 60_000;
+        const ceiling = Math.min(capMs, delayMs * 2 ** attempt * 1.25);
+        // Keep the existing minimum delay below the cap, then spread workers
+        // across the upper 20% of the capped exponential window.
+        const baseWait = Math.round(ceiling * (0.8 + Math.random() * 0.2));
+        const retryAfterMs = Number(err?.retryAfterMs);
+        // Provider cooldowns can exceed the backoff cap; callers with phase
+        // budgets reject hints that cannot fit before starting another attempt.
+        const wait = Number.isFinite(retryAfterMs) ? Math.max(baseWait, retryAfterMs) : baseWait;
         const cause = err.cause ? ` (cause: ${err.cause.message || err.cause.code || err.cause})` : '';
         console.warn(`  Retry ${attempt + 1}/${maxRetries} in ${wait}ms: ${err.message || err}${cause}`);
-        await new Promise(r => setTimeout(r, wait));
+        // Test-only cap on the idle wait between attempts (WM_SEED_RETRY_DELAY_MS):
+        // suites that stub persistent upstream failures otherwise sleep through
+        // every real backoff. Attempt COUNT and the logged/computed wait stay
+        // real — only the sleep shrinks. Dual-gated on NODE_TEST_CONTEXT so the
+        // knob is structurally inert outside the node test runner: a stray env
+        // var on a Railway seeder must not disable production backoff (and the
+        // full-wait log lines would make that near-invisible). Read per call.
+        const overrideMs = process.env.NODE_TEST_CONTEXT
+          ? Number(process.env.WM_SEED_RETRY_DELAY_MS)
+          : Number.NaN;
+        const pause = Number.isFinite(overrideMs) ? Math.min(wait, overrideMs) : wait;
+        await new Promise(r => setTimeout(r, pause));
       }
     }
   }
@@ -567,21 +1110,65 @@ export function isRetryableHttpStatus(status) {
 /**
  * Build an Error from a non-ok provider response for use with `withRetry`.
  * Tags `nonRetryable` for permanent statuses and attaches a capped
- * `retryAfterMs` hint when the server sent one:
- *   - `maxRetryAfterMs` caps a generous server hint (e.g. a 10s ceiling).
- *   - `capMs` (the caller's remaining wall-clock budget) caps it further and,
- *     when <= 0, marks the error non-retryable so the loop stops instead of
- *     sleeping past its deadline.
+ * `retryAfterMs` hint when the server sent one.
+ *
+ * Three knobs, and the distinction between them is the whole point:
+ *   - `maxRetryAfterMs` — a policy CEILING ("never sleep longer than this").
+ *     Clamping is legitimate: the server's hint may be conservative, so an
+ *     earlier retry can still succeed.
+ *   - `capMs` — also a ceiling, plus "when <= 0 there is no time left at all,
+ *     so stop". Kept exactly as-is: scripts/_seed-history.mjs passes a fixed
+ *     `RELAY_RETRY_AFTER_CAP_MS` here, so it is NOT a remaining-budget signal.
+ *   - `remainingBudgetMs` (#6110) — the wall clock the caller actually has
+ *     left. This one can produce a VERDICT, not just a clamp: if the server's
+ *     own hint meets or exceeds it, no retry inside this run can succeed, so
+ *     the error is nonRetryable and the caller falls through immediately with
+ *     its budget intact instead of sleeping against a wall that cannot move.
+ *     Equality is futile too: sleeping the full remainder leaves usableBudget
+ *     at 0, so the next withRetry attempt throws createLlmBudgetError and
+ *     aborts the whole provider waterfall rather than failing over.
+ *
+ * Why the verdict matters — production, seed-insights 2026-08-03 12:10Z/12:20Z:
+ * a provider answered 429 with "tokens per day (TPD): Limit 100000, Used 100000 …
+ * try again in 20m13.92s". That 1213s hint was clamped to the 10s ceiling and
+ * retried twice, spending 20s of a 60s LLM budget (and of a 120s seed lock) on
+ * a daily quota that could not reset for another 20 minutes. Those cycles ran
+ * 30-36s against 7-17s for healthy ones, and the run still ended with nothing.
  */
-export function httpRetryError(resp, { maxRetryAfterMs, capMs } = {}) {
+export function httpRetryError(resp, { maxRetryAfterMs, capMs, remainingBudgetMs } = {}) {
   const status = resp?.status;
   const err = new Error(`HTTP ${status}`);
   err.status = status;
   err.nonRetryable = !isRetryableHttpStatus(status);
-  let retryAfterMs = parseRetryAfterMs(getResponseHeader(resp?.headers, 'Retry-After'));
+  const rawHeader = getResponseHeader(resp?.headers, 'Retry-After');
+  const uncappedRetryAfterMs = parseRetryAfterUncappedMs(rawHeader);
+  let retryAfterMs = parseRetryAfterMs(rawHeader);
   if (retryAfterMs != null) {
+    // #6110: judge futility on the UNCAPPED hint. Every ceiling in play here —
+    // MAX_RETRY_AFTER_MS at parse time, then maxRetryAfterMs and capMs below —
+    // answers "how long may we sleep", never "is sleeping worth anything". Only
+    // the uncapped hint carries the magnitude that settles that, and comparing
+    // the capped value instead would reinstate this very bug for any caller
+    // whose budget is >= MAX_RETRY_AFTER_MS (a 1213s hint reads as 60s there).
+    // `>=`: equality is futile for waterfall callers. Sleeping a hint that
+    // equals the remaining budget spends the whole remainder; the next
+    // withRetry attempt hits usableBudgetMs() <= 0 → createLlmBudgetError and
+    // aborts every later provider. Fail-fast keeps the budget for fallthrough.
+    if (Number.isFinite(remainingBudgetMs) && uncappedRetryAfterMs >= Math.max(0, remainingBudgetMs)) {
+      err.nonRetryable = true;
+      // Keep the UNCAPPED hint even though we will not sleep on it: only the
+      // raw magnitude separates "quota exhausted for 20 minutes" from
+      // "throttled for 2 seconds" in the log. The sleep path below still uses
+      // the capped parse. withRetry checks nonRetryable before ever reading
+      // retryAfterMs, so attaching the uncapped value here cannot cause a sleep.
+      err.retryAfterMs = uncappedRetryAfterMs;
+      return err;
+    }
     if (Number.isFinite(maxRetryAfterMs)) retryAfterMs = Math.min(retryAfterMs, maxRetryAfterMs);
     if (Number.isFinite(capMs)) retryAfterMs = Math.min(retryAfterMs, Math.max(0, capMs));
+    // No `remainingBudgetMs` clamp here on purpose: the early return above
+    // already guarantees hint < budget, and the ceilings only shrink it
+    // further. Adding one would be dead code that reads like a safeguard.
     if (retryAfterMs > 0) err.retryAfterMs = retryAfterMs;
     else err.nonRetryable = true;
   }
@@ -623,9 +1210,9 @@ export function logSeedResult(domain, count, durationMs, extra = {}) {
  * payload for contract-mode writes; passes legacy bare-shape values through
  * unchanged. Callers MUST NOT parse the envelope themselves.
  */
-export async function readCanonicalValue(key) {
+export async function readCanonicalValue(key, options = {}) {
   const { url, token } = getRedisCredentials();
-  return redisGet(url, token, key);
+  return redisGet(url, token, key, options);
 }
 
 export async function verifySeedKey(key) {
@@ -649,66 +1236,348 @@ export function shouldEnvelopeKey(key) {
   return typeof key === 'string' && !key.startsWith('seed-meta:');
 }
 
-export async function writeExtraKey(key, data, ttl, envelopeMeta) {
+export async function writeExtraKey(key, data, ttl, envelopeMeta, options = {}) {
   const { url, token } = getRedisCredentials();
-  const value = envelopeMeta && shouldEnvelopeKey(key) ? buildEnvelope({ ...envelopeMeta, data }) : data;
-  const payload = JSON.stringify(value);
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(['SET', key, payload, 'EX', ttl]),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!resp.ok) throw new Error(`Extra key ${key}: write failed (HTTP ${resp.status})`);
+  const payload = serializeExtraKeyValue(key, data, envelopeMeta);
+  // options.lockFence (runSeed only): write only while the run still holds
+  // its seed lock (SM-122).
+  const lockFence = options?.lockFence;
+  // Retry transient Redis timeouts / 5xx / network tears so a single Upstash
+  // blip in afterPublish doesn't crash the whole seeder run. Permanent 4xx
+  // (auth, payload-too-large) fail fast; 429 honors Retry-After. Mirrors the
+  // redisCommand / atomicPublish contract (seed-gdelt-intel PUBLISH_TIMEOUT fix).
+  await withRetry(async () => {
+    const reply = await redisCommand(
+      url,
+      token,
+      lockFence ? fencedSetCommand(lockFence, key, payload, ttl) : ['SET', key, payload, 'EX', ttl],
+      { label: `Extra key ${key}`, timeoutMs: SEED_EXTRA_KEY_COMMAND_TIMEOUT_MS },
+    );
+    if (lockFence) assertFenceReply(reply, lockFence.lockKey);
+  }, SEED_REDIS_RETRY_ATTEMPTS - 1, SEED_REDIS_RETRY_BASE_MS);
   console.log(`  Extra key ${key}: written`);
 }
 
-export async function writeSeedMeta(dataKey, recordCount, metaKeyOverride, metaTtlSeconds) {
+/** Serialize an extra key exactly as it is persisted to Redis. */
+export function serializeExtraKeyValue(key, data, envelopeMeta) {
+  const value = envelopeMeta && shouldEnvelopeKey(key) ? buildEnvelope({ ...envelopeMeta, data }) : data;
+  return JSON.stringify(value);
+}
+
+/** Return the UTF-8 size of an extra-key value as Redis receives it. */
+export function extraKeyPayloadBytes(key, data, envelopeMeta) {
+  return Buffer.byteLength(serializeExtraKeyValue(key, data, envelopeMeta), 'utf8');
+}
+
+/**
+ * Floor for every seed-meta TTL. A meta key must survive its data key's
+ * disappearance so health can report STALE_SEED (present-but-stale) rather than
+ * losing the heartbeat at the same moment as the payload — see the "seed-meta
+ * outlives its data key" note in api/health.js's absence branch.
+ */
+export const SEED_META_MIN_TTL_SECONDS = 86400 * 7;
+
+/**
+ * The meta TTL for a data key written with `dataTtlSeconds`.
+ *
+ * The floor alone is not enough once a data key outlives 7 days: health reads
+ * freshness from seed-meta and falls through to plain OK when the meta is gone
+ * but the data key still has bytes, so a meta that expires FIRST makes the
+ * STALE_SEED alarm unreachable for the remainder of the data key's life. The
+ * clamp is the same one `writeFreshnessMetadata` has always applied to the
+ * canonical key; extra keys need it for the same reason.
+ *
+ * An explicit `metaTtlSeconds` still wins, so the parameter keeps meaning what
+ * it says. The three seeders that already pass one (seed-jodi-gas,
+ * seed-natural-events, seed-defense-industrial-suppliers) pass their own data
+ * TTL — the value this would have computed — so they are byte-identical either
+ * way; the override exists for a future caller that needs a different one.
+ */
+export function resolveSeedMetaTtl(metaTtlSeconds, dataTtlSeconds) {
+  return metaTtlSeconds ?? Math.max(SEED_META_MIN_TTL_SECONDS, dataTtlSeconds || 0);
+}
+
+export const SEED_META_KEY_PREFIX = 'seed-meta:';
+
+/**
+ * Resolve the seed-meta key for a data key. With no override the meta key is
+ * derived (`seed-meta:<dataKey minus :vN>`); an override must be a DISTINCT key
+ * inside the `seed-meta:` namespace.
+ *
+ * #8424: seed-bls-series passed its own data key as the override, so every run
+ * overwrote the series it had just written with the 44-byte heartbeat, on the
+ * 7-day meta TTL, while health — watching the canonical key — read OK for six
+ * months. A wrong override now fails the run before any byte is written
+ * instead of silently erasing the payload it describes.
+ */
+export function resolveSeedMetaKey(dataKey, metaKeyOverride) {
+  if (metaKeyOverride === undefined || metaKeyOverride === null || metaKeyOverride === '') {
+    return `${SEED_META_KEY_PREFIX}${dataKey.replace(/:v\d+$/, '')}`;
+  }
+  if (typeof metaKeyOverride !== 'string' || !metaKeyOverride.startsWith(SEED_META_KEY_PREFIX) || metaKeyOverride === dataKey) {
+    throw new Error(
+      `seed-meta key for ${dataKey} must be a distinct ${SEED_META_KEY_PREFIX}* key, got ${String(metaKeyOverride)} `
+      + '(a colliding override overwrites the data it describes, #8424)',
+    );
+  }
+  return metaKeyOverride;
+}
+
+function buildSeedMeta(recordCount, coverage, extra, fetchedAt = Date.now()) {
+  const meta = { fetchedAt, recordCount: recordCount ?? 0 };
+  if (coverage) meta.coverage = coverage;
+  // Optional producer diagnostics, copied verbatim onto the meta record.
+  // api/health.js decides which fields it trusts (see readSeedMeta), so callers
+  // must keep `extra` safe for a public endpoint; the consumer-prices
+  // `coverage` block is deliberately NOT merged here (health parses it with a
+  // separate retailer schema — see fetchTradeFlows in seed-supply-chain-trade).
+  if (extra && typeof extra === 'object') {
+    for (const [key, value] of Object.entries(extra)) {
+      if (value !== undefined) meta[key] = value;
+    }
+  }
+  return meta;
+}
+
+export async function writeSeedMeta(dataKey, recordCount, metaKeyOverride, metaTtlSeconds, coverage, extra, options = {}) {
   const { url, token } = getRedisCredentials();
-  const metaKey = metaKeyOverride || `seed-meta:${dataKey.replace(/:v\d+$/, '')}`;
-  const meta = { fetchedAt: Date.now(), recordCount: recordCount ?? 0 };
-  const metaTtl = metaTtlSeconds ?? 86400 * 7;
+  const metaKey = resolveSeedMetaKey(dataKey, metaKeyOverride);
+  const meta = buildSeedMeta(recordCount, coverage, extra);
+  // No data TTL is in scope here — callers that know one resolve it through
+  // `resolveSeedMetaTtl` before calling. Bare floor otherwise.
+  const metaTtl = resolveSeedMetaTtl(metaTtlSeconds);
   const resp = await fetch(url, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(['SET', metaKey, JSON.stringify(meta), 'EX', metaTtl]),
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': CHROME_UA },
+    // options.lockFence (runSeed only): write only while the run still holds
+    // its seed lock (SM-122).
+    body: JSON.stringify(options?.lockFence
+      ? fencedSetCommand(options.lockFence, metaKey, JSON.stringify(meta), metaTtl)
+      : ['SET', metaKey, JSON.stringify(meta), 'EX', metaTtl]),
     signal: AbortSignal.timeout(5_000),
   });
-  if (!resp.ok) console.warn(`  seed-meta ${metaKey}: write failed`);
+  if (!resp.ok) {
+    console.warn(`  seed-meta ${metaKey}: write failed`);
+    return false;
+  }
+  // Upstash can return HTTP 200 with a command-level error. Treat that as a
+  // failed metadata write instead of reporting success while health still
+  // points at the previous heartbeat.
+  const reply = await parseRedisCommandResponse(resp, `seed-meta ${metaKey}`);
+  if (options?.lockFence) assertFenceReply(reply, options.lockFence.lockKey);
+  return true;
 }
 
-export async function writeExtraKeyWithMeta(key, data, ttl, recordCount, metaKeyOverride, metaTtlSeconds) {
+export async function writeExtraKeyWithMeta(key, data, ttl, recordCount, metaKeyOverride, metaTtlSeconds, coverage, extra) {
+  // Resolve (and reject) the meta key BEFORE the data write: a colliding pair
+  // must fail the run with the previous value intact, not after erasing it.
+  const metaKey = resolveSeedMetaKey(key, metaKeyOverride);
   await writeExtraKey(key, data, ttl);
-  await writeSeedMeta(key, recordCount, metaKeyOverride, metaTtlSeconds);
+  // The data TTL is right here, so the meta never has to be the shorter of the
+  // two. seed-economy's four EIA weekly keys (21d data, 14d health budget) rode
+  // the bare 7d default and went silent-OK for the 14 days in between.
+  // `extra` carries the same optional producer diagnostics writeSeedMeta accepts
+  // directly (see its contract note) — provenance a caller needs on the meta
+  // record, not just inside the data payload.
+  return writeSeedMeta(key, recordCount, metaKey, resolveSeedMetaTtl(metaTtlSeconds, ttl), coverage, extra);
 }
 
-export async function extendExistingTtl(keys, ttlSeconds = 600) {
+// Some aggregate keys are both the data pointer and the provenance source for
+// health. Publish that pair in one Redis transaction so readers cannot observe
+// a new marker with the previous seed-meta record.
+export async function writeExtraKeyWithMetaAtomically({
+  key,
+  data,
+  ttlSeconds,
+  recordCount,
+  metaKey: metaKeyOverride,
+  metaTtlSeconds,
+  coverage,
+  extra,
+  fetchedAt = Date.now(),
+}) {
+  const { url, token } = getRedisCredentials();
+  const dataTtl = Number(ttlSeconds);
+  const metaTtl = Number(resolveSeedMetaTtl(metaTtlSeconds, dataTtl));
+  if (!key || !Number.isInteger(dataTtl) || dataTtl <= 0) {
+    throw new Error('Atomic extra-key publish requires a key and a positive integer TTL');
+  }
+  if (!Number.isInteger(metaTtl) || metaTtl <= 0) {
+    throw new Error('Atomic seed-meta publish requires a positive integer TTL');
+  }
+
+  const metaKey = resolveSeedMetaKey(key, metaKeyOverride);
+  const commands = [
+    ['SET', key, JSON.stringify(data), 'EX', dataTtl],
+    ['SET', metaKey, JSON.stringify(buildSeedMeta(recordCount, coverage, extra, fetchedAt)), 'EX', metaTtl],
+  ];
+  // This runs after the provider fetches have settled. Retrying this bounded
+  // Redis transaction therefore recovers a transient publication failure
+  // without replaying the provider requests or exposing half the pair.
+  return withRetry(async () => {
+    const resp = await fetch(`${url}/multi-exec`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': CHROME_UA },
+      body: JSON.stringify(commands),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!resp.ok) {
+      const err = httpRetryError(resp);
+      err.message = `Atomic extra-key publish failed: HTTP ${resp.status}`;
+      err.httpStatus = resp.status;
+      throw err;
+    }
+
+    let results;
+    try {
+      results = await resp.json();
+    } catch (cause) {
+      throw Object.assign(new Error('Atomic extra-key publish failed: invalid transaction response'), {
+        cause,
+        nonRetryable: true,
+      });
+    }
+    if (!Array.isArray(results)) {
+      throw Object.assign(
+        new Error(`Atomic extra-key publish failed: ${results?.error || 'invalid transaction response'}`),
+        { nonRetryable: true },
+      );
+    }
+    const failures = results.filter((result) => result?.error || result?.result === 'ERR');
+    if (failures.length > 0 || results.length !== commands.length) {
+      throw Object.assign(
+        new Error(`Atomic extra-key publish failed: ${failures.length || 'missing'} command result(s)`),
+        { nonRetryable: true },
+      );
+    }
+    return true;
+  }, SEED_REDIS_RETRY_ATTEMPTS - 1, SEED_REDIS_RETRY_BASE_MS);
+}
+
+// Detailed counterpart to extendExistingTtl. Results stay aligned to the input
+// keys so callers that publish per-key health can distinguish a confirmed
+// EXPIRE no-op from a successful extension and from a pipeline result that
+// could not be confirmed at all.
+//
+// `options.allowMissingKeys` names keys whose absence is EXPECTED (an optional
+// marker that has not been written yet). For those keys a confirmed EXPIRE
+// no-op stops being a failure: the "manual seed required" warning is suppressed
+// and `allExtended` forgives them. That second half is load-bearing --
+// `allExtended` gates runSeed's RETRY exit(1) and its preservationSucceeded
+// diagnostic, so treating an expected-absent marker as a preservation failure
+// would crash-loop a seeder over a key that is not supposed to exist yet.
+//
+// The #5364 contract is otherwise intact: a no-op on any key NOT in this list is
+// still a real data condition, an unconfirmed result is still a failure even for
+// a listed key, and `missingKeys` still reports every no-op for callers that
+// need per-key truth.
+export async function extendExistingTtlDetailed(keys, ttlSeconds = 600, options = {}) {
+  const requestedKeys = Array.isArray(keys) ? keys : [];
+  const allowMissingKeys = new Set(
+    Array.isArray(options?.allowMissingKeys) ? options.allowMissingKeys : [],
+  );
+  if (requestedKeys.length === 0) {
+    return {
+      allExtended: true,
+      extendedKeys: [],
+      missingKeys: [],
+      unconfirmedKeys: [],
+    };
+  }
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) {
     console.error('  Cannot extend TTL: missing Redis credentials');
-    return;
+    return {
+      allExtended: false,
+      extendedKeys: [],
+      missingKeys: [],
+      unconfirmedKeys: [...requestedKeys],
+    };
   }
   try {
     // EXPIRE only refreshes TTL when key already exists (returns 0 on missing keys — no-op).
     // Check each result: keys that returned 0 are missing/expired and cannot be extended.
-    const pipeline = keys.map(k => ['EXPIRE', k, ttlSeconds]);
-    const resp = await fetch(`${url}/pipeline`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(pipeline),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (resp.ok) {
-      const results = await resp.json();
-      const extended = results.filter(r => r?.result === 1).length;
-      const missing = results.filter(r => r?.result === 0).length;
-      if (extended > 0) console.log(`  Extended TTL on ${extended} key(s) (${ttlSeconds}s)`);
-      if (missing > 0) console.warn(`  WARNING: ${missing} key(s) were expired/missing — EXPIRE was a no-op; manual seed required`);
+    const pipeline = requestedKeys.map(k => ['EXPIRE', k, ttlSeconds]);
+    // Retry the pipeline call on transient Redis failures. A successful response
+    // with some EXPIRE no-ops is a real missing-key condition, NOT a transient
+    // error, so we only retry HTTP/network failures and return false for no-ops.
+    const resp = await withRetry(async () => {
+      const r = await fetch(`${url}/pipeline`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(pipeline),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!r.ok) {
+        const err = new Error(`TTL extension pipeline failed (HTTP ${r.status})`);
+        if (PERMANENT_4XX_STATUSES.has(r.status)) {
+          err.nonRetryable = true;
+        } else if (r.status === 429) {
+          const retryAfterMs = parseRetryAfterUncappedMs(getResponseHeader(r.headers, 'Retry-After'));
+          if (retryAfterMs != null) {
+            err.retryAfterMs = retryAfterMs;
+            // A bounded Redis operation cannot wait out a longer cooldown.
+            if (retryAfterMs > MAX_RETRY_AFTER_MS) err.nonRetryable = true;
+          }
+        }
+        throw err;
+      }
+      return r;
+    }, 2, 1000);
+    const results = await resp.json();
+    const extendedKeys = [];
+    const missingKeys = [];
+    const unconfirmedKeys = [];
+    for (let i = 0; i < requestedKeys.length; i++) {
+      if (results?.[i]?.result === 1) {
+        extendedKeys.push(requestedKeys[i]);
+      } else if (results?.[i]?.result === 0) {
+        missingKeys.push(requestedKeys[i]);
+      } else {
+        unconfirmedKeys.push(requestedKeys[i]);
+      }
     }
+    if (extendedKeys.length > 0) console.log(`  Extended TTL on ${extendedKeys.length} key(s) (${ttlSeconds}s)`);
+    const strictMissingKeys = missingKeys.filter((key) => !allowMissingKeys.has(key));
+    if (strictMissingKeys.length > 0) console.warn(`  WARNING: ${strictMissingKeys.length} key(s) were expired/missing — EXPIRE was a no-op; manual seed required`);
+    if (unconfirmedKeys.length > 0) console.warn(`  WARNING: TTL extension result was unconfirmed for ${unconfirmedKeys.length} key(s)`);
+    return {
+      // An allowed-missing key is EXCLUDED from this verdict, not just from the
+      // warning: `allExtended` gates runSeed's RETRY exit(1) and its
+      // preservationSucceeded diagnostic, so counting an expected-absent marker
+      // as a preservation failure would crash-loop a seeder over a key that is
+      // not supposed to exist yet. The second clause requires a CONFIRMED no-op
+      // -- an allowed-missing key whose EXPIRE result could not be read is still
+      // a failure, because "we could not tell" is not "expectedly absent".
+      allExtended: requestedKeys.every((key) => (
+        extendedKeys.includes(key) || (allowMissingKeys.has(key) && missingKeys.includes(key))
+      )),
+      extendedKeys,
+      missingKeys,
+      unconfirmedKeys,
+    };
   } catch (e) {
     console.error(`  TTL extension failed: ${e.message}`);
+    return {
+      allExtended: false,
+      extendedKeys: [],
+      missingKeys: [],
+      unconfirmedKeys: [...requestedKeys],
+    };
   }
+}
+
+// Returns true only when EVERY requested key was actually extended (EXPIRE
+// returned 1 for all). Returns false on missing creds, network/HTTP failure,
+// or any key that was missing/expired (EXPIRE no-op). Existing fire-and-forget
+// callers ignore the return; a caller that treats a successful extension as
+// proof the data is still alive (e.g. a market-closed skip that then reports
+// fresh) MUST gate on this boolean and fall back to a real fetch on false —
+// otherwise a silent extension failure looks green while the key expires.
+export async function extendExistingTtl(keys, ttlSeconds = 600, options = {}) {
+  const result = await extendExistingTtlDetailed(keys, ttlSeconds, options);
+  return result.allExtended;
 }
 
 export function sleep(ms) {
@@ -716,12 +1585,10 @@ export function sleep(ms) {
 }
 
 // ─── Proxy helpers for sources that block Railway container IPs ───
-// Proxy support not available in self-host fork
-const resolveProxyString = () => null;
-const resolveProxyStringConnect = () => null;
+const { resolveProxyString, resolveProxyStringConnect } = createRequire(import.meta.url)('./_proxy-utils.cjs');
 
-export function resolveProxy() {
-  return resolveProxyString();
+export function resolveProxy(raw = process.env.PROXY_URL || '') {
+  return resolveProxyString(raw);
 }
 
 // For HTTP CONNECT tunneling (httpsProxyFetchJson); keeps gate.decodo.com, not us.decodo.com.
@@ -729,20 +1596,64 @@ export function resolveProxyForConnect() {
   return resolveProxyStringConnect();
 }
 
+// Scrub `scheme://user:pass@host` credentials out of anything we surface. Proxy auth
+// strings are the only place seeders carry inline credentials, and they end up embedded
+// in curl argv — see the execFileSync catch in curlFetch below.
+export function redactProxyCredentials(text) {
+  return String(text ?? '').replace(/(\w+:\/\/)[^/\s:@]+:[^/\s@]+@/g, '$1***:***@');
+}
+
 // curl-based fetch; throws on non-2xx. Returns response body as string.
 // NOTE: requires curl binary — available in Dockerfile.relay (apk add curl) and Railway.
 // Prefer httpsProxyFetchJson (pure Node.js) when possible; use curlFetch when curl-specific
 // features are needed (e.g. --compressed, -L redirect following with proxy).
-export function curlFetch(url, proxyAuth, headers = {}) {
-  const args = ['-sS', '--compressed', '--max-time', '15', '-L'];
+//
+// `exec` is an injection seam for tests ONLY — the credential scrubbing below lives in a
+// catch around execFileSync, and there is no other way to drive that branch deterministically.
+export function curlFetch(
+  url,
+  proxyAuth,
+  headers = {},
+  { exec = execFileSync, timeoutMs = 15_000 } = {},
+) {
+  const curlTimeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+  const args = ['-sS', '--compressed', '--max-time', String(curlTimeoutSeconds), '-L'];
   if (proxyAuth) {
-    const proxyUrl = /^https?:\/\//i.test(proxyAuth) ? proxyAuth : `http://${proxyAuth}`;
+    const proxyUrl = /^https?:\/\//i.test(proxyAuth) ? proxyAuth : `https://${proxyAuth}`;
+    if (/^http:\/\//i.test(proxyUrl) && process.env.PROXY_ALLOW_INSECURE_HTTP !== '1') {
+      throw new Error('Plain HTTP curl proxies require PROXY_ALLOW_INSECURE_HTTP=1');
+    }
     args.push('-x', proxyUrl);
   }
   for (const [k, v] of Object.entries(headers)) args.push('-H', `${k}: ${v}`);
   args.push('-w', '\n%{http_code}');
   args.push(url);
-  const raw = execFileSync('curl', args, { encoding: 'utf8', timeout: 20000, stdio: ['pipe', 'pipe', 'pipe'] });
+  let raw;
+  try {
+    raw = exec('curl', args, {
+      encoding: 'utf8',
+      timeout: timeoutMs + 5_000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    // SECURITY: when curl itself exits non-zero (SSL_ERROR_SYSCALL, "CONNECT tunnel
+    // failed", DNS), execFileSync builds an Error whose message is the ENTIRE argv —
+    // including `-x http://user:pass@proxy-host`. Seeders log that message, so the proxy
+    // credentials were being written verbatim into Railway logs on every curl-level
+    // failure (observed continuously during the 2026-07-13 GDELT 429 storm). Re-throw
+    // with curl's own stderr, which names the failure without echoing the command.
+    //
+    // Dropping `.status` is load-bearing, not incidental: execFileSync sets it to curl's
+    // EXIT CODE (35, 56, 7…). _gdelt-fetch.mjs uses `.status` to distinguish upstream
+    // HTTP responses from transport failures, so leaking the exit code would classify
+    // curl exit 35 as an HTTP response and publish the wrong route diagnostic. Only a
+    // genuine HTTP status may carry `.status`.
+    const stderr = redactProxyCredentials(err?.stderr || '').trim().split('\n').filter(Boolean).pop();
+    throw Object.assign(
+      new Error(`curl failed: ${stderr || redactProxyCredentials(err?.message) || 'unknown error'}`),
+      { curlFailed: true },
+    );
+  }
   const nl = raw.lastIndexOf('\n');
   const status = parseInt(raw.slice(nl + 1).trim(), 10);
   if (status < 200 || status >= 300) throw Object.assign(new Error(`HTTP ${status}`), { status });
@@ -755,28 +1666,140 @@ export function curlFetch(url, proxyAuth, headers = {}) {
 //                  "http://user:pass@host:port"  (explicit plain TCP)
 // Bare/undeclared-scheme proxies always use TLS (Decodo gate.decodo.com requires it).
 // Explicit http:// proxies use plain TCP to avoid breaking non-TLS setups.
-async function httpsProxyFetchJson(url, proxyAuth) {
-  const { buffer } = await httpsProxyFetchRaw(url, proxyAuth, { accept: 'application/json' });
+async function httpsProxyFetchJson(url, proxyAuth, proxyAttempt = 0) {
+  const { buffer } = await httpsProxyFetchRaw(url, proxyAuth, { accept: 'application/json', proxyAttempt });
   return JSON.parse(buffer.toString('utf8'));
 }
 
-export async function httpsProxyFetchRaw(url, proxyAuth, { accept = '*/*', timeoutMs = 20_000, signal } = {}) {
-  // Proxy not available on self-host — skip
-  const proxyConfig = parseProxyConfig(proxyAuth);
+// `headers` are forwarded to the origin (e.g. an API subscription key); the
+// shared User-Agent is applied unless a caller sets its own.
+export async function httpsProxyFetchRaw(url, proxyAuth, {
+  accept = '*/*', timeoutMs = 20_000, signal, proxyAttempt = 0, headers = {}, onErrorResponse, maxResponseBytes,
+} = {}) {
+  const { proxyFetch, parseProxyConfigForAttempt } = createRequire(import.meta.url)('./_proxy-utils.cjs');
+  const proxyConfig = parseProxyConfigForAttempt(proxyAuth, proxyAttempt);
   if (!proxyConfig) throw new Error('Invalid proxy auth string');
-  const result = await proxyFetch(url, proxyConfig, { accept, timeoutMs, signal, headers: { 'User-Agent': CHROME_UA } });
-  if (!result.ok) throw Object.assign(new Error(`HTTP ${result.status}`), { status: result.status });
+  const result = await proxyFetch(url, proxyConfig, { accept, timeoutMs, signal, maxResponseBytes, headers: { 'User-Agent': CHROME_UA, ...headers } });
+  if (!result.ok) {
+    onErrorResponse?.(result);
+    throw Object.assign(new Error(`HTTP ${result.status}`), { status: result.status });
+  }
   return { buffer: result.buffer, contentType: result.contentType };
 }
 
-// Whether a proxy error should be retried (the Decodo proxy rotates exit IP per
-// attempt). Covers 5xx/522, DNS/socket errors, AND mid-handshake TLS tears — the
+// Whether a proxy error should be retried. A retry reaches a DIFFERENT exit IP
+// only because the caller advances its attempt index (see fredFetchJson) — a
+// Decodo sticky port pins one exit for the life of the session and never
+// rotates on its own. Reading it the other way round is what let three retries
+// pile onto one dead exit during the 2026-09-10 outage (#7963).
+// Covers 5xx/522, DNS/socket errors, AND mid-handshake TLS tears — the
 // last group is load-bearing: if a TLS-tear isn't classified transient, the
 // retry loop breaks on attempt 1 and falls to a direct FRED fetch, which a
 // datacenter IP gets rate-limited/blocked on → the whole batch fails. Exported
 // for unit testing (the proxy fetch itself is network-bound and not injectable).
 export function isTransientProxyError(message) {
-  return /HTTP 5\d{2}|522|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE|socket (disconnected|hang up)|TLS connection|tls_get_more_records|packet length too long|SSL routines|secure TLS connection/i.test(message || '');
+  return /HTTP(?:\/1\.[01])? 5\d{2}|522|timeout|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE|socket (disconnected|hang up)|TLS connection|tls_get_more_records|packet length too long|SSL routines|secure TLS connection/i.test(message || '');
+}
+
+// Whether the ORIGIN refused this particular egress IP — a failure that a
+// different sticky exit can actually fix. FRED blocks datacenter IPs, which is
+// why the proxy leg exists at all (#2911), so a 403 served through a healthy
+// tunnel says "this exit is unwelcome" and the next sticky exit may be fine.
+//
+// 403 ONLY, deliberately. 429 was in the first draft and came out under review.
+// Nothing in this repo establishes that FRED's rate limit is scoped to the
+// source IP — #2911 cites direct-fetch TIMEOUTS as the observed motivation, not
+// IP-keyed 429s — and `api_key` travels in the query string (_fred-seeder.mjs),
+// which is how quota is conventionally scoped. If the limit is per-key,
+// rotating exits cannot clear it and merely triples the request count against a
+// quota that is already exhausted, while the Retry-After FRED sends is
+// discarded anyway because httpsProxyFetchRaw drops `result.headers` when it
+// throws. Widen to 429 only with evidence that FRED's 429 is IP-scoped, and
+// plumb Retry-After first — _proxy-utils.cjs already preserves those headers
+// through the tunnel for exactly this reason (#6241).
+//
+// Deliberately separate from isTransientProxyError rather than folded into it:
+// that predicate is shared by other seeders whose retry budgets are tuned to
+// their own upstreams, and widening it would change their behaviour too. Kept
+// status-based rather than message-based because proxyConnectTunnel and
+// httpsProxyFetchRaw both collapse to `HTTP <status>` text, and only the
+// structured fields tell the two apart.
+//
+// Gateway-layer rejections are excluded: proxyConnectTunnel marks its own
+// failures `proxyConnect: true` for exactly this decision — see its comment in
+// _proxy-utils.cjs, "only the origin case can be helped by a different exit". A
+// 407, or a gateway 403 for a port outside the account's allocation, means the
+// credentials or plan are wrong and no exit fixes that. Other origin 4xx are
+// excluded too: every exit answers a bad series id identically, so rotating on
+// one would just burn the proxy budget before the direct leg gets its turn.
+//
+// Takes the ERROR OBJECT, not a message string — it reads structured fields, so
+// a mistaken isExitRefusalError(err.message) would silently return false
+// forever and quietly disable rotation. The typeof guard makes that loud-ish
+// rather than accidental, and a regression test pins it.
+export function isExitRefusalError(error) {
+  if (!error || typeof error !== 'object' || error.proxyConnect) return false;
+  return error.status === 403;
+}
+
+const FRED_JSON_HEADERS = { Accept: 'application/json', 'User-Agent': CHROME_UA };
+
+function throwIfFredMaintenance(body, contentType) {
+  if (/\btext\/html\b/i.test(contentType || '')
+    && /<h1[^>]*>\s*We(?:['\u2019]ll| will) be back soon!?\s*<\/h1>/i.test(body)) {
+    throw markPreservableFetchFailure(new Error('FRED API is under maintenance'));
+  }
+}
+
+function parseFredJson(body, contentType) {
+  throwIfFredMaintenance(body, contentType);
+  return JSON.parse(body);
+}
+
+// FRED's own edge returns sporadic 5xx on individual series. Observed
+// 2026-08-26: four consecutive 24/24 runs, then `FRED T10Y2Y: fetch failed —
+// direct: HTTP 502` and the same for UNRATE, publishing 22/24 — enough to trip
+// health's minRecordCount of 24 for the whole hour. Both series answered 200
+// when queried directly minutes later, and adjacent runs fetched them fine.
+//
+// Deliberately status-only, and deliberately NOT reusing isTransientProxyError:
+// that predicate also matches timeouts and socket tears, and a direct leg that
+// timed out has already burned its 20s budget — retrying it would double the
+// worst case inside runSeed's fetch-phase deadline for a leg that is plainly
+// broken. A 5xx fails fast, so this retry costs a few hundred milliseconds.
+const FRED_DIRECT_ATTEMPTS = 2;
+function isRetriableFredStatus(status) {
+  return Number.isInteger(status) && status >= 500 && status <= 599;
+}
+
+// Direct FRED fetch with a bounded retry on a fast-failing 5xx. Shared by the
+// proxy-fallback path and the no-proxy path: a transient 502 is transient
+// regardless of which leg reached it, and having only one of the two retry is
+// how the asymmetry below went unnoticed — the proxy leg already retried three
+// times while its own fallback got a single attempt.
+async function fredDirectFetchJson(url) {
+  let lastError;
+  for (let attempt = 1; attempt <= FRED_DIRECT_ATTEMPTS; attempt += 1) {
+    try {
+      const r = await fetch(url, { headers: FRED_JSON_HEADERS, signal: AbortSignal.timeout(20_000) });
+      if (r.ok) {
+        if (/\btext\/html\b/i.test(r.headers?.get?.('content-type') || '')) {
+          return parseFredJson(await r.text(), r.headers.get('content-type'));
+        }
+        return await r.json();
+      }
+      throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+    } catch (error) {
+      lastError = error;
+      if (attempt < FRED_DIRECT_ATTEMPTS && isRetriableFredStatus(error?.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 350 * attempt + Math.random() * 250));
+        continue;
+      }
+      if (isRetriableFredStatus(error?.status) || error?.status === 429) markPreservableFetchFailure(error);
+      throw error;
+    }
+  }
+  throw lastError;
 }
 
 // Fetch JSON from a FRED URL, routing through proxy when available.
@@ -784,34 +1807,60 @@ export function isTransientProxyError(message) {
 // so try proxy first to avoid 20s timeout on every direct attempt.
 export async function fredFetchJson(url, proxyAuth) {
   if (proxyAuth) {
-    // Retry the proxy (rotates exit IP per attempt) before falling back direct.
+    // Advance Decodo sticky ports before falling back direct. Reusing port
+    // 10001 kept all retries on the failed exit during the 2026-09-10 outage.
     // isTransientProxyError covers TLS-handshake tears — see its doc comment.
+    //
+    // The exits are recorded so the warning below can name them. Rotation
+    // no-ops silently for any host outside parseProxyConfigForAttempt's sticky
+    // map (us.decodo.com, an ISP or city-targeted endpoint) or any port outside
+    // its range, and a healthy run looks identical whether rotation engaged or
+    // the configured exit simply recovered. Three identical ports in that line
+    // is the operator's one-line proof the rotation is inert for the deployed
+    // PROXY_URL — without it the next outage reads exactly like the last one.
+    const { parseProxyConfigForAttempt } = createRequire(import.meta.url)('./_proxy-utils.cjs');
+    const triedExits = [];
     let lastProxyErr;
     for (let attempt = 1; attempt <= 3; attempt++) {
+      triedExits.push(parseProxyConfigForAttempt(proxyAuth, attempt - 1)?.port ?? '?');
       try {
-        return await httpsProxyFetchJson(url, proxyAuth);
+        const { buffer, contentType } = await httpsProxyFetchRaw(url, proxyAuth, {
+          accept: 'application/json', proxyAttempt: attempt - 1,
+          onErrorResponse: ({ buffer: errorBody, contentType: errorContentType }) => {
+            throwIfFredMaintenance(errorBody.toString('utf8'), errorContentType);
+          },
+        });
+        return parseFredJson(buffer.toString('utf8'), contentType);
       } catch (proxyErr) {
         lastProxyErr = proxyErr;
-        const transient = isTransientProxyError(proxyErr.message);
-        if (attempt < 3 && transient) {
+        // Two different reasons to try the next exit: the hop broke (transient),
+        // or this exit's IP is the thing FRED is refusing (403/429). The second
+        // is what the rotation above is FOR, and it used to break the loop after
+        // one attempt because the transient predicate matches no 4xx.
+        const rotatable = isTransientProxyError(proxyErr.message) || isExitRefusalError(proxyErr);
+        if (attempt < 3 && rotatable) {
           await new Promise((r) => setTimeout(r, 400 * attempt + Math.random() * 300));
           continue;
         }
         break;
       }
     }
-    console.warn(`  [fredFetch] proxy failed after retries (${lastProxyErr?.message}) — retrying direct`);
+    console.warn(`  [fredFetch] proxy failed after retries on exits [${triedExits.join(', ')}] (${lastProxyErr?.message}) — retrying direct`);
     try {
-      const r = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20_000) });
-      if (r.ok) return r.json();
-      throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+      return await fredDirectFetchJson(url);
     } catch (directErr) {
-      throw Object.assign(new Error(`direct: ${directErr.message}`), { cause: directErr });
+      const proxyMaintenance = lastProxyErr?.preservableFetchFailure === true;
+      const connectTimeout = directErr.cause?.code === 'UND_ERR_CONNECT_TIMEOUT';
+      const directMessage = `${directErr.message}${connectTimeout ? ' (UND_ERR_CONNECT_TIMEOUT)' : ''}`;
+      const message = `${proxyMaintenance ? `proxy: ${lastProxyErr.message}; ` : ''}direct: ${directMessage}`;
+      throw Object.assign(new Error(message), {
+        cause: directErr,
+        preservableFetchFailure: directErr.preservableFetchFailure === true
+          || (proxyMaintenance && (directErr.status === 403 || directErr.name === 'TimeoutError' || connectTimeout)),
+      });
     }
   }
-  const r = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20_000) });
-  if (r.ok) return r.json();
-  throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+  return fredDirectFetchJson(url);
 }
 
 // Fetch JSON from an IMF DataMapper URL, direct-first with proxy fallback.
@@ -896,11 +1945,19 @@ export function normalizeSdmxPeriod(period) {
  * `normalizeSdmxPeriod()` on every period before storing it as a key.
  * See `scripts/seed-gold-cb-reserves.mjs::fetchIrfclMonthlySeries` for the
  * canonical monthly pattern.
+ *
+ * `release` holds the dataset-level PUBLICATION_DATE and UPDATE_DATE of this
+ * one response, as IMF supplied them, or null when absent, malformed or
+ * ambiguous. They are reference metadata, so the request uses
+ * `attributes=all`: `dsd` omits them and `msd` drops the series attributes.
+ * Neither date names a WEO edition.
+ *
+ * @returns {Promise<{ values: Record<string, Record<string, number>>, release: { publishedAt: string|null, updatedAt: string|null } }>}
  */
-export async function imfSdmxFetchIndicator(indicator, { database = 'WEO', years } = {}) {
+export async function imfSdmxFetchIndicatorWithRelease(indicator, { database = 'WEO', years } = {}) {
   const agencyMap = { WEO: 'IMF.RES', FM: 'IMF.FAD' };
   const agency = agencyMap[database] || 'IMF.RES';
-  const url = `${IMF_SDMX_BASE}/data/dataflow/${agency}/${database}/+/*.${indicator}.A?dimensionAtObservation=TIME_PERIOD&attributes=dsd&measures=all`;
+  const url = `${IMF_SDMX_BASE}/data/dataflow/${agency}/${database}/+/*.${indicator}.A?dimensionAtObservation=TIME_PERIOD&attributes=all&measures=all`;
 
   const json = await withRetry(async () => {
     const r = await fetch(url, {
@@ -913,21 +1970,26 @@ export async function imfSdmxFetchIndicator(indicator, { database = 'WEO', years
       // 429 (rate limit) and 503 (overloaded) typically carry Retry-After;
       // attach so withRetry can honor the upstream hint.
       if (r.status === 429 || r.status === 503) {
-        err.retryAfterMs = parseRetryAfterMs(r.headers.get('retry-after'));
+        err.retryAfterMs = parseRetryAfterUncappedMs(r.headers.get('retry-after'));
+        if (err.retryAfterMs > MAX_RETRY_AFTER_MS) err.nonRetryable = true;
       }
       throw err;
     }
     return r.json();
   }, 2, 2000);
 
-  const struct = json?.data?.structures?.[0];
   const ds = json?.data?.dataSets?.[0];
-  if (!struct || !ds?.series) return {};
+  const struct = json?.data?.structures?.[Number.isInteger(ds?.structure) ? ds.structure : 0];
+  const release = {
+    publishedAt: imfDatasetDate(struct, ds, 'PUBLICATION_DATE'),
+    updatedAt: imfDatasetDate(struct, ds, 'UPDATE_DATE'),
+  };
+  if (!struct || !ds?.series) return { values: {}, release };
 
   const countryDim = struct.dimensions.series.find(d => d.id === 'COUNTRY');
   const countryDimPos = struct.dimensions.series.findIndex(d => d.id === 'COUNTRY');
   const timeDim = struct.dimensions.observation.find(d => d.id === 'TIME_PERIOD');
-  if (!countryDim || countryDimPos === -1 || !timeDim) return {};
+  if (!countryDim || countryDimPos === -1 || !timeDim) return { values: {}, release };
 
   const countryValues = countryDim.values.map(v => v.id);
   const timeValues = timeDim.values.map(v => v.value || v.id);
@@ -949,7 +2011,35 @@ export async function imfSdmxFetchIndicator(indicator, { database = 'WEO', years
     }
     if (Object.keys(byYear).length > 0) result[iso3] = byYear;
   }
-  return result;
+  return { values: result, release };
+}
+
+export async function imfSdmxFetchIndicator(indicator, options) {
+  return (await imfSdmxFetchIndicatorWithRelease(indicator, options)).values;
+}
+
+const IMF_RELEASE_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?)?$/;
+
+function imfDatasetDate(struct, ds, id) {
+  const descriptors = struct?.attributes?.dataSet;
+  if (!Array.isArray(descriptors)) return null;
+  const positions = descriptors.flatMap((d, i) => (d?.id === id ? [i] : []));
+  if (positions.length !== 1) return null;
+  let value = ds?.attributes?.[positions[0]];
+  if (Array.isArray(value)) {
+    if (value.length !== 1) return null;
+    [value] = value;
+  }
+  if (Number.isInteger(value)) {
+    const coded = descriptors[positions[0]].values?.[value];
+    value = coded?.value ?? coded?.id;
+  }
+  if (typeof value !== 'string') return null;
+  const match = IMF_RELEASE_DATE_RE.exec(value);
+  if (!match) return null;
+  const [y, m, d] = match.slice(1, 4).map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d));
+  return day.getUTCFullYear() === y && day.getUTCMonth() === m - 1 && day.getUTCDate() === d ? value : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1086,6 +2176,47 @@ export async function processItemRoute({
   return { localPrice, sourceSite, routeUpdate, routeDelete };
 }
 
+// Five 8s timeouts plus four 150ms gaps take at most 40.6s, leaving ample
+// headroom inside downstream seeds' 240s fetch-phase deadline.
+const MAX_POINT_OF_USE_FX_REQUESTS = 5;
+
+function isFinitePositiveRate(value) {
+  return Number.isFinite(value) && value > 0;
+}
+
+/**
+ * Cap Yahoo recovery work for conversion seeds. Currencies beyond the budget are
+ * not attempted: prefer a finite prior/cache rate when present (still marked as
+ * fallback provenance — unattempted is not live), else the caller fallback table.
+ * @param {Record<string, string>} fxSymbols
+ * @param {Record<string, number>} [fallbacks]
+ * @param {Record<string, unknown>} [priorRates] rates already on hand (e.g. cache)
+ */
+async function fetchPointOfUseFxRates(fxSymbols, fallbacks = {}, priorRates = {}) {
+  const attemptedSymbols = {};
+  const deferredCurrencies = [];
+  let requestCount = 0;
+
+  for (const [currency, symbol] of Object.entries(fxSymbols)) {
+    if (currency === 'USD' || requestCount < MAX_POINT_OF_USE_FX_REQUESTS) {
+      attemptedSymbols[currency] = symbol;
+      if (currency !== 'USD') requestCount += 1;
+    } else {
+      deferredCurrencies.push(currency);
+    }
+  }
+
+  const result = await fetchYahooFxRatesWithProvenance(attemptedSymbols, fallbacks);
+  for (const currency of deferredCurrencies) {
+    const prior = priorRates[currency];
+    result.rates[currency] = isFinitePositiveRate(prior)
+      ? prior
+      : (fallbacks[currency] ?? null);
+  }
+  result.fallbackCurrencies.push(...deferredCurrencies);
+  return result;
+}
+
 /**
  * Shared FX rates cache — reads from Redis `shared:fx-rates:v1` (4h TTL).
  * Falls back to fetching from Yahoo Finance if the key is missing/expired.
@@ -1103,69 +2234,146 @@ export async function getSharedFxRates(fxSymbols, fallbacks) {
     const cached = await redisGet(url, token, SHARED_KEY);
     if (cached && typeof cached === 'object' && Object.keys(cached).length > 0) {
       console.log('  FX rates: loaded from shared cache');
-      // Fill any missing currencies this seed needs using Yahoo or fallback
-      const missing = Object.keys(fxSymbols).filter(c => cached[c] == null);
+      const hasValidFallbackProvenance = (
+        Array.isArray(cached.fallbackCurrencies)
+        && cached.fallbackCurrencies.every(c => typeof c === 'string')
+      );
+      const cachedFallbacks = new Set(hasValidFallbackProvenance ? cached.fallbackCurrencies : []);
+      // The canonical seed publishes failed Yahoo quotes as null. Retry only
+      // the gaps this consumer needs, then use its fallback table at the point
+      // of use so direct readers never mistake constants for live quotes. A
+      // markerless legacy snapshot may itself contain fallback constants, so
+      // none of its requested non-USD values are trusted as live.
+      const missing = Object.keys(fxSymbols).filter(c => (
+        c !== 'USD'
+        && (!hasValidFallbackProvenance || cached[c] == null || cachedFallbacks.has(c))
+      ));
       if (missing.length === 0) return cached;
       console.log(`  FX rates: fetching ${missing.length} missing currencies from Yahoo`);
-      const extra = await fetchYahooFxRates(
+      const extra = await fetchPointOfUseFxRates(
         Object.fromEntries(missing.map(c => [c, fxSymbols[c]])),
         fallbacks,
+        cached,
       );
-      return { ...cached, ...extra };
+      const retried = new Set(missing);
+      const fallbackCurrencies = [
+        ...[...cachedFallbacks].filter(c => !retried.has(c)),
+        ...extra.fallbackCurrencies,
+      ];
+      return {
+        ...cached,
+        ...extra.rates,
+        fallbackCurrencies: [...new Set(fallbackCurrencies)],
+      };
     }
   } catch {
     // Cache read failed — fall through to live fetch
   }
 
   console.log('  FX rates: cache miss — fetching from Yahoo Finance');
-  return fetchYahooFxRates(fxSymbols, fallbacks);
+  const result = await fetchPointOfUseFxRates(fxSymbols, fallbacks);
+  return { ...result.rates, fallbackCurrencies: result.fallbackCurrencies };
 }
 
-export async function fetchYahooFxRates(fxSymbols, fallbacks) {
+/**
+ * Fetch USD-per-unit Yahoo FX quotes and record which currencies used the
+ * caller-provided fallback table. The provenance is based on the actual fetch
+ * outcome, never float equality with the fallback constant.
+ */
+export async function fetchYahooFxRatesWithProvenance(fxSymbols, fallbacks = {}) {
   const rates = {};
+  const fallbackCurrencies = [];
+  let requestsRemaining = Object.keys(fxSymbols).filter(currency => currency !== 'USD').length;
   for (const [currency, symbol] of Object.entries(fxSymbols)) {
     if (currency === 'USD') { rates['USD'] = 1.0; continue; }
+    let price = null;
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
       const resp = await fetch(url, {
         headers: { 'User-Agent': CHROME_UA },
         signal: AbortSignal.timeout(8_000),
       });
-      if (!resp.ok) { rates[currency] = fallbacks[currency] ?? null; continue; }
-      const data = await resp.json();
-      const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-      rates[currency] = (price != null && price > 0) ? price : (fallbacks[currency] ?? null);
-    } catch {
+      if (resp.ok) {
+        const data = await resp.json();
+        price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+      }
+    } catch {}
+    if (isFinitePositiveRate(price)) {
+      rates[currency] = price;
+    } else {
       rates[currency] = fallbacks[currency] ?? null;
+      fallbackCurrencies.push(currency);
     }
-    await new Promise(r => setTimeout(r, 100));
+    requestsRemaining -= 1;
+    if (requestsRemaining > 0) await sleep(150);
   }
   console.log('  FX rates fetched:', JSON.stringify(rates));
-  return rates;
+  if (fallbackCurrencies.length > 0) {
+    console.warn(`  FX rates using fallbacks (${fallbackCurrencies.length}): ${fallbackCurrencies.join(', ')}`);
+  }
+  return { rates, fallbackCurrencies };
 }
 
 /**
  * Read the current canonical snapshot from Redis before a seed run overwrites it.
  * Used by seed scripts that compute WoW deltas (bigmac, grocery-basket).
- * Returns null on any error — scripts must handle first-run (no prev data).
+ * Returns null on any error by default — scripts must handle first-run (no prev
+ * data). Pass strict:true when overwriting without the prior snapshot would lose
+ * accumulated state; missing keys still return null, while read failures throw.
+ * Pass includeEnvelopeMeta:true when a cross-seed calculation must bind the
+ * payload and its fetchedAt clock to the same atomic Redis GET.
+ * timeoutMs bounds the whole read, body included: raise it for multi-MB keys.
  */
-export async function readSeedSnapshot(canonicalKey) {
+export async function readSeedSnapshot(
+  canonicalKey,
+  { strict = false, includeEnvelopeMeta = false, timeoutMs = 5_000 } = {},
+) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) return null;
   try {
     const resp = await fetch(`${url}/get/${encodeURIComponent(canonicalKey)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(5_000),
+      headers: { Authorization: `Bearer ${token}`, 'User-Agent': CHROME_UA },
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!resp.ok) return null;
-    const { result } = await resp.json();
-    if (!result) return null;
+    if (!resp.ok) {
+      if (strict) throw new Error(`Redis snapshot read failed: HTTP ${resp.status}`);
+      return null;
+    }
+    // Upstash's GET contract has one unambiguous miss: an HTTP-200 JSON
+    // envelope with an explicitly-null `result`. In strict mode, every other
+    // malformed envelope is a read failure, not a cold start. This matters for
+    // rolling/baseline seeders: degrading `{}` or invalid JSON to null can make
+    // two ambiguous reads look like a missing key and overwrite last-good
+    // state. Non-strict callers retain their best-effort null degradation.
+    const body = strict
+      ? await parseRedisCommandResponse(resp, 'Redis snapshot read')
+      : await resp.json();
+    const result = body?.result;
+    if (result === null) return null;
+    if (strict && typeof result !== 'string') {
+      throw new Error('Redis snapshot read returned a non-string result');
+    }
+    if (!strict && !result) return null;
+    let parsed;
+    try {
+      parsed = parseStoredSeedJson(result);
+    } catch (cause) {
+      if (strict) {
+        throw Object.assign(new Error('Redis snapshot read returned malformed stored JSON'), { cause });
+      }
+      return null;
+    }
+    if (strict && parsed === null) {
+      throw new Error('Redis snapshot read returned a null stored snapshot');
+    }
     // Envelope-aware: WoW/prev baselines (bigmac, grocery-basket, fear-greed)
     // must see bare legacy-shape data whether the last write was pre- or post-
     // contract-migration. unwrapEnvelope is a no-op on legacy values.
-    return unwrapEnvelope(JSON.parse(result)).data;
-  } catch {
+    const envelope = unwrapEnvelope(parsed);
+    return includeEnvelopeMeta ? { data: envelope.data, meta: envelope._seed } : envelope.data;
+  } catch (error) {
+    if (strict) throw error;
     return null;
   }
 }
@@ -1206,16 +2414,117 @@ export function computeRecordCount({ opts = {}, data, payloadBytes = 0, topicArt
   return 0;
 }
 
-export function parseYahooChart(data, symbol) {
+/**
+ * Significant digits kept in a seeded sparkline series.
+ *
+ * Yahoo returns closes as float32 values widened to float64, so JSON.stringify emits the
+ * conversion noise verbatim: `17.209999084472656` — 18 characters to express 17.21. It is
+ * ~50% of every quote payload we seed, and those payloads sit in the bootstrap FAST tier,
+ * which takes ~5x more CDN origin misses than the slow tier. Measured 2026-07-14:
+ *
+ *   market:commodities-bootstrap:v1  241,869 B  — 12,238 noisy floats, 53% of the key
+ *   market:stocks-bootstrap:v1       187,834 B  —  7,858 noisy floats, 42% of the key
+ *   market:gulf-quotes:v1             57,289 B  —  2,783 noisy floats, 51% of the key
+ *
+ * SIGNIFICANT digits, not decimal places: commodities carries FX pairs (AUDUSD=X at 0.69),
+ * which a fixed 2dp round would flatten into a straight line.
+ *
+ * 7 chosen by sweeping every live series through the REAL renderer (src/utils/sparkline.ts)
+ * and diffing the SVG it emits:
+ *
+ *   sig │ commodities │ stocks │ worst shift
+ *    4  │     36%     │  37%   │  1.90px   <- visibly wrong
+ *    6  │     43%     │  46%   │  0.10px
+ *    7  │     44%     │  47%   │  0.00px (commodities 31/31 SVG byte-identical)
+ *
+ * At 7 digits the worst deviation anywhere is 0.10px — exactly ONE unit of the renderer's
+ * own `toFixed(1)` coordinate quantum, i.e. the smallest difference the SVG can express, on
+ * an 18px-tall chart. Dropping to 6 saves only ~2% more bytes and byte-matches fewer series,
+ * so 7 is the better trade.
+ *
+ * Precision is the ONLY safe lever here. Downsampling was measured and REJECTED: miniSparkline
+ * autoscales each series to its own min/max, so dropping any extreme rescales the whole curve
+ * — 96-point resampling moved the median series 3-4px and cost USDTRY=X 40% of its vertical
+ * range. See tests/sparkline-precision.test.mjs. Commodity sparklines use 5-minute bars to
+ * fix their time window (scripts/shared/quote-sparkline.cjs), not to save bytes.
+ */
+export const SPARKLINE_SIGNIFICANT_DIGITS = 7;
+
+/** Round one value to `sig` significant digits, preserving magnitude across price scales. */
+function toSignificantDigits(value, sig) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) return value;
+  // toPrecision returns a string (possibly exponential); Number() normalises it back and
+  // drops the trailing zeros, so JSON.stringify emits the shortest form.
+  return Number(value.toPrecision(sig));
+}
+
+/**
+ * Strip float64 conversion noise from a sparkline series. Non-arrays and non-finite entries
+ * pass through untouched, so a malformed upstream response degrades exactly as it does today.
+ */
+export function roundSparkline(values, sig = SPARKLINE_SIGNIFICANT_DIGITS) {
+  if (!Array.isArray(values)) return values;
+  return values.map((v) => toSignificantDigits(v, sig));
+}
+
+/** Decimal places kept for published geographic coordinates. 5 dp is ~1.1m at the equator. */
+export const GEO_COORDINATE_DECIMALS = 5;
+
+/**
+ * Round one lat/lon to `decimals` places for the PUBLISHED payload.
+ *
+ * Apply this at the serialization boundary, never at the parse boundary. Rounded
+ * coordinates that reach comparison logic shift its decisions: the earthquake
+ * cross-agency dedup gates on `haversineDistanceKm(...) <= 10`, and rounding both
+ * sides first can move a pair across that threshold (verified: pairs at 9.99977km
+ * become 10.00054km, so a duplicate publishes twice — or two distinct events merge).
+ * Non-finite values pass through untouched, matching roundSparkline's contract.
+ */
+export function roundGeoCoordinate(value, decimals = GEO_COORDINATE_DECIMALS) {
+  return Number.isFinite(value) ? Number(value.toFixed(decimals)) : value;
+}
+
+/**
+ * A measured observation from an upstream feed, or null when there isn't one.
+ *
+ * Statistical and market APIs spell "suppressed", "not yet released" and "no
+ * quote" as null, '' or false. Number() turns all three into 0, and 0 is a
+ * publishable measurement, so a bare Number() converts missing data into a
+ * confident reading of zero. Numeric strings stay valid because several feeds
+ * quote their values.
+ */
+export function finiteObservation(value) {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * `previousClose` replaces the chart's own. fetchYahooQuoteChart passes the
+ * last completed session's when Yahoo has rolled the chart to a session that
+ * has not traded, where the chart's own equals the price.
+ */
+export function parseYahooChart(data, symbol, { previousClose = null } = {}) {
   const result = data?.chart?.result?.[0];
   const meta = result?.meta;
   if (!meta) return null;
 
-  const price = meta.regularMarketPrice;
-  const prevClose = meta.chartPreviousClose || meta.previousClose || price;
+  // A quote with no price is not a quote. Publishing it produced a market row
+  // carrying an undefined price and a change of exactly 0.00%.
+  const price = finiteObservation(meta.regularMarketPrice);
+  if (price == null) return null;
+  // A zero previous close makes the percentage change infinite, so it is
+  // treated as unusable here exactly as the previous `||` chain did.
+  const prevClose = [previousClose, meta.chartPreviousClose, meta.previousClose]
+    .map(finiteObservation)
+    .find(value => value != null && value !== 0) ?? price;
   const change = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
   const closes = result.indicators?.quote?.[0]?.close;
-  const sparkline = Array.isArray(closes) ? closes.filter((v) => v != null) : [];
+  // NaN survives a != null filter and serializes as null in the published
+  // sparkline, leaving a hole in the chart rather than a shorter series.
+  const sparkline = roundSparkline(
+    Array.isArray(closes) ? closes.map(finiteObservation).filter(v => v != null) : [],
+  );
 
   return { symbol, name: symbol, display: symbol, price, change: +change.toFixed(2), sparkline };
 }
@@ -1227,18 +2536,196 @@ export function parseYahooChart(data, symbol) {
  * instead of clobbering a good cached payload with an empty recordCount=0 one on
  * a partial upstream fetch. The canonical key is already guarded by validateFn;
  * this closes the same gap for extra keys. Pure function — extracted for tests.
+ *
+ * A companion extra-key option, `allowMissingOnSkip: true`, marks a key whose
+ * ABSENCE is expected rather than alarming — a completion marker that is not
+ * written until the final tick of a multi-tick sweep. It downgrades the
+ * "manual seed required" warning to an info line on every preservation path,
+ * and is meaningless without `skipWhenEmpty`.
  */
 export function shouldSkipEmptyExtraKey(ek, recordCount) {
   return Boolean(ek && ek.skipWhenEmpty) && recordCount === 0;
+}
+
+/**
+ * Hard ceiling for a single seeded extra-key value — a blunt catastrophe backstop,
+ * not the primary guard (that is findLeakedPrePublishFields below).
+ *
+ * Calibrated against a full scan of production (2026-07-14): the largest seeded value
+ * in Redis is health:vpd-tracker:realtime:v1 at 3.14 MB, and only three exceed 2 MB.
+ * 8 MB therefore leaves ~2.5x headroom over the largest legitimate payload — so ordinary
+ * growth cannot crash a healthy seeder — while still refusing the 11.5 MB
+ * forecast:predictions-bootstrap:v1 that triggered this guard.
+ */
+export const MAX_SEEDED_VALUE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Detect an extra key that is re-exporting the seeder's PRE-PUBLISH internals.
+ *
+ * The trap (production incident, forecast:predictions-bootstrap:v1): runSeed feeds
+ * `publishTransform(data)` to the canonical key but feeds RAW `data` to every extraKey
+ * transform. A transform written as `{ ...data, <tweak> }` therefore ships the entire
+ * internal pipeline state — for seed-forecasts that was fullRunPredictions, inputs,
+ * publishSelectionPool, situationClusters, stateUnits, telemetry: an 11.5 MB key, 66x
+ * larger than the 172 KB canonical key it was meant to compact.
+ *
+ * The invariant: `publishTransform` exists precisely to STRIP pre-publish internals from
+ * the canonical payload. Any field it dropped, resurfacing in an extra key, is that same
+ * internal state escaping through a side door.
+ *
+ * So we flag exactly the intersection:
+ *     present in raw `data`  AND  present in `ekData`  AND  absent from `publishData`
+ *
+ * Fields an extra key legitimately ADDS (markers like `detailStripped`) never appear in
+ * raw `data`, so they are not flagged. Fields the canonical key keeps are not flagged.
+ * A seeder that genuinely must re-export a pre-publish field can opt out per-key with
+ * `allowPrePublishFields: ['inputs']`.
+ *
+ * Pure function — extracted for tests.
+ *
+ * @returns {string[]} leaked top-level field names (empty when clean)
+ */
+export function findLeakedPrePublishFields(rawData, publishData, ekData, ek = {}) {
+  const isPlain = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  // No publishTransform → publishData IS rawData → nothing was stripped → nothing to leak.
+  if (!isPlain(rawData) || !isPlain(publishData) || !isPlain(ekData)) return [];
+  if (rawData === publishData) return [];
+
+  const allowed = new Set(ek.allowPrePublishFields || []);
+  const canonicalFields = new Set(Object.keys(publishData));
+
+  return Object.keys(ekData).filter((field) => (
+    !canonicalFields.has(field)
+    && Object.hasOwn(rawData, field)
+    && !allowed.has(field)
+  ));
+}
+
+// Fleet-wide graceful-degradation backstop (issue #4786). A non-settling
+// await inside a seeder's fetchFn — e.g. an unguarded R2/S3 body stream whose
+// socket is silently reaped — never rejects, so the Phase-1 try/catch can't
+// catch it; the event loop drains and Node exits 13 ("Detected unsettled
+// top-level await"), painting a red Railway badge that is neither a graceful
+// skip nor a catchable failure. Racing the fetch against a wall-clock deadline
+// converts that hang into a normal rejection, which the existing graceful path
+// turns into exit 75 (TTL extended, last-good served, no data lost).
+//
+// The standalone deadline is tied to lockTtlMs — never a fixed value — because
+// seeders legitimately run from ~1min to 40min. A healthy seeder is designed
+// never to outlive its own lock, so lockTtlMs + margin exceeds any legitimate
+// run; the only thing that trips it is a genuine hang. A false trip is itself
+// graceful (exit 75), so the margin errs generous.
+//
+// When spawned as a bundle section, that lock-derived ceiling can outlast the
+// runner's section timeoutMs (#8479). resolveFetchDeadlineMs then clamps the
+// fetch deadline to leave FETCH_PHASE_PUBLISH_RESERVE_MS for publish or
+// graceful cleanup before the runner SIGTERMs.
+export const FETCH_PHASE_DEADLINE_MARGIN_MS = 120_000;
+
+// Time left between the fetch-phase deadline and the bundle section timeout so
+// publish (success) or releaseLock + TTL extend (graceful fetch failure) can
+// finish before `_bundle-runner` sends SIGTERM. Matches the 40s headroom used
+// by education-attainment and cross-strait activity seeders.
+export const FETCH_PHASE_PUBLISH_RESERVE_MS = 40_000;
+
+export function raceFetchDeadline(promise, ms, label) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} fetch phase exceeded ${ms}ms deadline (likely a non-settling await — see issue #4786)`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Resolve the fetch-phase wall-clock budget for runSeed.
+ *
+ * Standalone: explicit `fetchPhaseTimeoutMs`, else `lockTtlMs + margin`.
+ * Bundle section: also clamp to `sectionTimeoutMs - publish reserve` so the
+ * graceful path is reachable before the runner's SIGTERM (#8479).
+ *
+ * @param {{
+ *   fetchPhaseTimeoutMs?: number | null,
+ *   lockTtlMs: number,
+ *   sectionTimeoutMs?: number | null,
+ * }} opts
+ * @returns {number}
+ */
+export function resolveFetchDeadlineMs({
+  fetchPhaseTimeoutMs,
+  lockTtlMs,
+  sectionTimeoutMs = null,
+}) {
+  const configured = Number.isFinite(fetchPhaseTimeoutMs) && fetchPhaseTimeoutMs > 0
+    ? fetchPhaseTimeoutMs
+    : lockTtlMs + FETCH_PHASE_DEADLINE_MARGIN_MS;
+  if (!Number.isFinite(sectionTimeoutMs) || sectionTimeoutMs <= 0) {
+    return configured;
+  }
+  // A section shorter than the reserve still needs a positive race target so
+  // hang detection fires rather than waiting forever for SIGTERM.
+  const sectionCap = Math.max(1, sectionTimeoutMs - FETCH_PHASE_PUBLISH_RESERVE_MS);
+  return Math.min(configured, sectionCap);
+}
+
+// Set by _bundle-runner for canonical-clock members that need proof that every
+// publish side effect completed. Standalone seed runs leave it unset.
+export const BUNDLE_COMPLETION_META_KEY_ENV = 'WM_BUNDLE_COMPLETION_META_KEY';
+
+// Set by _bundle-runner to the section's timeoutMs so runSeed can clamp its
+// fetch deadline inside the wall clock that will SIGTERM the child (#8479).
+export const BUNDLE_SECTION_TIMEOUT_MS_ENV = 'BUNDLE_SECTION_TIMEOUT_MS';
+
+/**
+ * Section timeoutMs injected by `_bundle-runner` for the current child.
+ * Standalone seed runs leave it unset.
+ *
+ * @returns {number | null}
+ */
+export function getBundleSectionTimeoutMs() {
+  const raw = Number(process.env[BUNDLE_SECTION_TIMEOUT_MS_ENV]);
+  return Number.isFinite(raw) && raw > 0 ? raw : null;
 }
 
 export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}) {
   const {
     validateFn,
     ttlSeconds,
+    maxPayloadBytes,
     lockTtlMs = 120_000,
+    lockAcquireRetries = 2,
     extraKeys,
+    // Keys written outside runSeed's normal extra-key phase that still need
+    // last-good TTL protection when the primary fetch fails or is skipped.
+    preserveKeys = [],
+    // Some sources must keep their original absolute expiry after a failed
+    // refresh. Opt out of renewal without changing the stored value or clock.
+    extendTtlOnFailure = true,
+    // Opt-in companion keys whose write TTL differs from the canonical key.
+    // Each declaration is preserved at its own TTL; preserveKeys keeps its
+    // existing canonical-TTL behavior for backward compatibility.
+    preserveKeyTtls = [],
+    // Standalone-cron exit policy. Railway shows exit 75 as a crash, so a
+    // seeder that can serve last-good through a short upstream outage may opt
+    // in to exit 0 on a fetch failure. All of these must hold, else it exits 75:
+    //   - the error is tagged with markPreservableFetchFailure() (an upstream
+    //     outage, never a missing credential or a code bug);
+    //   - Redis confirms the canonical key and seed-meta TTLs were extended;
+    //   - seed-meta fetchedAt is within maxStaleMin, so a chronic outage goes
+    //     back to exit 75 once health would call the data stale;
+    //   - the run is standalone. Under _bundle-runner exit 0 means "keys were
+    //     written" (#6396), so bundle members always keep exit 75.
+    // Requires maxStaleMin. seed-meta is never refreshed on this path.
+    allowPreservedFetchFailure = false,
+    beforePublish,
+    publishAtomically,
+    compressPayload = false, // store gzip+base64 (see _seed-payload-codec.mjs) when JSON outgrows MAX_PAYLOAD_BYTES
     afterPublish,
+    afterValidationSkip,
+    afterPreservedValidationSkip,
+    afterFreshness,
     publishTransform,
     declareRecords,        // new — contract opt-in. When present, runSeed enters
                            // envelope-dual-write path: writes `{_seed, data}` to
@@ -1246,10 +2733,59 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     sourceVersion,         // new — required when declareRecords is passed
     schemaVersion,         // new — required when declareRecords is passed
     zeroIsValid = false,   // new — when true, recordCount=0 is OK_ZERO, not RETRY
-    contentMeta,           // (rawData) => {newestItemAt, oldestItemAt} | null
+    contentMeta,           // (rawData, runStartedAtMs) => {newestItemAt, oldestItemAt} | null
     maxContentAgeMin,      // positive integer minutes — opts in together with contentMeta
+    fetchPhaseTimeoutMs,   // hard ceiling on the fetch phase; defaults to lockTtlMs + margin (#4786)
   } = opts;
   const contractMode = typeof declareRecords === 'function';
+  if (extraKeys && !Array.isArray(extraKeys)) {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} extraKeys must be an array`);
+    process.exit(1);
+  }
+  // A colliding or un-namespaced extraKey meta key would be caught by
+  // writeSeedMeta, but only after the provider fetches and the data write.
+  // Refuse it at config time instead, before any upstream call is spent.
+  for (const ek of Array.isArray(extraKeys) ? extraKeys : []) {
+    if (ek?.metaKey === undefined || ek?.metaKey === null) continue;
+    try {
+      resolveSeedMetaKey(ek.key, ek.metaKey);
+    } catch (err) {
+      console.error(`  CONTRACT VIOLATION: ${domain}:${resource} ${err.message}`);
+      process.exit(1);
+    }
+  }
+  if (afterPublish && typeof afterPublish !== 'function') {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} afterPublish must be a function`);
+    process.exit(1);
+  }
+  if (publishAtomically && typeof publishAtomically !== 'function') {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} publishAtomically must be a function`);
+    process.exit(1);
+  }
+  if (afterFreshness && typeof afterFreshness !== 'function') {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} afterFreshness must be a function`);
+    process.exit(1);
+  }
+  if (allowPreservedFetchFailure && !(Number.isFinite(opts.maxStaleMin) && opts.maxStaleMin > 0)) {
+    console.error(
+      `  CONTRACT VIOLATION: ${domain}:${resource} allowPreservedFetchFailure requires a positive maxStaleMin`,
+    );
+    process.exit(1);
+  }
+  const bundleCompletionMetaKey = String(process.env[BUNDLE_COMPLETION_META_KEY_ENV] ?? '').trim();
+  if (bundleCompletionMetaKey) {
+    if (!contractMode) {
+      console.error(`  CONTRACT VIOLATION: ${domain}:${resource} bundle completion attestation requires contract mode`);
+      process.exit(1);
+    }
+    if (!bundleCompletionMetaKey.startsWith('seed-completion:')) {
+      console.error(
+        `  CONTRACT VIOLATION: ${domain}:${resource} bundle completion key must use the dedicated `
+        + `seed-completion: namespace, got ${bundleCompletionMetaKey}`,
+      );
+      process.exit(1);
+    }
+  }
   if (contractMode) {
     // Soft-warn (PR 2) on other mandatory contract fields; PR 3 hard-aborts.
     const missing = [];
@@ -1274,8 +2810,86 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
       process.exit(1);
     }
   }
+  if (!Array.isArray(preserveKeyTtls)) {
+    console.error(`  CONTRACT VIOLATION: ${domain}:${resource} preserveKeyTtls must be an array`);
+    process.exit(1);
+  }
+  const normalizedPreserveKeyTtls = [];
+  const declaredTtlByKey = new Map();
+  for (const declaration of preserveKeyTtls) {
+    const key = declaration?.key;
+    const declaredTtl = declaration?.ttlSeconds;
+    if (
+      !declaration
+      || typeof declaration !== 'object'
+      || Array.isArray(declaration)
+      || typeof key !== 'string'
+      || key.trim().length === 0
+      || !Number.isInteger(declaredTtl)
+      || declaredTtl <= 0
+    ) {
+      console.error(
+        `  CONTRACT VIOLATION: ${domain}:${resource} preserveKeyTtls entries must be `
+        + `{ key: non-empty string, ttlSeconds: positive integer }`,
+      );
+      process.exit(1);
+    }
+    if (declaredTtlByKey.has(key) && declaredTtlByKey.get(key) !== declaredTtl) {
+      console.error(
+        `  CONTRACT VIOLATION: ${domain}:${resource} preserveKeyTtls declares conflicting TTLs for ${key}`,
+      );
+      process.exit(1);
+    }
+    declaredTtlByKey.set(key, declaredTtl);
+    normalizedPreserveKeyTtls.push({ key, ttlSeconds: declaredTtl });
+  }
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const startMs = Date.now();
+  const defaultPreservationTtl = ttlSeconds || 600;
+  const defaultPreservationKeys = [...new Set([
+    canonicalKey,
+    `seed-meta:${domain}:${resource}`,
+    ...(extraKeys || []).map((ek) => ek.key),
+    ...preserveKeys,
+  ].filter((key) => typeof key === 'string' && key.length > 0))];
+
+  // Extra keys whose absence is expected rather than alarming (see
+  // shouldSkipEmptyExtraKey). Threaded into EVERY preservation call, not just
+  // the empty-skip branch: the fetch-failure, SIGTERM, contract-RETRY,
+  // atomic-publish-failure and validation-skip paths all preserve the same key
+  // set, and warning "manual seed required" for a marker that is not supposed
+  // to exist yet is the false alarm allowMissingOnSkip exists to remove.
+  const optionalPreservationKeys = (extraKeys || [])
+    .filter((ek) => ek && ek.allowMissingOnSkip)
+    .map((ek) => ek.key)
+    .filter((key) => typeof key === 'string' && key.length > 0);
+
+  // Single preservation seam for fetch failure, fetch-phase SIGTERM, contract
+  // RETRY, validation skip, and per-extra-key empty skips. Grouping keys by TTL
+  // keeps one Redis pipeline per TTL while allowing explicit declarations to
+  // override a key that also appears in the default canonical-TTL cohort.
+  const preserveExistingKeys = async (targets) => {
+    if (extendTtlOnFailure === false) return false;
+    const ttlByKey = new Map();
+    if (targets) {
+      for (const target of targets) ttlByKey.set(target.key, target.ttlSeconds);
+    } else {
+      for (const key of defaultPreservationKeys) ttlByKey.set(key, defaultPreservationTtl);
+      for (const target of normalizedPreserveKeyTtls) ttlByKey.set(target.key, target.ttlSeconds);
+    }
+
+    const keysByTtl = new Map();
+    for (const [key, targetTtl] of ttlByKey) {
+      if (!keysByTtl.has(targetTtl)) keysByTtl.set(targetTtl, []);
+      keysByTtl.get(targetTtl).push(key);
+    }
+    const results = await Promise.all(
+      [...keysByTtl].map(([targetTtl, keys]) => extendExistingTtl(keys, targetTtl, {
+        allowMissingKeys: optionalPreservationKeys,
+      })),
+    );
+    return results.every(Boolean);
+  };
 
   console.log(`=== ${domain}:${resource} Seed ===`);
   console.log(`  Run ID:  ${runId}`);
@@ -1285,6 +2899,7 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
   // Acquire lock
   const lockResult = await acquireLockSafely(`${domain}:${resource}`, runId, lockTtlMs, {
     label: `${domain}:${resource}`,
+    maxRetries: lockAcquireRetries,
   });
   if (lockResult.skipped) {
     process.exit(0);
@@ -1293,6 +2908,27 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     console.log('  SKIPPED: another seed run in progress');
     process.exit(0);
   }
+
+  // SM-122: the fetch deadline is lockTtlMs + 120s, so a run can outlive its
+  // lock, and another run can then take it and publish newer data. Renew the
+  // lock while this run works, and fence every publish point on ownership:
+  // the canonical SET and seed-meta SET run inside Redis only while this run
+  // still holds the lock (SEED_LOCK_FENCED_SET_SCRIPT), and the publish phase
+  // re-checks ownership before its first write. A run that lost the lock
+  // exits without publishing and without touching seed-meta.
+  const lockDomain = `${domain}:${resource}`;
+  const lockHeartbeat = startLockHeartbeat(lockDomain, runId, lockTtlMs);
+  const lockFence = {
+    lockKey: `seed-lock:${lockDomain}`,
+    runId,
+    ttlMs: lockTtlMs,
+    renew: () => renewLockIfHeld(lockDomain, runId, lockTtlMs),
+  };
+  // Cheap local check between Redis-fenced writes: the heartbeat already
+  // learned the lock is gone, so stop before the next write group.
+  const assertLockStillHeld = () => {
+    if (lockHeartbeat.state.lost) throw lockHeartbeat.state.lost;
+  };
 
   // SIGTERM handler — installed BEFORE fetch and KEPT installed through
   // publish. _bundle-runner.mjs sends SIGTERM when a section's timeout
@@ -1318,14 +2954,12 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
   let currentPhase = 'fetch';
   const sigTermHandler = async () => {
     console.error(`  [${domain}:${resource}] SIGTERM received during ${currentPhase} phase — releasing lock runId=${runId}`);
+    lockHeartbeat.stop();
     try {
       if (currentPhase === 'fetch') {
-        const ttl = ttlSeconds || 600;
-        const keys = [canonicalKey, `seed-meta:${domain}:${resource}`];
-        if (extraKeys) keys.push(...extraKeys.map((ek) => ek.key));
         await Promise.allSettled([
           releaseLock(`${domain}:${resource}`, runId),
-          extendExistingTtl(keys, ttl),
+          preserveExistingKeys(),
         ]);
       } else {
         await releaseLock(`${domain}:${resource}`, runId);
@@ -1333,15 +2967,48 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     } catch (err) {
       console.error(`  [${domain}:${resource}] SIGTERM cleanup error: ${err?.message || err}`);
     } finally {
+      // process.exit does not drain in-flight promises — flush any
+      // fire-and-forget llm_call telemetry (bounded by its 1.5s fetch
+      // timeout; the runner's 5s SIGKILL grace leaves room).
+      try { await flushPendingLlmEvents(); } catch { /* never block exit */ }
       process.exit(143);
     }
   };
   process.once('SIGTERM', sigTermHandler);
 
-  // Phase 1: Fetch data (graceful on failure — extend TTL on stale data)
+  // Phase 1: Fetch data (graceful on failure — extend TTL on stale data).
+  // Raced against a wall-clock deadline so a non-settling await inside fetchFn
+  // (see raceFetchDeadline above, issue #4786) surfaces as a catchable
+  // rejection instead of hanging the process into an exit-13 red badge.
+  // When spawned by the bundle runner, also clamp to the section timeout so
+  // this graceful path fires before the runner's SIGTERM (#8479).
+  const sectionTimeoutMs = getBundleSectionTimeoutMs();
+  const unconstrainedDeadlineMs = resolveFetchDeadlineMs({
+    fetchPhaseTimeoutMs,
+    lockTtlMs,
+    sectionTimeoutMs: null,
+  });
+  const fetchDeadlineMs = resolveFetchDeadlineMs({
+    fetchPhaseTimeoutMs,
+    lockTtlMs,
+    sectionTimeoutMs,
+  });
+  if (sectionTimeoutMs != null && fetchDeadlineMs < unconstrainedDeadlineMs) {
+    console.warn(
+      `  [${domain}:${resource}] fetch deadline clamped ${unconstrainedDeadlineMs}ms → ${fetchDeadlineMs}ms `
+      + `to fit bundle section timeout ${sectionTimeoutMs}ms (issue #8479)`,
+    );
+  }
   let data;
+  // Absolute wall-clock deadline of the fetch race, for fetchers with optional
+  // work that must stop in time to publish what they already have.
+  const fetchDeadlineAtMs = Date.now() + fetchDeadlineMs;
   try {
-    data = await withRetry(fetchFn);
+    data = await raceFetchDeadline(
+      withRetry(() => fetchFn({ runId, runStartedAtMs: startMs, fetchDeadlineAtMs })),
+      fetchDeadlineMs,
+      `${domain}:${resource}`,
+    );
   } catch (err) {
     // Keep the SIGTERM handler installed across the fetch-failure
     // cleanup. Earlier code did `process.off('SIGTERM', sigTermHandler)`
@@ -1360,13 +3027,44 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     const cause = err.cause ? ` (cause: ${err.cause.message || err.cause.code || err.cause})` : '';
     console.error(`  FETCH FAILED: ${err.message || err}${cause}`);
 
-    const ttl = ttlSeconds || 600;
-    const keys = [canonicalKey, `seed-meta:${domain}:${resource}`];
-    if (extraKeys) keys.push(...extraKeys.map(ek => ek.key));
-    await extendExistingTtl(keys, ttl);
+    if (opts.recordInitialFetchFailure === true) {
+      try {
+        const { url, token } = getRedisCredentials();
+        await redisCommand(url, token, ['SET', `seed-meta:${domain}:${resource}`, JSON.stringify({
+          status: 'error', firstFailureAt: startMs, recordCount: 0, runId,
+        }), 'NX']);
+      } catch {
+        console.warn(`  [${domain}:${resource}] initial failure receipt could not be stored`);
+      }
+    }
+
+    const preserved = await preserveExistingKeys();
+
+    if (
+      allowPreservedFetchFailure === true
+      && err?.preservableFetchFailure === true
+      && preserved
+      && sectionTimeoutMs == null
+    ) {
+      const ageMin = await readSeedMetaAgeMin(`seed-meta:${domain}:${resource}`);
+      if (ageMin != null && ageMin <= opts.maxStaleMin) {
+        // Distinct marker: this tick failed, but it is not the exit-75
+        // "Failed gracefully" outcome that log triage counts as a crash.
+        console.log(`\n=== Refresh failed; last-good retained (${Math.round(durationMs)}ms) ===`);
+        console.warn(
+          `  [${domain}:${resource}] last-good is ${Math.round(ageMin)}min old (maxStaleMin ${opts.maxStaleMin}); `
+          + 'exiting 0 without refreshing seed-meta',
+        );
+        await exitAfterTelemetryFlush(0);
+      }
+      console.warn(
+        `  [${domain}:${resource}] last-good age ${ageMin == null ? 'unknown' : `${Math.round(ageMin)}min`} `
+        + `is not within maxStaleMin ${opts.maxStaleMin}; exiting ${GRACEFUL_FETCH_FAILURE_EXIT_CODE}`,
+      );
+    }
 
     console.log(`\n=== Failed gracefully (${Math.round(durationMs)}ms) ===`);
-    process.exit(GRACEFUL_FETCH_FAILURE_EXIT_CODE);
+    await exitAfterTelemetryFlush(GRACEFUL_FETCH_FAILURE_EXIT_CODE);
   }
   // Transition to publish phase — handler stays installed but switches
   // behavior via the phase tracker.
@@ -1374,6 +3072,10 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
 
   // Phase 2: Publish to Redis (rethrow on failure — data was fetched but not stored)
   try {
+    // Ownership gate before any publish-phase write (canonical, extra keys,
+    // hooks, seed-meta, TTL preservation). Renews the lease on success.
+    await lockFence.renew();
+
     // Content-age contract: invoke contentMeta on RAW fetcher output BEFORE
     // publishTransform runs. This lets seeders carry pre-publish helper fields
     // (e.g. _publishedAtIsSynthetic) on items that contentMeta reads, then
@@ -1388,7 +3090,7 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     let contentOldestAt = null;
     if (contentAgeOptedIn) {
       try {
-        const result = contentMeta(data);
+        const result = contentMeta(data, startMs);
         if (result && typeof result === 'object'
             && Number.isFinite(result.newestItemAt) && result.newestItemAt > 0
             && Number.isFinite(result.oldestItemAt) && result.oldestItemAt > 0) {
@@ -1415,7 +3117,7 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
         // Contract violation — declareRecords returned non-int / threw. HARD FAIL.
         await releaseLock(`${domain}:${resource}`, runId);
         console.error(`  CONTRACT VIOLATION: ${err.message || err}`);
-        process.exit(1);
+        await exitAfterTelemetryFlush(1);
       }
       if (contractRecordCount > 0) {
         contractState = 'OK';
@@ -1445,25 +3147,134 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
       }
     }
 
-    // Contract RETRY on empty (no zeroIsValid) — skip publish, extend TTL, exit 0.
+    // Contract RETRY on empty (no zeroIsValid) — skip publish and preserve the
+    // last-good keys. Exit 0 when Redis confirms every key was actually extended;
+    // otherwise the data is already gone (or preservation could not be verified), so a
+    // green process would hide a live outage indefinitely — EXCEPT when the seeder
+    // declared `sourceUnavailable`, which also exits 0 (see #5256 below: with no source
+    // configured, no retry can ever restore the data, so exiting 1 crash-loops forever
+    // and /api/health already carries the alarm).
     if (contractState === 'RETRY') {
       const durationMs = Date.now() - startMs;
-      const keys = [canonicalKey, `seed-meta:${domain}:${resource}`];
-      if (extraKeys) keys.push(...extraKeys.map(ek => ek.key));
-      await extendExistingTtl(keys, ttlSeconds || 600);
+      const preserved = await preserveExistingKeys();
+
+      // #5256: the RETRY-FAILED exit below assumes A LATER TICK CAN RESTORE THE DATA. When
+      // the seeder reports it had no usable source at all (primary unconfigured AND every
+      // fallback down), no tick ever can — seed-conflict-intel crash-looped every ~15min
+      // forever, firing "Deploy Crashed!" each time while /api/health already reported the
+      // domain EMPTY/crit. The crash added nothing over health; it only trained us to ignore
+      // the crash channel. Stay green, publish NOTHING (an empty envelope would overwrite
+      // last-good the moment the source blips), and leave the data alarm to /api/health.
+      //
+      // This is deliberately NOT `zeroIsValid`: a seeder must opt in per-run, on the exact
+      // code path where it knows it has no source. A zero-yield run that does not declare
+      // sourceUnavailable is still a dead feed and still exits 1 — #5258 stands.
+      //
+      // Checked BEFORE `preserved`, not inside `!preserved`: the outcome is exit 0 either
+      // way, but an operator must see the REAL reason on every tick. Falling through to the
+      // generic "TTL extended, bundle will retry next cycle" message while last-good is
+      // still alive would hide the no-source condition for however many cycles the keys
+      // survive, and only surface it once they expire.
+      if (data?.sourceUnavailable) {
+        console.warn(
+          `  NO SOURCE: declareRecords returned 0 and no usable upstream was available — published nothing, `
+          + (preserved
+            ? `last-good TTL extended (data still served, but it is no longer being refreshed).`
+            : `and last-good has already expired — /api/health reports ${domain}:${resource} EMPTY.`),
+        );
+        console.log(`\n=== Done (${Math.round(durationMs)}ms, NO SOURCE) ===`);
+        await releaseLock(`${domain}:${resource}`, runId);
+        await exitAfterTelemetryFlush(0);
+      }
+
+      // A seeder that reached its upstream but was refused, or received nothing it may
+      // publish, declares `publishBlocked` (the reason) on that run. Last-good stays,
+      // seed-meta keeps its clock, and the bundle runner reports PUBLISH_BLOCKED, not ok.
+      if (data?.publishBlocked) {
+        console.warn(
+          `  PUBLISH BLOCKED: ${data.publishBlocked} — published nothing, `
+          + (preserved ? 'last-good TTL extended.' : 'and there is no complete last-good to preserve.'),
+        );
+        console.log(`\n=== Done (${Math.round(durationMs)}ms, PUBLISH BLOCKED) ===`);
+        await releaseLock(`${domain}:${resource}`, runId);
+        await exitAfterTelemetryFlush(PUBLISH_BLOCKED_EXIT_CODE);
+      }
+
+      if (!preserved) {
+        console.error(`  FAILURE: declareRecords returned 0 and last-good preservation failed — one or more keys are missing or could not be extended`);
+        console.log(`\n=== Done (${Math.round(durationMs)}ms, RETRY FAILED) ===`);
+        await releaseLock(`${domain}:${resource}`, runId);
+        await exitAfterTelemetryFlush(1);
+      }
       console.log(`  RETRY: declareRecords returned 0 (zeroIsValid=false) — envelope unchanged, TTL extended, bundle will retry next cycle`);
       console.log(`\n=== Done (${Math.round(durationMs)}ms, RETRY) ===`);
       await releaseLock(`${domain}:${resource}`, runId);
-      process.exit(0);
+      await exitAfterTelemetryFlush(0);
     }
 
-    const publishResult = await atomicPublish(canonicalKey, publishData, validateFn, ttlSeconds, { envelopeMeta });
+    let publishResult;
+    try {
+      publishResult = await atomicPublish(canonicalKey, publishData, validateFn, ttlSeconds, {
+        envelopeMeta,
+        maxPayloadBytes,
+        beforePublish: beforePublish
+          ? () => beforePublish(data, { canonicalKey, ttlSeconds, runId, lockFence })
+          : undefined,
+        publishAtomically: publishAtomically
+          ? (publishContext) => publishAtomically(data, { ...publishContext, runId })
+          : undefined,
+        compressPayload,
+        lockFence,
+      });
+    } catch (error) {
+      // An atomic publisher either switches its complete key cohort or leaves
+      // the prior cohort untouched. If staging or the final switch fails,
+      // extend that untouched last-good cohort before surfacing the failure.
+      // Validation skips are handled below and retain their stricter policy.
+      // A thrown `beforePublish` is the same shape: it runs ahead of every
+      // canonical/extra write, so the prior cohort is likewise untouched and the
+      // deep coverage rejections that live there must not cost last-good TTLs.
+      // A lost seed lock goes straight to the lock-lost exit below: the keys
+      // now belong to the run that holds the lock.
+      if (isSeedLockLostError(error)) throw error;
+      if (publishAtomically || beforePublish) {
+        const preserved = await preserveExistingKeys().catch(() => false);
+        if (!preserved) {
+          console.error(`  FAILURE: atomic publish failed and last-good preservation was incomplete`);
+        }
+      }
+      throw error;
+    }
     if (publishResult.skipped) {
       const durationMs = Date.now() - startMs;
-      const keys = [canonicalKey, `seed-meta:${domain}:${resource}`];
-      if (extraKeys) keys.push(...extraKeys.map(ek => ek.key));
-      await extendExistingTtl(keys, ttlSeconds || 600);
+      const preserved = await preserveExistingKeys();
       const strictFailure = Boolean(opts.emptyDataIsFailure);
+      const validationSkipContext = {
+        canonicalKey,
+        ttlSeconds,
+        recordCount: contractRecordCount,
+        runId,
+        lockFence,
+        preservationSucceeded: preserved,
+      };
+      // Some rejected snapshots carry failure evidence that must survive even
+      // when there is no complete last-good cohort to preserve. Keep this hook
+      // in the publish phase so its persistence cannot make withRetry(fetchFn)
+      // repeat upstream source requests. A hook may return
+      // `{ freshnessMetaPatch }`; reserved freshness fields are stripped before
+      // the shared writer applies the patch.
+      let validationSkipResult = null;
+      let validationSkipMetaRead = false;
+      let validationSkipExistingMeta = null;
+      if (!strictFailure && afterValidationSkip) {
+        validationSkipExistingMeta = await readExistingSeedMeta(domain, resource);
+        validationSkipMetaRead = true;
+        assertLockStillHeld();
+        validationSkipResult = await afterValidationSkip(data, {
+          ...validationSkipContext,
+          existingSeedMeta: validationSkipExistingMeta,
+        });
+      }
       if (strictFailure) {
         // Strict-floor seeders (e.g. IMF-External, floor=180 countries) treat
         // empty data as a real upstream failure. Do NOT refresh seed-meta —
@@ -1496,16 +3307,32 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
         //   - canonical envelope is malformed / legacy bare shape
         //   - canonical envelope has recordCount <= 0
         const canonicalMeta = await readCanonicalEnvelopeMeta(canonicalKey);
+        // Preserve non-reserved diagnostics (poolCounts, GDELT errorReason, …)
+        // from the previous seed-meta write. The SET below replaces the whole
+        // key; without this merge a validate-skip after a healthy publish wipes
+        // afterPublish patches and fail-closed consumers false-alarm.
+        const currentSkipDiagnostics =
+          freshnessMetaDiagnosticsPatch(validationSkipResult?.freshnessMetaPatch) || {};
+        const preservedDiagnostics = {
+          ...(freshnessMetaDiagnosticsPatch(
+            validationSkipMetaRead
+              ? validationSkipExistingMeta
+              : await readExistingSeedMeta(domain, resource),
+          ) || {}),
+          ...currentSkipDiagnostics,
+        };
         if (canonicalMeta) {
           // Pass-through canonical's contentAge so health doesn't lose the
           // STALE_CONTENT signal exactly when last-good-with-stale-content
           // data is being served (Codex round 1 P0b).
-          await writeFreshnessMetadata(
+          await writeFreshnessMetadataSafely(
             domain, resource, canonicalMeta.recordCount,
             canonicalMeta.sourceVersion || opts.sourceVersion,
             ttlSeconds,
             canonicalMeta.fetchedAt,
             canonicalMeta.contentAge,
+            Object.keys(preservedDiagnostics).length > 0 ? preservedDiagnostics : null,
+            { lockFence },
           );
           console.log(
             `  SKIPPED: validation failed (empty/partial fetch) — seed-meta mirrors canonical ` +
@@ -1514,15 +3341,27 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
             `existing cache TTL extended`,
           );
         } else {
-          await writeFreshnessMetadata(domain, resource, 0, opts.sourceVersion, ttlSeconds);
+          // No non-empty last-good envelope: drop prior diagnostics because
+          // they described a different cohort, but retain diagnostics emitted
+          // by this rejected attempt. A valid zero-record predecessor can
+          // still carry bounded source-failure evidence.
+          await writeFreshnessMetadataSafely(
+            domain, resource, 0, opts.sourceVersion, ttlSeconds,
+            undefined, undefined,
+            Object.keys(currentSkipDiagnostics).length > 0 ? currentSkipDiagnostics : null,
+            { lockFence },
+          );
           console.log(`  SKIPPED: validation failed (empty data) — seed-meta refreshed (recordCount=0), existing cache TTL extended`);
         }
+      }
+      if (!strictFailure && preserved && afterPreservedValidationSkip) {
+        await afterPreservedValidationSkip(data, validationSkipContext);
       }
       console.log(`\n=== Done (${Math.round(durationMs)}ms, no write) ===`);
       await releaseLock(`${domain}:${resource}`, runId);
       // Strict path exits non-zero so _bundle-runner counts it as failed++
       // (otherwise the bundle summary hides upstream outages behind ran++).
-      process.exit(strictFailure ? 1 : 0);
+      await exitAfterTelemetryFlush(strictFailure ? 1 : 0);
     }
     const { payloadBytes } = publishResult;
     const topicArticleCount = Array.isArray(data?.topics)
@@ -1542,6 +3381,9 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
     // the canonical one.
     if (extraKeys) {
       for (const ek of extraKeys) {
+        // Stop at the first key once the heartbeat has seen the lock go; each
+        // write below is also fenced inside Redis.
+        assertLockStillHeld();
         // skipWhenEmpty needs a resolved recordCount, which only exists in
         // contract mode (declareRecords). Warn loudly on misconfig instead of
         // silently writing the empty payload the flag was meant to guard against.
@@ -1549,6 +3391,27 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
           console.warn(`  [extraKey] ${ek.key} declares skipWhenEmpty but ${domain}:${resource} is not in contract mode (no declareRecords) — guard inactive`);
         }
         const ekData = ek.transform ? ek.transform(data) : data;
+
+        // Guard 1 — pre-publish internals escaping through an extra key. `data` here is
+        // the RAW fetcher output, NOT `publishData`: a transform written as `{ ...data }`
+        // re-exports everything publishTransform deliberately stripped from the canonical
+        // key. That shipped an 11.5 MB forecast:predictions-bootstrap:v1 (66x its own
+        // canonical key) and every bootstrap origin miss paid for it. Fail loudly: the
+        // canonical key is already published at this point, so refusing to write the extra
+        // key leaves last-good data in place rather than serving a monstrous payload.
+        const leaked = findLeakedPrePublishFields(data, publishData, ekData, ek);
+        if (leaked.length > 0) {
+          await releaseLock(`${domain}:${resource}`, runId);
+          console.error(
+            `  CONTRACT VIOLATION on extraKey ${ek.key}: re-exports ${leaked.length} pre-publish field(s) `
+            + `that publishTransform strips from the canonical key: ${leaked.join(', ')}. `
+            + `extraKey transforms receive the RAW fetcher output, not the published payload — `
+            + `project it first (e.g. compose with your publishTransform) or list the fields in `
+            + `allowPrePublishFields if they are genuinely intended.`,
+          );
+          await exitAfterTelemetryFlush(1);
+        }
+
         let ekEnvelope = null;
         if (contractMode) {
           const ekDeclare = typeof ek.declareRecords === 'function' ? ek.declareRecords : declareRecords;
@@ -1558,15 +3421,33 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
           } catch (err) {
             await releaseLock(`${domain}:${resource}`, runId);
             console.error(`  CONTRACT VIOLATION on extraKey ${ek.key}: ${err.message || err}`);
-            process.exit(1);
+            await exitAfterTelemetryFlush(1);
           }
           // Opt-in skip-empty: don't overwrite a good cached extra-key payload
           // with a recordCount=0 write on a partial fetch (e.g. a token panel
           // whose IDs the upstream dropped this cycle). Preserve last-good by
-          // extending the existing key's TTL instead.
+          // extending the existing key's TTL instead. Three outcomes, reported
+          // distinctly because they mean different things to an operator:
+          // preserved (EXPIRE confirmed), expected-absent (an
+          // allowMissingOnSkip key that has not been written yet), or a real
+          // preservation failure / unconfirmed pipeline result.
           if (shouldSkipEmptyExtraKey(ek, ekCount)) {
-            await extendExistingTtl([ek.key], ek.ttl || ttlSeconds || 600);
-            console.log(`  [extraKey] ${ek.key} empty (recordCount=0) — skipped write, extended TTL to preserve last-good`);
+            assertLockStillHeld();
+            const preservation = await extendExistingTtlDetailed(
+              [ek.key],
+              ek.ttl || ttlSeconds || 600,
+              { allowMissingKeys: ek.allowMissingOnSkip ? [ek.key] : [] },
+            );
+            // Per-key truth, not allExtended: that verdict now forgives an
+            // allowed-missing key, so it would report a preserved TTL for a key
+            // that is simply absent.
+            if (preservation.extendedKeys.includes(ek.key)) {
+              console.log(`  [extraKey] ${ek.key} empty (recordCount=0) — skipped write, extended TTL to preserve last-good`);
+            } else if (ek.allowMissingOnSkip && preservation.missingKeys.includes(ek.key)) {
+              console.log(`  [extraKey] ${ek.key} empty (recordCount=0) — skipped write, optional last-good key was absent`);
+            } else {
+              console.warn(`  [extraKey] ${ek.key} empty (recordCount=0) — skipped write, TTL preservation failed or was unconfirmed`);
+            }
             continue;
           }
           ekEnvelope = {
@@ -1577,13 +3458,50 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
             state: ekCount > 0 ? 'OK' : (zeroIsValid ? 'OK_ZERO' : 'OK'),
           };
         }
-        await writeExtraKey(ek.key, ekData, ek.ttl || ttlSeconds, ekEnvelope);
+
+        // Guard 2 — blunt backstop. Catches a monstrous payload whatever the cause,
+        // including one this codebase has not seen yet. Measure the serialized UTF-8
+        // value (including a contract envelope), which is what Redis actually stores.
+        const ekBytes = extraKeyPayloadBytes(ek.key, ekData, ekEnvelope);
+        if (ekBytes > MAX_SEEDED_VALUE_BYTES) {
+          await releaseLock(`${domain}:${resource}`, runId);
+          console.error(
+            `  CONTRACT VIOLATION on extraKey ${ek.key}: payload is ${ekBytes} bytes, above the `
+            + `${MAX_SEEDED_VALUE_BYTES}-byte ceiling for a seeded value. Refusing to publish.`,
+          );
+          await exitAfterTelemetryFlush(1);
+        }
+        await writeExtraKey(ek.key, ekData, ek.ttl || ttlSeconds, ekEnvelope, { lockFence });
+        if (contractMode && ek.metaKey) {
+          const metaExtra = typeof ek.metaExtra === 'function'
+            ? ek.metaExtra(ekData, data)
+            : ek.metaExtra;
+          let wroteMeta = false;
+          try {
+            wroteMeta = await writeSeedMeta(
+              ek.key,
+              ekEnvelope?.recordCount ?? 0,
+              ek.metaKey,
+              // Same data TTL the writeExtraKey above just used, so a long-lived
+              // extra key can't outlive the meta that reports on it.
+              resolveSeedMetaTtl(ek.metaTtlSeconds, ek.ttl || ttlSeconds),
+              ek.coverage,
+              metaExtra,
+              { lockFence },
+            );
+          } catch (err) {
+            if (ek.metaCritical || isSeedLockLostError(err)) throw err;
+            console.warn(`  Extra key ${ek.key}: seed-meta ${ek.metaKey} write failed; freshness will age: ${err.message}`);
+          }
+          if (!wroteMeta && ek.metaCritical) throw new Error(`Extra key ${ek.key}: seed-meta ${ek.metaKey} write failed`);
+        }
       }
     }
 
-    if (afterPublish) {
-      await afterPublish(data, { canonicalKey, ttlSeconds, recordCount, runId });
-    }
+    assertLockStillHeld();
+    const afterPublishResult = afterPublish
+      ? await afterPublish(data, { canonicalKey, ttlSeconds, recordCount, runId, lockFence })
+      : null;
 
     // Mirror content-age fields into seed-meta when the seeder opted in.
     //
@@ -1604,24 +3522,79 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
       oldestItemAt: contentOldestAt,
       maxContentAgeMin,
     } : undefined;
-    const meta = await writeFreshnessMetadata(
+    const meta = await writeFreshnessMetadataSafely(
       domain, resource, recordCount, opts.sourceVersion, ttlSeconds,
       undefined,            // fetchedAtOverride — success path uses now
       successContentAge,
+      afterPublishResult?.freshnessMetaPatch,
+      { lockFence },
     );
+    if (afterFreshness) {
+      if (meta == null) {
+        throw new Error(`${domain}:${resource} freshness metadata write failed before completion`);
+      }
+      await afterFreshness(data, {
+        canonicalKey,
+        ttlSeconds,
+        recordCount,
+        runId,
+        freshnessMeta: meta,
+      });
+    }
+
+    // This is the final required Redis write for an attested bundle member.
+    // It deliberately does not run on fetch failure, contract retry, or
+    // validation-skip paths. Bind it to the canonical envelope timestamp so a
+    // marker from any other run cannot attest this publish.
+    if (bundleCompletionMetaKey) {
+      if (meta == null) {
+        throw new Error(`${domain}:${resource} freshness metadata write failed before completion attestation`);
+      }
+      if (!Number.isFinite(envelopeMeta?.fetchedAt)) {
+        throw new Error(`${domain}:${resource} canonical envelope timestamp missing before completion attestation`);
+      }
+      await writeExtraKey(
+        bundleCompletionMetaKey,
+        {
+          fetchedAt: envelopeMeta.fetchedAt,
+          completedAt: Date.now(),
+          runId,
+        },
+        Math.max(7 * 24 * 60 * 60, ttlSeconds || 0),
+        undefined,
+        { lockFence },
+      );
+    }
 
     const durationMs = Date.now() - startMs;
-    logSeedResult(domain, recordCount, durationMs, { payloadBytes, contractMode, state: contractState || 'LEGACY' });
+    const completionState =
+      typeof afterPublishResult?.completionState === 'string'
+      && afterPublishResult.completionState.trim().length > 0
+        ? afterPublishResult.completionState
+        : (contractState || 'LEGACY');
+    logSeedResult(domain, recordCount, durationMs, {
+      runId,
+      canonicalKey,
+      fetchedAt: envelopeMeta?.fetchedAt ?? meta?.fetchedAt ?? null,
+      ...(contentAgeOptedIn ? { newestItemAt: contentNewestAt, oldestItemAt: contentOldestAt, maxContentAgeMin } : {}),
+      payloadBytes,
+      contractMode,
+      state: completionState,
+    });
 
     // Verify (best-effort: write already succeeded, don't fail the job on transient read issues)
     let verified = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < SEED_VERIFY_ATTEMPTS; attempt++) {
       try {
         verified = !!(await verifySeedKey(canonicalKey));
         if (verified) break;
-        if (attempt === 0) await new Promise(r => setTimeout(r, 500));
+        if (attempt < SEED_VERIFY_ATTEMPTS - 1) {
+          await new Promise(r => setTimeout(r, SEED_VERIFY_RETRY_DELAY_MS));
+        }
       } catch {
-        if (attempt === 0) await new Promise(r => setTimeout(r, 500));
+        if (attempt < SEED_VERIFY_ATTEMPTS - 1) {
+          await new Promise(r => setTimeout(r, SEED_VERIFY_RETRY_DELAY_MS));
+        }
       }
     }
     if (verified) {
@@ -1632,22 +3605,32 @@ export async function runSeed(domain, resource, canonicalKey, fetchFn, opts = {}
 
     console.log(`\n=== Done (${Math.round(durationMs)}ms) ===`);
     await releaseLock(`${domain}:${resource}`, runId);
-    process.exit(0);
+    await exitAfterTelemetryFlush(0);
   } catch (err) {
+    lockHeartbeat.stop();
+    if (isSeedLockLostError(err)) {
+      const durationMs = Date.now() - startMs;
+      if (err.holder) {
+        // Same outcome as the acquire-time lock-contention skip: the run that
+        // now holds the lock publishes this tick and owns its seed-meta.
+        console.warn(
+          `  SKIPPED: seed lock ${err.lockKey} was taken over by run ${err.holder} before this run (${runId}) `
+          + 'finished publishing — remaining writes and seed-meta left to that run',
+        );
+        console.log(`\n=== Done (${Math.round(durationMs)}ms, LOCK LOST) ===`);
+        await exitAfterTelemetryFlush(0);
+      }
+      // No run owns the tick: keep last-good alive and report a graceful
+      // failure so the next tick retries. seed-meta is not touched.
+      console.warn(
+        `  SKIPPED: seed lock ${err.lockKey} expired before this run (${runId}) finished publishing `
+        + '— remaining writes and seed-meta skipped',
+      );
+      await preserveExistingKeys().catch(() => false);
+      console.log(`\n=== Failed gracefully (${Math.round(durationMs)}ms, lock expired) ===`);
+      await exitAfterTelemetryFlush(GRACEFUL_FETCH_FAILURE_EXIT_CODE);
+    }
     await releaseLock(`${domain}:${resource}`, runId);
     throw err;
   }
-}
-
-// Export internal Redis helpers for seeders that import them directly.
-export { redisCommand, redisGet, redisSet, redisDel };
-export async function redisPipeline(url, token, commands) {
-  const resp = await fetch(`${url}/pipeline`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(commands),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!resp.ok) throw new Error(`Redis pipeline failed: HTTP ${resp.status}`);
-  return resp.json();
 }

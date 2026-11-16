@@ -1,20 +1,61 @@
+import { getCachedJson } from '../../../_shared/redis';
+import { STORAGE_FACILITIES_KEY } from '../../../_shared/cache-keys';
 import type {
-  ServerContext,
   GetStorageFacilityDetailRequest,
   GetStorageFacilityDetailResponse,
+  StorageFacilityEntry,
 } from '../../../../src/generated/server/worldmonitor/supply_chain/v1/service_server';
-import { listStorageFacilities } from './list-storage-facilities';
+import { projectStorageFacility } from './list-storage-facilities';
 
+interface RawRegistry {
+  updatedAt?: string;
+  facilities?: Record<string, unknown>;
+}
+
+/**
+ * Returns one storage facility + its revision log, loaded lazily when the
+ * user opens the asset-detail drawer. Revisions come from the auto-revision
+ * log wired in Week 3 — empty array until then.
+ */
 export async function getStorageFacilityDetail(
-  ctx: ServerContext,
+  _ctx: unknown,
   req: GetStorageFacilityDetailRequest,
 ): Promise<GetStorageFacilityDetailResponse> {
-  const { facilities } = await listStorageFacilities(ctx, { facilityType: '' });
-  const facility = facilities.find(f => f.id === req.facilityId);
+  if (!req.facilityId || req.facilityId.length === 0) {
+    return {
+      facility: undefined,
+      revisions: [],
+      fetchedAt: new Date().toISOString(),
+      unavailable: true,
+    };
+  }
+
+  // Seeder writes via raw key (no env-prefix) — match it on read.
+  const raw = (await getCachedJson(STORAGE_FACILITIES_KEY, true)) as RawRegistry | null;
+  const entry = raw?.facilities?.[req.facilityId];
+  if (!entry) {
+    return {
+      facility: undefined,
+      revisions: [],
+      fetchedAt: new Date().toISOString(),
+      unavailable: true,
+    };
+  }
+
+  const facility: StorageFacilityEntry | null = projectStorageFacility(entry);
+  if (!facility) {
+    return {
+      facility: undefined,
+      revisions: [],
+      fetchedAt: new Date().toISOString(),
+      unavailable: true,
+    };
+  }
+
   return {
     facility,
     revisions: [],
-    fetchedAt: new Date().toISOString(),
-    unavailable: !facility,
+    fetchedAt: raw?.updatedAt ?? new Date().toISOString(),
+    unavailable: false,
   };
 }

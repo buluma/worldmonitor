@@ -1,3 +1,7 @@
+/**
+ * ListClimateNews RPC -- reads seeded climate news data from Railway seed cache.
+ */
+
 import type {
   ClimateServiceHandler,
   ServerContext,
@@ -6,8 +10,7 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/climate/v1/service_server';
 
 import { getCachedJson } from '../../../_shared/redis';
-
-const CLIMATE_NEWS_KEY = 'climate:news-intelligence:v1';
+import { CLIMATE_NEWS_KEY } from '../../../_shared/cache-keys';
 
 export const listClimateNews: ClimateServiceHandler['listClimateNews'] = async (
   _ctx: ServerContext,
@@ -15,8 +18,8 @@ export const listClimateNews: ClimateServiceHandler['listClimateNews'] = async (
 ): Promise<ListClimateNewsResponse> => {
   try {
     const result = await getCachedJson(CLIMATE_NEWS_KEY, true) as ListClimateNewsResponse | null;
-    return result ?? { items: [], fetchedAt: 0 };
+    return result ? { ...result, dataAvailable: true } : { items: [], fetchedAt: 0, dataAvailable: false };
   } catch {
-    return { items: [], fetchedAt: 0 };
+    return { items: [], fetchedAt: 0, dataAvailable: false };
   }
 };

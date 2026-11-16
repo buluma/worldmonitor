@@ -17,6 +17,16 @@ const root = resolve(__dirname, '..');
 
 const readSrc = (relPath: string) => readFileSync(resolve(root, relPath), 'utf-8');
 
+function deferred<T>() {
+  let resolvePromise!: (value: T) => void;
+  let rejectPromise!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return { promise, resolve: resolvePromise, reject: rejectPromise };
+}
+
 
 // ============================================================
 // 2. Behavioral: persistentStaleCeilingMs controls hydration discard
@@ -690,3 +700,195 @@ describe('CircuitBreaker — same name, different ceiling (registry behavior)', 
   });
 });
 
+// ============================================================
+// shouldCache eviction — cached invalid data is evicted and refetched
+// ============================================================
+
+describe('CircuitBreaker — shouldCache eviction of invalid cached data', () => {
+  const CIRCUIT_BREAKER_URL = pathToFileURL(
+    resolve(root, 'src/utils/circuit-breaker.ts'),
+  ).href;
+
+  it('evicts cached data that fails shouldCache and fetches fresh', async () => {
+    const mod = await import(`${CIRCUIT_BREAKER_URL}?t=${Date.now()}-evict-fresh`);
+    const { createCircuitBreaker, clearAllCircuitBreakers } = mod;
+    clearAllCircuitBreakers();
+
+    try {
+      const breaker = createCircuitBreaker<number[]>({
+        name: 'ShouldCache Evict Test',
+        cacheTtlMs: 60 * 1000,
+      });
+
+      // Populate cache with empty array (simulates a prior failed fetch)
+      breaker.recordSuccess([]);
+      assert.deepEqual(breaker.getCached(), [], 'empty array is cached');
+
+      let fetchCount = 0;
+      const result = await breaker.execute(
+        async () => { fetchCount++; return [1, 2, 3]; },
+        [] as number[],
+        { shouldCache: (r) => r.length > 0 },
+      );
+
+      assert.equal(fetchCount, 1, 'must bypass empty cache and fetch fresh');
+      assert.deepEqual(result, [1, 2, 3], 'fresh data is returned');
+      assert.deepEqual(breaker.getCached(), [1, 2, 3], 'fresh data is now cached');
+    } finally {
+      clearAllCircuitBreakers();
+    }
+  });
+
+  it('serves valid cached data without fetching when shouldCache passes', async () => {
+    const mod = await import(`${CIRCUIT_BREAKER_URL}?t=${Date.now()}-evict-skip`);
+    const { createCircuitBreaker, clearAllCircuitBreakers } = mod;
+    clearAllCircuitBreakers();
+
+    try {
+      const breaker = createCircuitBreaker<number[]>({
+        name: 'ShouldCache Skip Test',
+        cacheTtlMs: 60 * 1000,
+      });
+
+      breaker.recordSuccess([1, 2, 3]);
+
+      let fetchCount = 0;
+      const result = await breaker.execute(
+        async () => { fetchCount++; return [4, 5, 6]; },
+        [] as number[],
+        { shouldCache: (r) => r.length > 0 },
+      );
+
+      assert.equal(fetchCount, 0, 'valid cache must not trigger a live fetch');
+      assert.deepEqual(result, [1, 2, 3], 'cached data is returned');
+    } finally {
+      clearAllCircuitBreakers();
+    }
+  });
+
+  it('without shouldCache, empty array is served from cache without fetching', async () => {
+    const mod = await import(`${CIRCUIT_BREAKER_URL}?t=${Date.now()}-evict-no-pred`);
+    const { createCircuitBreaker, clearAllCircuitBreakers } = mod;
+    clearAllCircuitBreakers();
+
+    try {
+      const breaker = createCircuitBreaker<number[]>({
+        name: 'No ShouldCache Test',
+        cacheTtlMs: 60 * 1000,
+      });
+
+      breaker.recordSuccess([]);
+
+      let fetchCount = 0;
+      const result = await breaker.execute(
+        async () => { fetchCount++; return [1, 2, 3]; },
+        [] as number[],
+        // No shouldCache — default is () => true, so empty array is valid
+      );
+
+      assert.equal(fetchCount, 0, 'without shouldCache, cached empty array is served');
+      assert.deepEqual(result, [], 'empty cached data is returned as-is');
+    } finally {
+      clearAllCircuitBreakers();
+    }
+  });
+});
+
+describe('CircuitBreaker — awaited stale refresh opt-in', () => {
+  const CIRCUIT_BREAKER_URL = pathToFileURL(
+    resolve(root, 'src/utils/circuit-breaker.ts'),
+  ).href;
+
+  it('waits for a stale refresh and falls back with cached mode when it fails', async () => {
+    const mod = await import(`${CIRCUIT_BREAKER_URL}?t=${Date.now()}-await-stale-failure`);
+    const { createCircuitBreaker, clearAllCircuitBreakers } = mod;
+    clearAllCircuitBreakers();
+
+    const originalNow = Date.now;
+    let now = 1_000;
+    Date.now = () => now;
+
+    try {
+      const breaker = createCircuitBreaker<{ value: string }>({
+        name: 'Awaited Stale Failure Test',
+        cacheTtlMs: 10,
+        persistCache: false,
+      });
+      const fallback = { value: 'fallback' };
+      await breaker.execute(async () => ({ value: 'seed' }), fallback);
+      const originalTimestamp = breaker.getDataState().timestamp;
+      now += 11;
+
+      const refresh = deferred<{ value: string }>();
+      let refreshCalls = 0;
+      const pending = breaker.execute(async () => {
+        refreshCalls++;
+        return refresh.promise;
+      }, fallback, {
+        staleRefreshMode: 'await',
+      });
+
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      assert.equal(refreshCalls, 1);
+      assert.equal(settled, false, 'await mode must not return stale before refresh settles');
+
+      refresh.reject(new Error('upstream unavailable'));
+      const result = await pending;
+      assert.deepEqual(result, { value: 'seed' });
+      assert.deepEqual(breaker.getDataState(), {
+        mode: 'cached',
+        timestamp: originalTimestamp,
+        offline: false,
+      });
+    } finally {
+      Date.now = originalNow;
+      clearAllCircuitBreakers();
+    }
+  });
+
+  it('coalesces concurrent awaited stale refreshes and returns the fresh result', async () => {
+    const mod = await import(`${CIRCUIT_BREAKER_URL}?t=${Date.now()}-await-stale-coalesce`);
+    const { createCircuitBreaker, clearAllCircuitBreakers } = mod;
+    clearAllCircuitBreakers();
+
+    const originalNow = Date.now;
+    let now = 2_000;
+    Date.now = () => now;
+
+    try {
+      const breaker = createCircuitBreaker<{ value: string }>({
+        name: 'Awaited Stale Coalescing Test',
+        cacheTtlMs: 10,
+        persistCache: false,
+      });
+      const fallback = { value: 'fallback' };
+      await breaker.execute(async () => ({ value: 'seed' }), fallback);
+      now += 11;
+
+      const refresh = deferred<{ value: string }>();
+      let refreshCalls = 0;
+      const refreshFn = async () => {
+        refreshCalls++;
+        return refresh.promise;
+      };
+      const options = { staleRefreshMode: 'await' as const };
+      const first = breaker.execute(refreshFn, fallback, options);
+      const second = breaker.execute(refreshFn, fallback, options);
+      await Promise.resolve();
+      assert.equal(refreshCalls, 1, 'same-key awaited refreshes must share one request');
+
+      refresh.resolve({ value: 'fresh' });
+      const [firstResult, secondResult] = await Promise.all([first, second]);
+      assert.deepEqual(firstResult, { value: 'fresh' });
+      assert.deepEqual(secondResult, { value: 'fresh' });
+      assert.equal(breaker.getDataState().mode, 'live');
+    } finally {
+      Date.now = originalNow;
+      clearAllCircuitBreakers();
+    }
+  });
+});

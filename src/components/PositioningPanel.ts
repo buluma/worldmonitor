@@ -1,18 +1,12 @@
-import type { MarketServiceClient, HyperliquidAssetFlow } from '@/generated/client/worldmonitor/market/v1/service_client';
+import type { HyperliquidAssetFlow } from '@/generated/client/worldmonitor/market/v1/service_client';
 import { Panel } from './Panel';
+import { createLazyClient, getRpcBaseUrl, rpcFetch } from '@/services/rpc-client';
+import { MarketServiceClient } from '@/services/generated-rpc-clients';
 import { t } from '@/services/i18n';
 import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
 import { getHydratedData } from '@/services/bootstrap';
 
-let _client: MarketServiceClient | null = null;
-async function getMarketClient(): Promise<MarketServiceClient> {
-  if (!_client) {
-    const { MarketServiceClient } = await import('@/generated/client/worldmonitor/market/v1/service_client');
-    const { getRpcBaseUrl } = await import('@/services/rpc-client');
-    _client = new MarketServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
-  }
-  return _client;
-}
+const getMarketClient = createLazyClient(() => new MarketServiceClient(getRpcBaseUrl(), { fetch: rpcFetch }));
 
 interface AssetView {
   symbol: string;
@@ -35,6 +29,9 @@ interface FlowSnapshot {
 
 const ELEVATED_THRESHOLD = 40;
 
+// 12 samples back = 1 hour at 5min cadence. Matches the original
+// MarketPanel.ts implementation. Using 2 samples would report a
+// 5-minute delta mislabeled as "OI delta 1h".
 function oiDelta1h(sparkOi: number[] | undefined): number | null {
   if (!Array.isArray(sparkOi) || sparkOi.length < 13) return null;
   const last = sparkOi[sparkOi.length - 1]!;
@@ -100,18 +97,22 @@ function renderArcGauge(score: number, color: string, size = 56): string {
   const endAngle = Math.PI * 2.2;
   const totalArc = endAngle - startAngle;
   const fillAngle = startAngle + (score / 100) * totalArc;
+
   const bgX1 = cx + r * Math.cos(startAngle);
   const bgY1 = cy + r * Math.sin(startAngle);
   const bgX2 = cx + r * Math.cos(endAngle);
   const bgY2 = cy + r * Math.sin(endAngle);
+
   const fX2 = cx + r * Math.cos(fillAngle);
   const fY2 = cy + r * Math.sin(fillAngle);
   const largeArc = (fillAngle - startAngle) > Math.PI ? 1 : 0;
+
   const opacity = score < 15 ? 0.4 : score < 40 ? 0.6 : 0.9;
+
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" class="pos-gauge">
     <path d="M ${bgX1} ${bgY1} A ${r} ${r} 0 1 1 ${bgX2} ${bgY2}" fill="none" stroke="var(--border-color, #333)" stroke-width="3" stroke-linecap="round"/>
     ${score > 0 ? `<path d="M ${bgX1} ${bgY1} A ${r} ${r} 0 ${largeArc} 1 ${fX2} ${fY2}" fill="none" stroke="${color}" stroke-width="3.5" stroke-linecap="round" opacity="${opacity}"/>` : ''}
-    <text x="${cx}" y="${cy + 2}" text-anchor="middle" dominant-baseline="middle" fill="${color}" font-size="13" font-weight="600" opacity="${opacity}">${Math.round(score)}</text>
+    <text x="${cx}" y="${cy + 2}" text-anchor="middle" dominant-baseline="middle" fill="${color}" style="font-size:calc(13px * var(--wm-panel-effective-scale, 1))" font-weight="600" opacity="${opacity}">${Math.round(score)}</text>
   </svg>`;
 }
 
@@ -129,10 +130,13 @@ function renderAssetCard(asset: AssetView, clickTarget: string | null): string {
   const glowStyle = elevated ? ` style="--pos-glow-color: ${color}"` : '';
   const clickAttr = clickTarget ? ` data-pos-navigate="${escapeHtml(clickTarget)}"` : '';
   const cursorClass = clickTarget ? ' pos-card--clickable' : '';
+
   const title = `${asset.symbol} score ${score}/100` +
     (asset.funding != null ? ` | funding ${fundingStr}` : '') +
     (asset.oiDelta1h != null ? ` | OI delta ${oiStr}` : '') +
-    (asset.warmup ? ' | warming up' : '') + (asset.stale ? ' | upstream stale' : '');
+    (asset.warmup ? ' | warming up' : '') +
+    (asset.stale ? ' | upstream stale' : '');
+
   return `<div class="pos-card${elevatedClass}${cursorClass}"${glowStyle}${clickAttr} title="${escapeHtml(title)}">
     <div class="pos-card__name">${escapeHtml(asset.display)}${staleBadge}${warmupBadge}</div>
     ${renderArcGauge(score, color)}
@@ -143,10 +147,14 @@ function renderAssetCard(asset: AssetView, clickTarget: string | null): string {
   </div>`;
 }
 
+// Keys must match the seeded symbol field from seed-hyperliquid-flow.mjs,
+// NOT display names. Commodity perps use xyz: prefixed Hyperliquid names.
 const CLICK_TARGETS: Record<string, string> = {
-  BTC: 'crypto', ETH: 'crypto', SOL: 'crypto', PAXG: 'commodities',
-  'xyz:CL': 'commodities', 'xyz:BRENTOIL': 'commodities', 'xyz:GOLD': 'commodities',
-  'xyz:SILVER': 'commodities', 'xyz:PLATINUM': 'commodities', 'xyz:PALLADIUM': 'commodities',
+  BTC: 'crypto', ETH: 'crypto', SOL: 'crypto',
+  PAXG: 'commodities',
+  'xyz:CL': 'commodities', 'xyz:BRENTOIL': 'commodities',
+  'xyz:GOLD': 'commodities', 'xyz:SILVER': 'commodities',
+  'xyz:PLATINUM': 'commodities', 'xyz:PALLADIUM': 'commodities',
   'xyz:COPPER': 'commodities', 'xyz:NATGAS': 'commodities',
 };
 
@@ -171,7 +179,13 @@ export class PositioningPanel extends Panel {
   private _loading = false;
 
   constructor() {
-    super({ id: 'positioning-247', title: t('components.positioning247.title'), showCount: false, infoTooltip: t('components.positioning247.infoTooltip') });
+    super({
+      id: 'positioning-247',
+      title: t('components.positioning247.title'),
+      showCount: false,
+      infoTooltip: t('components.positioning247.infoTooltip'),
+    });
+
     this.content.addEventListener('click', (e) => {
       const card = (e.target as HTMLElement).closest<HTMLElement>('[data-pos-navigate]');
       if (card?.dataset.posNavigate) {
@@ -192,22 +206,33 @@ export class PositioningPanel extends Panel {
       if (!this._flow) {
         const hydrated = getHydratedData('hyperliquidFlow') as Record<string, unknown> | undefined;
         if (hydrated && !hydrated.unavailable && Array.isArray(hydrated.assets) && hydrated.assets.length > 0) {
-          this._flow = { ...mapResponse(hydrated.assets as Array<Record<string, unknown>>, true), warmup: Boolean(hydrated.warmup) };
+          this._flow = {
+            ...mapResponse(hydrated.assets as Array<Record<string, unknown>>, true),
+            warmup: Boolean(hydrated.warmup),
+          };
           this._render();
         }
       }
-      const client = await getMarketClient();
+
+      const client = getMarketClient();
       const resp = await client.getHyperliquidFlow({});
       if (resp.unavailable || !resp.assets || resp.assets.length === 0) {
-        if (!this._flow) this._flow = { warmup: true, commodityAssets: [], cryptoAssets: [], fxAssets: [], unavailable: true };
+        if (!this._flow) {
+          this._flow = { warmup: true, commodityAssets: [], cryptoAssets: [], fxAssets: [], unavailable: true };
+        }
       } else {
-        this._flow = { ...mapResponse(resp.assets as HyperliquidAssetFlow[], false), warmup: Boolean(resp.warmup) };
+        this._flow = {
+          ...mapResponse(resp.assets as HyperliquidAssetFlow[], false),
+          warmup: Boolean(resp.warmup),
+        };
       }
       this._render();
       return true;
     } catch (err) {
       console.error('[PositioningPanel] RPC failed:', err instanceof Error ? err.message : err);
-      if (!this._flow) this._flow = { warmup: true, commodityAssets: [], cryptoAssets: [], fxAssets: [], unavailable: true };
+      if (!this._flow) {
+        this._flow = { warmup: true, commodityAssets: [], cryptoAssets: [], fxAssets: [], unavailable: true };
+      }
       this._render();
       return false;
     } finally {
@@ -216,17 +241,29 @@ export class PositioningPanel extends Panel {
   }
 
   private _render(): void {
-    if (!this._flow) { this.showLoading(); return; }
+    if (!this._flow) {
+      this.showLoading();
+      return;
+    }
     if (this._flow.unavailable) {
+      // Empty snapshots on fresh deploy / cold seed are normal warmup, not errors.
+      // Show guidance that samples populate over the next few minutes.
       this.setSafeContent(unsafeRawHtml(`<div class="pos-panel"><div class="pos-warmup">${escapeHtml(t('components.positioning247.warmup'))}</div></div>`, 'legacy Panel.setContent() migration'));
       return;
     }
+
     const sections: string[] = [];
-    if (this._flow.warmup) sections.push(`<div class="pos-warmup">${escapeHtml(t('components.positioning247.warmup'))}</div>`);
+
+    if (this._flow.warmup) {
+      sections.push(`<div class="pos-warmup">${escapeHtml(t('components.positioning247.warmup'))}</div>`);
+    }
+
     sections.push(renderSection(t('components.positioning247.commodities'), this._flow.commodityAssets));
     sections.push(renderSection(t('components.positioning247.crypto'), this._flow.cryptoAssets));
     sections.push(renderSection(t('components.positioning247.fx'), this._flow.fxAssets));
+
     sections.push(`<div class="pos-footer">${escapeHtml(t('components.positioning247.footer'))}</div>`);
+
     this.setSafeContent(unsafeRawHtml(`<div class="pos-panel">${sections.join('')}</div>`, 'legacy Panel.setContent() migration'));
   }
 }

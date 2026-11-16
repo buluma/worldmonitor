@@ -1,10 +1,11 @@
 import { Panel } from './Panel';
 import { getRpcBaseUrl } from '@/services/rpc-client';
 import { t } from '@/services/i18n';
-import { escapeHtml } from '@/utils/sanitize';
-import { MarketServiceClient } from '@/generated/client/worldmonitor/market/v1/service_client';
+import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
+
 import type { ListEtfFlowsResponse } from '@/generated/client/worldmonitor/market/v1/service_client';
 import { getHydratedData } from '@/services/bootstrap';
+import { MarketServiceClient } from '@/services/generated-rpc-clients';
 
 type ETFFlowsResult = ListEtfFlowsResponse;
 
@@ -21,6 +22,21 @@ function flowClass(direction: string): string {
   return 'flow-neutral';
 }
 
+type NetFlowKind = 'inflow' | 'outflow' | 'neutral';
+
+function netFlowKind(direction: string): NetFlowKind {
+  if (direction.includes('INFLOW')) return 'inflow';
+  if (direction.includes('OUTFLOW')) return 'outflow';
+  return 'neutral';
+}
+
+export function etfNetFlowLabel(direction: string): string {
+  const kind = netFlowKind(direction);
+  if (kind === 'inflow') return t('components.etfFlows.netInflow');
+  if (kind === 'outflow') return t('components.etfFlows.netOutflow');
+  return t('components.etfFlows.netNeutral');
+}
+
 function changeClass(val: number): string {
   if (val > 0.1) return 'change-positive';
   if (val < -0.1) return 'change-negative';
@@ -31,55 +47,71 @@ export class ETFFlowsPanel extends Panel {
   private data: ETFFlowsResult | null = null;
   private loading = true;
   private error: string | null = null;
+  private tableNavigationCleanup: (() => void) | null = null;
   constructor() {
     super({ id: 'etf-flows', title: t('panels.etfFlows'), showCount: false, infoTooltip: t('components.etfFlows.infoTooltip') });
   }
 
   public async fetchData(): Promise<void> {
     const hydrated = getHydratedData('etfFlows') as ETFFlowsResult | undefined;
-    if (hydrated) {
+    if (hydrated?.etfs?.length) {
       this.data = hydrated;
       this.error = null;
       this.loading = false;
       this.renderPanel();
+      void this.refreshFromRpc();
       return;
     }
+    await this.refreshFromRpc();
+  }
 
+  private async refreshFromRpc(): Promise<void> {
     try {
       const client = new MarketServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
-      this.data = await client.listEtfFlows({});
+      const fresh = await client.listEtfFlows({});
       if (!this.element?.isConnected) return;
-      this.error = null;
+      if (fresh.etfs?.length || !this.data) {
+        this.data = fresh;
+        this.error = null;
+        this.loading = false;
+        this.renderPanel();
+      }
     } catch (err) {
       if (this.isAbortError(err)) return;
       if (!this.element?.isConnected) return;
-      console.warn('[ETFFlows] Fetch error:', err);
-      this.error = t('components.etfFlows.unavailable');
+      if (!this.data) {
+        console.warn('[ETFFlows] Fetch error:', err);
+        this.error = t('components.etfFlows.unavailable');
+        this.loading = false;
+        this.renderPanel();
+      }
     }
-    this.loading = false;
-    this.renderPanel();
   }
 
   private renderPanel(): void {
+    // Locked panels restore their original nodes, including these listeners.
+    if (this.isLocked) return;
+    this.tableNavigationCleanup?.();
+    this.tableNavigationCleanup = null;
     if (this.loading) {
       this.showLoading(t('common.loadingEtfData'));
       return;
     }
 
     if (this.error || !this.data) {
-      this.showError(this.error || t('common.noDataShort'), () => void this.fetchData(), undefined);
+      this.showError(this.error || t('common.noDataShort'), () => void this.fetchData());
       return;
     }
 
     const d = this.data;
     if (!d.etfs?.length) {
       const msg = d.rateLimited ? t('components.etfFlows.rateLimited') : t('components.etfFlows.unavailable');
-      this.showError(msg, () => void this.fetchData(), undefined);
+      this.setSafeContent(unsafeRawHtml(`<div class="panel-loading-text">${msg}</div>`, 'legacy Panel.setContent() migration'));
       return;
     }
 
     const s = d.summary || { etfCount: 0, totalVolume: 0, totalEstFlow: 0, netDirection: 'NEUTRAL', inflowCount: 0, outflowCount: 0 };
-    const dirClass = s.netDirection.includes('INFLOW') ? 'flow-inflow' : s.netDirection.includes('OUTFLOW') ? 'flow-outflow' : 'flow-neutral';
+    const dirClass = `flow-${netFlowKind(s.netDirection)}`;
 
     const rows = d.etfs.map(etf => `
       <tr class="etf-row ${flowClass(etf.direction)}">
@@ -96,7 +128,7 @@ export class ETFFlowsPanel extends Panel {
         <div class="etf-summary ${dirClass}">
           <div class="etf-summary-item">
             <span class="etf-summary-label">${t('components.etfFlows.netFlow')}</span>
-            <span class="etf-summary-value ${dirClass}">${s.netDirection.includes('INFLOW') ? t('components.etfFlows.netInflow') : t('components.etfFlows.netOutflow')}</span>
+            <span class="etf-summary-value ${dirClass}">${etfNetFlowLabel(s.netDirection)}</span>
           </div>
           <div class="etf-summary-item">
             <span class="etf-summary-label">${t('components.etfFlows.estFlow')}</span>
@@ -111,15 +143,19 @@ export class ETFFlowsPanel extends Panel {
             <span class="etf-summary-value">${s.inflowCount}↑ ${s.outflowCount}↓</span>
           </div>
         </div>
-        <div class="etf-table-wrap">
-          <table class="etf-table">
+        <div class="etf-table-nav" hidden>
+          <button type="button" data-scroll="previous" aria-controls="${this.panelId}-table">${t('components.etfFlows.previousColumns')}</button>
+          <button type="button" data-scroll="next" aria-controls="${this.panelId}-table">${t('components.etfFlows.moreColumns')}</button>
+        </div>
+        <div id="${this.panelId}-table" class="etf-table-wrap table-scroll" role="group" tabindex="0" aria-labelledby="${this.panelId}Title">
+          <table class="wm-table etf-table">
             <thead>
               <tr>
-                <th>${t('components.etfFlows.table.ticker')}</th>
-                <th>${t('components.etfFlows.table.issuer')}</th>
-                <th>${t('components.etfFlows.table.estFlow')}</th>
-                <th>${t('components.etfFlows.table.volume')}</th>
-                <th>${t('components.etfFlows.table.change')}</th>
+                <th scope="col">${t('components.etfFlows.table.ticker')}</th>
+                <th scope="col">${t('components.etfFlows.table.issuer')}</th>
+                <th scope="col">${t('components.etfFlows.table.estFlow')}</th>
+                <th scope="col">${t('components.etfFlows.table.volume')}</th>
+                <th scope="col">${t('components.etfFlows.table.change')}</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -128,6 +164,54 @@ export class ETFFlowsPanel extends Panel {
       </div>
     `;
 
-    this.setContent(html);
+    this.setSafeContent(unsafeRawHtml(html, 'legacy Panel.setContent() migration'), () => this.bindTableNavigation());
+  }
+
+  private bindTableNavigation(): void {
+    this.tableNavigationCleanup?.();
+    this.tableNavigationCleanup = null;
+    const wrap = this.content.querySelector<HTMLElement>('.etf-table-wrap');
+    const table = wrap?.querySelector('table');
+    const nav = this.content.querySelector<HTMLElement>('.etf-table-nav');
+    const previous = nav?.querySelector<HTMLButtonElement>('[data-scroll="previous"]');
+    const next = nav?.querySelector<HTMLButtonElement>('[data-scroll="next"]');
+    if (!wrap || !table || !nav || !previous || !next) return;
+
+    const controller = new AbortController();
+    const update = () => {
+      const overflow = wrap.scrollWidth - wrap.clientWidth;
+      const position = Math.abs(wrap.scrollLeft);
+      nav.hidden = overflow <= 1;
+      previous.disabled = position <= 1;
+      next.disabled = position >= overflow - 1;
+    };
+    const scroll = (direction: number) => {
+      const sign = getComputedStyle(wrap).direction === 'rtl' ? -1 : 1;
+      wrap.scrollBy({ left: sign * direction * wrap.clientWidth * 0.8 });
+    };
+    previous.addEventListener('click', () => scroll(-1), { signal: controller.signal });
+    next.addEventListener('click', () => scroll(1), { signal: controller.signal });
+    wrap.addEventListener('scroll', update, { passive: true, signal: controller.signal });
+    const observer = new ResizeObserver(update);
+    observer.observe(wrap);
+    observer.observe(table);
+    update();
+    this.tableNavigationCleanup = () => {
+      controller.abort();
+      observer.disconnect();
+    };
+  }
+
+  public override destroy(): void {
+    this.tableNavigationCleanup?.();
+    this.tableNavigationCleanup = null;
+    super.destroy();
+  }
+
+  public override unlockPanel(): void {
+    if (!this.isLocked) return;
+    super.unlockPanel();
+    // Restoring detached nodes can reset scrollLeft without a scroll event.
+    this.bindTableNavigation();
   }
 }

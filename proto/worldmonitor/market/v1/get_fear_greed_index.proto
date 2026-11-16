@@ -2,72 +2,61 @@ syntax = "proto3";
 
 package worldmonitor.market.v1;
 
-import "worldmonitor/market/v1/fear_greed.proto";
+import "sebuf/http/annotations.proto";
 
-// GetFearGreedIndexRequest has no filters -- returns the latest composite index.
-message GetFearGreedIndexRequest {
+message GetFearGreedIndexRequest {}
+
+message FearGreedCategory {
+  double score = 1;
+  double weight = 2;
+  double contribution = 3;
+  bool degraded = 4;
+  string inputs_json = 5;
 }
 
-// GetFearGreedIndexResponse contains the composite fear/greed index and its components.
+message FearGreedSectorPerformance {
+  string symbol = 1;
+  string name = 2;
+  double change1d = 3;
+}
+
 message GetFearGreedIndexResponse {
-  // Composite score (0-100).
   double composite_score = 1;
-  // Composite label (e.g. "Extreme Fear", "Neutral", "Extreme Greed").
   string composite_label = 2;
-  // Previous composite score.
   double previous_score = 3;
-  // Seed timestamp as reported by the seed source.
   string seeded_at = 4;
-  // Sentiment component.
   FearGreedCategory sentiment = 5;
-  // Volatility component.
   FearGreedCategory volatility = 6;
-  // Positioning component.
   FearGreedCategory positioning = 7;
-  // Trend component.
   FearGreedCategory trend = 8;
-  // Market breadth component.
   FearGreedCategory breadth = 9;
-  // Momentum component.
   FearGreedCategory momentum = 10;
-  // Liquidity component.
   FearGreedCategory liquidity = 11;
-  // Credit component.
   FearGreedCategory credit = 12;
-  // Macro component.
   FearGreedCategory macro = 13;
-  // Cross-asset component.
   FearGreedCategory cross_asset = 14;
-  // CBOE VIX level.
   double vix = 15;
-  // High-yield credit spread.
   double hy_spread = 16;
-  // 10-year Treasury yield.
-  double yield10y = 17;
-  // Put/call ratio.
+  double yield_10y = 17;
   double put_call_ratio = 18;
-  // Percentage of S&P 500 constituents above their 200-day moving average.
-  double pct_above200d = 19;
-  // CNN Fear & Greed index value.
+  double pct_above_200d = 19;
   double cnn_fear_greed = 20;
-  // CNN Fear & Greed label.
   string cnn_label = 21;
-  // AAII bullish sentiment percentage.
   double aaii_bull = 22;
-  // AAII bearish sentiment percentage.
   double aaii_bear = 23;
-  // Federal funds rate.
   string fed_rate = 24;
-  // True if the composite could not be computed.
+  // True when the upstream or seed-backed variant is unavailable; empty payload fields
+  // are graceful degradation, not confirmed zero data.
   bool unavailable = 25;
-  // OFR Financial Stress Index value.
+  // Bespoke Fear & Greed header stress ratio, not the KCFSI/ECB FSI panel
+  // composite. Formula: (HYG / TLT) / (VIX * HY OAS / 100).
   double fsi_value = 26;
-  // OFR Financial Stress Index label.
+  // Label for fsi_value: Low Stress (>=1.5), Moderate Stress (>=0.8),
+  // Elevated Stress (>=0.3), otherwise High Stress.
   string fsi_label = 27;
-  // HYG (high-yield bond ETF) price.
+  // Latest HYG ETF price used in the Fear & Greed header stress ratio.
   double hyg_price = 28;
-  // TLT (20+ year Treasury ETF) price.
+  // Latest TLT ETF price used in the Fear & Greed header stress ratio.
   double tlt_price = 29;
-  // Sector performance breakdown.
   repeated FearGreedSectorPerformance sector_performance = 30;
 }

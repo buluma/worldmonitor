@@ -3,18 +3,19 @@ import { t, getLocale } from '@/services/i18n';
 import { getRpcBaseUrl } from '@/services/rpc-client';
 import { h, replaceChildren } from '@/utils/dom-utils';
 import { sanitizeUrl } from '@/utils/sanitize';
-import { MilitaryServiceClient } from '@/generated/client/worldmonitor/military/v1/service_client';
+
 import type { DefensePatentFiling } from '@/generated/client/worldmonitor/military/v1/service_client';
+import { MilitaryServiceClient } from '@/services/generated-rpc-clients';
 
 type ViewMode = 'all' | 'H04B' | 'H01L' | 'F42B' | 'G06N' | 'C12N';
 
 function cpcLabel(code: string): string {
   switch (code) {
-    case 'H04B': return t('mcp.defensePatents.cpcLabels.H04B');
-    case 'H01L': return t('mcp.defensePatents.cpcLabels.H01L');
-    case 'F42B': return t('mcp.defensePatents.cpcLabels.F42B');
-    case 'G06N': return t('mcp.defensePatents.cpcLabels.G06N');
-    case 'C12N': return t('mcp.defensePatents.cpcLabels.C12N');
+    case 'H04B': return t('components.defensePatents.cpcLabels.H04B');
+    case 'H01L': return t('components.defensePatents.cpcLabels.H01L');
+    case 'F42B': return t('components.defensePatents.cpcLabels.F42B');
+    case 'G06N': return t('components.defensePatents.cpcLabels.G06N');
+    case 'C12N': return t('components.defensePatents.cpcLabels.C12N');
     default: return code;
   }
 }
@@ -29,8 +30,11 @@ const CPC_ICONS: Record<string, string> = {
   C12N: '🧬',
 };
 
-let _militaryClient: MilitaryServiceClient | null = null;
-function militaryClient(): MilitaryServiceClient {
+// Lazy singleton: top-level `new X(...)` evaluates at module-init time, which
+// TDZ'd under cluster-chunk splits when this panel's chunk initialised before
+// the chunk owning MilitaryServiceClient. Defer construction until first call.
+let _militaryClient: InstanceType<typeof MilitaryServiceClient> | null = null;
+function militaryClient(): InstanceType<typeof MilitaryServiceClient> {
   if (!_militaryClient) {
     _militaryClient = new MilitaryServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
   }
@@ -41,14 +45,14 @@ export class DefensePatentsPanel extends Panel {
   private viewMode: ViewMode = 'all';
   private patents: DefensePatentFiling[] = [];
   private loading = true;
-  private _error: string | null = null;
+  private error: string | null = null;
 
   constructor() {
     super({
       id: 'defense-patents',
-      title: t('mcp.defensePatents.title'),
+      title: t('components.defensePatents.title'),
       showCount: true,
-      infoTooltip: t('mcp.defensePatents.infoTooltip'),
+      infoTooltip: t('components.defensePatents.infoTooltip'),
     });
     this.element.classList.add('panel-tall');
     void this.fetchPatents();
@@ -56,7 +60,7 @@ export class DefensePatentsPanel extends Panel {
 
   private async fetchPatents(): Promise<void> {
     this.loading = true;
-    this._error = null;
+    this.error = null;
     this.render();
 
     try {
@@ -64,11 +68,11 @@ export class DefensePatentsPanel extends Panel {
       if (!this.element?.isConnected) return;
       this.patents = data.patents ?? [];
       this.setCount(data.total ?? this.patents.length);
-      this._error = null;
+      this.error = null;
     } catch (err) {
       if (this.isAbortError(err)) return;
       if (!this.element?.isConnected) return;
-      this._error = t('mcp.defensePatents.error');
+      this.error = t('components.defensePatents.error');
       console.error('[DefensePatents] Fetch error:', err);
     }
     this.loading = false;
@@ -80,27 +84,25 @@ export class DefensePatentsPanel extends Panel {
       replaceChildren(this.content,
         h('div', { className: 'defense-patents-loading' },
           h('div', { className: 'loading-spinner' }),
-          h('span', null, t('mcp.defensePatents.loading')),
+          h('span', null, t('components.defensePatents.loading')),
         ),
       );
       return;
     }
 
-    if (this._error) {
-      this.showError(this._error, () => this.refresh());
+    if (this.error) {
+      this.showError(this.error, () => this.refresh());
       return;
     }
 
-    this.setErrorState(false);
-
     const tabs: [ViewMode, string][] = [
-      ['all', t('mcp.defensePatents.tabs.all')],
+      ['all', t('components.defensePatents.tabs.all')],
       ...CPC_CODES.map((code): [ViewMode, string] => [code, cpcLabel(code)]),
     ];
 
     const filtered = this.getFiltered();
 
-    replaceChildren(this.content,
+    this.setContentNodes(
       h('div', { className: 'defense-patents-panel' },
         h('div', { className: 'panel-tabs' },
           ...tabs.map(([mode, label]) =>
@@ -113,7 +115,7 @@ export class DefensePatentsPanel extends Panel {
         h('div', { className: 'defense-patents-list' },
           ...(filtered.length > 0
             ? filtered.map(p => this.buildRow(p))
-            : [h('div', { className: 'empty-state' }, t('mcp.defensePatents.empty'))]),
+            : [h('div', { className: 'empty-state' }, t('components.defensePatents.empty'))]),
         ),
       ),
     );
@@ -135,7 +137,7 @@ export class DefensePatentsPanel extends Panel {
         h('div', { className: 'patent-header' },
           h('span', { className: 'patent-assignee' }, p.assignee),
           safeUrl
-            ? h('a', { href: safeUrl, target: '_blank', rel: 'noopener', className: 'patent-link', title: t('mcp.defensePatents.viewOnUspto') }, '↗')
+            ? h('a', { href: safeUrl, target: '_blank', rel: 'noopener', className: 'patent-link', title: t('components.defensePatents.viewOnUspto') }, '↗')
             : false,
         ),
         h('div', { className: 'patent-title' }, p.title),

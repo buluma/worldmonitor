@@ -1,10 +1,11 @@
 import { Panel } from './Panel';
 import { t } from '@/services/i18n';
-import { joinSafeHtml, safeHtml, sanitizeUrl, unsafeRawHtml, type SafeHtml } from '@/utils/sanitize';
+import { joinSafeHtml, safeHtml, safeUrlAttr, type SafeHtml } from '@/utils/sanitize';
 import { getHydratedData } from '@/services/bootstrap';
 import { createLazyClient, getRpcBaseUrl, rpcFetch } from '@/services/rpc-client';
-import { ClimateServiceClient } from '@/generated/client/worldmonitor/climate/v1/service_client';
+
 import type { ListClimateNewsResponse, ClimateNewsItem } from '@/generated/client/worldmonitor/climate/v1/service_client';
+import { ClimateServiceClient } from '@/services/generated-rpc-clients';
 
 const getClimateClient = createLazyClient(() => new ClimateServiceClient(getRpcBaseUrl(), { fetch: rpcFetch }));
 
@@ -28,25 +29,22 @@ function truncateSummary(text: string, maxLen = 120): string {
 function renderNewsCard(item: ClimateNewsItem): SafeHtml {
   const timeAgo = item.publishedAt ? formatTimeAgo(item.publishedAt) : '';
   const summary = truncateSummary(item.summary);
-  const safeUrl = sanitizeUrl(item.url);
+  const safeUrl = safeUrlAttr(item.url);
 
   const inner = safeHtml`<div class="climate-news-card__header">
       <span class="climate-news-card__source">${item.sourceName}</span>
       <span class="climate-news-card__time">${timeAgo}</span>
     </div>
     <div class="climate-news-card__title">${item.title}</div>
-    ${summary ? safeHtml`<div class="climate-news-card__summary">${summary}</div>` : safeHtml``}`;
+    ${summary ? safeHtml`<div class="climate-news-card__summary">${summary}</div>` : ''}`;
 
-  if (!safeUrl) return safeHtml`<div class="climate-news-card">${inner}</div>`;
-  return unsafeRawHtml(
-    `<a class="climate-news-card" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${inner}</a>`,
-    'safeUrl sanitized by sanitizeUrl(); inner built via safeHtml template literals',
-  );
+  if (!safeUrl.toString()) return safeHtml`<div class="climate-news-card">${inner}</div>`;
+  return safeHtml`<a class="climate-news-card" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
 }
 
 export class ClimateNewsPanel extends Panel {
   constructor() {
-    super({ id: 'climate-news', title: t('panels.climateNews'), infoTooltip: t('mcp.climateNews.infoTooltip') });
+    super({ id: 'climate-news', title: t('panels.climateNews'), infoTooltip: t('components.climateNews.infoTooltip') });
   }
 
   public async fetchData(): Promise<void> {
@@ -67,13 +65,13 @@ export class ClimateNewsPanel extends Panel {
     } catch (err) {
       if (this.isAbortError(err)) return;
       if (!this.element?.isConnected) return;
-      this.showError(t('mcp.climateNews.loadError'), () => void this.fetchData());
+      this.showError(t('components.climateNews.loadError'), () => void this.fetchData());
     }
   }
 
   private renderNewsList(data: ListClimateNewsResponse): void {
     if (!data.items?.length) {
-      this.showError(t('mcp.climateNews.loadError'), () => void this.fetchData());
+      this.showError(t('components.climateNews.loadError'), () => void this.fetchData());
       return;
     }
 

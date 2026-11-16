@@ -3,14 +3,37 @@ import { WindowedList } from './VirtualList';
 import type { NewsItem, ClusteredEvent, DeviationLevel, RelatedAsset, RelatedAssetContext } from '@/types';
 import { THREAT_PRIORITY } from '@/services/threat-classifier';
 import { formatTime, getCSSColor } from '@/utils';
-import { escapeHtml, sanitizeUrl } from '@/utils/sanitize';
-import { analysisWorker, enrichWithVelocityML, getClusterAssetContext, MAX_DISTANCE_KM, activityTracker, generateSummary, translateText } from '@/services';
-import { getSourcePropagandaRisk, getSourceTier, getSourceType } from '@/config/feeds';
+import { escapeHtml, sanitizeUrl, unsafeRawHtml } from '@/utils/sanitize';
+import { computeNewSinceVisit } from '@/utils/new-since-visit';
+import { assessCorroboration, badgePublisherCount, corroborationFlagHtml, evidenceFromCluster, evidenceFromItem, publisherRoster } from '@/utils/corroboration-flag';
+import { analysisWorker, enrichWithVelocityML, getClusterAssetContext, MAX_DISTANCE_KM, activityTracker, generateSummary, translateText, preloadRelatedAssetTables } from '@/services';
 import { SITE_VARIANT } from '@/config';
-import { t, getCurrentLanguage } from '@/services/i18n';
+import { t, getCurrentLanguage, getCurrentLanguageTag } from '@/services/i18n';
 import { track } from '@/services/analytics';
+import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import {
+  renderCredibilityBadge,
+  renderPrimarySourceProvenance,
+} from './news/source-provenance';
+import { describePublisherRoster, renderPublisherRosterHtml } from './news/publisher-roster';
+import { PanelScopeFilter, focusedEmptyHtml, scopeTagHtml, type ScopeRow } from './panel-scope-filter';
+import { getPanelScopeBehaviour } from '@/config/panel-scope';
+import { headlineCountries, MAX_ATTRIBUTION_CHARS, withoutOwnSourceSuffix } from '@/services/scope-attribution';
+import type { ResolvedScope } from '@/services/tab-focus';
+import { effectivePubDateMs } from '@/services/feed-date';
+
 
 type SortMode = 'relevance' | 'newest';
+type NewsIdentity = Pick<NewsItem, 'link' | 'title' | 'source'>;
+
+/** Identity of a headline across the clustering worker, which hands back copies. */
+function newsScopeKey(item: NewsIdentity): string {
+  return `${item.link}\u0000${item.title}\u0000${item.source}`;
+}
+
+function matchesNewsItem(item: NewsIdentity, link: string, identity?: NewsIdentity): boolean {
+  return item.link === link && (!identity || (identity.link === link && item.title === identity.title && item.source === identity.source));
+}
 
 /** Threshold for enabling virtual scrolling */
 const VIRTUAL_SCROLL_THRESHOLD = 15;
@@ -26,7 +49,14 @@ interface PreparedCluster {
   showNewTag: boolean;
 }
 
+export interface NewsPanelServices {
+  clusterNews: (items: NewsItem[]) => Promise<ClusteredEvent[]>;
+  generateSummary: typeof generateSummary;
+  translateText: typeof translateText;
+}
+
 export class NewsPanel extends Panel {
+  private readonly newsServices: NewsPanelServices;
   private clusteredMode = true;
   private deviationEl: HTMLElement | null = null;
   private relatedAssetContext = new Map<string, RelatedAssetContext>();
@@ -34,9 +64,14 @@ export class NewsPanel extends Panel {
   private onRelatedAssetsFocus?: (assets: RelatedAsset[], originLabel: string) => void;
   private onRelatedAssetsClear?: () => void;
   private isFirstRender = true;
+  /** Cluster ids that arrived while the user was away (#4923) — their NEW
+   * ribbons persist until seen instead of expiring with the 2-min window. */
+  private newSinceAwayIds = new Set<string>();
   private windowedList: WindowedList<PreparedCluster> | null = null;
   private useVirtualScroll = true;
   private renderRequestId = 0;
+  private searchReveal: { link: string; identity?: NewsIdentity; renderRequestId: number; expiresAt: number } | null = null;
+  private searchRevealTimer: ReturnType<typeof setTimeout> | null = null;
   private boundScrollHandler: (() => void) | null = null;
   private boundClickHandler: (() => void) | null = null;
 
@@ -45,16 +80,46 @@ export class NewsPanel extends Panel {
   private sortBtn: HTMLButtonElement | null = null;
   private lastRawClusters: ClusteredEvent[] | null = null;
   private lastRawItems: NewsItem[] | null = null;
+  private relatedAssetTableRefreshPending = false;
+  private refreshDegraded = false;
+  private renderedBadgeState: 'none' | 'live' | 'cached' | 'unavailable' = 'none';
+
+  // Dashboard focus (#10453). `scopeSourceItems` is the last full list handed
+  // to renderNews, kept so a focus change or a strip toggle re-renders in
+  // memory instead of refetching. `scopeRows` marks what is rendered now.
+  private readonly scopeFilter: PanelScopeFilter;
+  private scopeSourceItems: NewsItem[] | null = null;
+  private scopeRows = new Map<string, ScopeRow<NewsItem>>();
 
   // Panel summary feature
   private summaryBtn: HTMLButtonElement | null = null;
   private summaryContainer: HTMLElement | null = null;
   private currentHeadlines: string[] = [];
+  // RSS descriptions paired 1:1 with currentHeadlines. Used to ground the
+  // SummarizeArticle LLM (U7) so it stops hallucinating across unrelated
+  // headlines. Empty strings preserve today headline-only behavior (R6).
+  private currentBodies: string[] = [];
   private lastHeadlineSignature = '';
   private isSummarizing = false;
 
-  constructor(id: string, title: string) {
-    super({ id, title, showCount: true, trackActivity: true });
+  // Optional risk score getter: computes 0-100 score per cluster for badge display
+  private riskScoreGetter: ((cluster: ClusteredEvent) => number | null) | null = null;
+
+  public setRiskScoreGetter(fn: (cluster: ClusteredEvent) => number | null): void {
+    this.riskScoreGetter = fn;
+  }
+
+  constructor(id: string, title: string, infoTooltip?: string,
+    services: Partial<NewsPanelServices> = {},
+  ) {
+    super({ id, title, showCount: true, trackActivity: true, infoTooltip });
+    this.scopeFilter = new PanelScopeFilter({ content: this.content, onChange: () => this.renderScopedNews() });
+    this.newsServices = {
+      clusterNews: items => analysisWorker.clusterNews(items),
+      generateSummary,
+      translateText,
+      ...services,
+    };
     this.sortMode = this.loadSortMode();
     this.createDeviationIndicator();
     this.createSortToggle();
@@ -174,7 +239,7 @@ export class NewsPanel extends Panel {
       ? t('components.newsPanel.sortNewest') || 'Newest'
       : t('components.newsPanel.sortRelevance') || 'Relevance';
     const tooltip = `${t('components.newsPanel.sortBy') || 'Sort by'}: ${label}`;
-    this.sortBtn.innerHTML = icon;
+    setTrustedHtml(this.sortBtn, trustedHtml(icon, "legacy direct innerHTML migration"));
     this.sortBtn.title = tooltip;
     this.sortBtn.setAttribute('aria-label', tooltip);
   }
@@ -197,7 +262,7 @@ export class NewsPanel extends Panel {
     // Create summarize button
     this.summaryBtn = document.createElement('button');
     this.summaryBtn.className = 'panel-summarize-btn';
-    this.summaryBtn.innerHTML = '✨';
+    setTrustedHtml(this.summaryBtn, trustedHtml('✨', "legacy direct innerHTML migration"));
     this.summaryBtn.title = t('components.newsPanel.summarize');
     this.summaryBtn.addEventListener('click', () => {
       track('news-summarize', { panelId: this.panelId });
@@ -218,7 +283,11 @@ export class NewsPanel extends Panel {
     if (this.currentHeadlines.length === 0) return;
 
     // Check cache first (include variant, version, and language)
-    const currentLang = getCurrentLanguage();
+    // The full tag, not the stripped code: this is the language the model is
+    // asked to WRITE in, and a Traditional reader asking for `zh` gets
+    // Simplified prose back. It keys the cache too, so the two scripts cannot
+    // serve each other's summary.
+    const currentLang = getCurrentLanguageTag();
     const cacheKey = `panel_summary_v3_${SITE_VARIANT}_${this.panelId}_${currentLang}`;
     const cached = this.getCachedSummary(cacheKey);
     if (cached) {
@@ -228,15 +297,21 @@ export class NewsPanel extends Panel {
 
     // Show loading state
     this.isSummarizing = true;
-    this.summaryBtn.innerHTML = '<span class="panel-summarize-spinner"></span>';
+    setTrustedHtml(this.summaryBtn, trustedHtml('<span class="panel-summarize-spinner"></span>', "legacy direct innerHTML migration"));
     this.summaryBtn.disabled = true;
     this.summaryContainer.style.display = 'block';
-    this.summaryContainer.innerHTML = `<div class="panel-summary-loading">${t('components.newsPanel.generatingSummary')}</div>`;
+    setTrustedHtml(this.summaryContainer, trustedHtml(`<div class="panel-summary-loading">${t('components.newsPanel.generatingSummary')}</div>`, "legacy direct innerHTML migration"));
 
     const sigAtStart = this.lastHeadlineSignature;
 
     try {
-      const result = await generateSummary(this.currentHeadlines.slice(0, 8), undefined, this.panelId, currentLang);
+      const result = await this.newsServices.generateSummary(
+        this.currentHeadlines.slice(0, 8),
+        undefined,
+        this.panelId,
+        currentLang,
+        { bodies: this.currentBodies.slice(0, 8) },
+      );
       if (!this.element?.isConnected) return;
       if (this.lastHeadlineSignature !== sigAtStart) {
         this.hideSummary();
@@ -246,54 +321,65 @@ export class NewsPanel extends Panel {
         this.setCachedSummary(cacheKey, result.summary);
         this.showSummary(result.summary);
       } else {
-        this.summaryContainer.innerHTML = `<div class="panel-summary-error">${t('components.newsPanel.summaryError')}</div>`;
+        setTrustedHtml(this.summaryContainer, trustedHtml(`<div class="panel-summary-error">${t('components.newsPanel.summaryError')}</div>`, "legacy direct innerHTML migration"));
         setTimeout(() => this.hideSummary(), 3000);
       }
     } catch {
       if (!this.element?.isConnected) return;
-      this.summaryContainer.innerHTML = `<div class="panel-summary-error">${t('components.newsPanel.summaryFailed')}</div>`;
+      setTrustedHtml(this.summaryContainer, trustedHtml(`<div class="panel-summary-error">${t('components.newsPanel.summaryFailed')}</div>`, "legacy direct innerHTML migration"));
       setTimeout(() => this.hideSummary(), 3000);
     } finally {
       this.isSummarizing = false;
       if (this.summaryBtn) {
-        this.summaryBtn.innerHTML = '✨';
+        setTrustedHtml(this.summaryBtn, trustedHtml('✨', "legacy direct innerHTML migration"));
         this.summaryBtn.disabled = false;
       }
     }
   }
 
   private async handleTranslate(element: HTMLElement, text: string): Promise<void> {
-    const currentLang = getCurrentLanguage();
+    if (element.hasAttribute('disabled')) return;
+    // Target language for the translation, so the full tag — same reason as
+    // handleSummarize above. The `en` short-circuit is unaffected: no tag that
+    // resolves to a Chinese catalogue equals 'en'.
+    const currentLang = getCurrentLanguageTag();
     if (currentLang === 'en') return; // Assume news is mostly English, no need to translate if UI is English (or add detection later)
 
     const titleEl = element.closest('.item')?.querySelector('.item-title') as HTMLElement;
     if (!titleEl) return;
 
     const originalText = titleEl.textContent || '';
+    const item = element.closest('.item');
+    item?.querySelector('.item-translation-error')?.remove();
 
     // Visual feedback
-    element.innerHTML = '...';
+    setTrustedHtml(element, trustedHtml('...', "legacy direct innerHTML migration"));
+    element.setAttribute('disabled', '');
     element.style.pointerEvents = 'none';
 
     try {
-      const translated = await translateText(text, currentLang);
+      const translated = await this.newsServices.translateText(text, currentLang).catch((e) => {
+        console.error('Translation failed', e);
+        return null;
+      });
       if (!this.element?.isConnected) return;
       if (translated) {
         titleEl.textContent = translated;
         titleEl.dataset.original = originalText;
-        element.innerHTML = '✓';
+        setTrustedHtml(element, trustedHtml('✓', "legacy direct innerHTML migration"));
         element.title = 'Original: ' + originalText;
         element.classList.add('translated');
       } else {
-        element.innerHTML = '文';
-        // Shake animation or error state could be added here
+        setTrustedHtml(element, trustedHtml('文', "legacy direct innerHTML migration"));
+        const error = document.createElement('span');
+        error.className = 'item-translation-error';
+        error.setAttribute('role', 'status');
+        error.textContent = t('components.newsPanel.translationUnavailable');
+        item?.appendChild(error);
       }
-    } catch (e) {
-      if (!this.element?.isConnected) return;
-      console.error('Translation failed', e);
-      element.innerHTML = '文';
     } finally {
       if (element.isConnected) {
+        element.removeAttribute('disabled');
         element.style.pointerEvents = 'auto';
       }
     }
@@ -302,23 +388,26 @@ export class NewsPanel extends Panel {
   private showSummary(summary: string): void {
     if (!this.summaryContainer || !this.element?.isConnected) return;
     this.summaryContainer.style.display = 'block';
-    this.summaryContainer.innerHTML = `
+    setTrustedHtml(this.summaryContainer, trustedHtml(`
       <div class="panel-summary-content">
         <span class="panel-summary-text">${escapeHtml(summary)}</span>
         <button class="panel-summary-close" title="${t('components.newsPanel.close')}" aria-label="${t('components.newsPanel.close')}">×</button>
       </div>
-    `;
+    `, "legacy direct innerHTML migration"));
     // Close button click is handled via event delegation on summaryContainer (set up in constructor)
   }
 
   private hideSummary(): void {
     if (!this.summaryContainer) return;
     this.summaryContainer.style.display = 'none';
-    this.summaryContainer.innerHTML = '';
+    setTrustedHtml(this.summaryContainer, trustedHtml('', "legacy direct innerHTML migration"));
   }
 
   private getHeadlineSignature(): string {
-    return JSON.stringify(this.currentHeadlines.slice(0, 5).sort());
+    return JSON.stringify([
+      this.currentHeadlines.slice(0, 5).sort(),
+      this.currentBodies.slice(0, 5), // NOT sorted — paired with headlines
+    ]);
   }
 
   private updateHeadlineSignature(): void {
@@ -374,18 +463,112 @@ export class NewsPanel extends Panel {
   public override showError(message?: string, onRetry?: () => void, autoRetrySeconds?: number): void {
     this.lastRawClusters = null;
     this.lastRawItems = null;
+    // A failure is not "nothing for these countries": no counts, and a later
+    // focus change must not paint old headlines over the error.
+    this.scopeSourceItems = null;
+    this.scopeFilter.hideStrip();
+    this.renderedBadgeState = 'unavailable';
     super.showError(message, onRetry, autoRetrySeconds);
   }
 
+  /**
+   * Retained headlines remain useful when a refresh window fails, but they
+   * must not be relabelled LIVE by time-range or sort re-renders.
+   */
+  public setRefreshDegraded(degraded: boolean): void {
+    this.refreshDegraded = degraded;
+    if (this.renderedBadgeState === 'live' || this.renderedBadgeState === 'cached') {
+      this.renderCurrentDataBadge();
+    }
+  }
+
+  private renderCurrentDataBadge(): void {
+    const state = this.refreshDegraded ? 'cached' : 'live';
+    this.renderedBadgeState = state;
+    this.setDataBadge(state);
+  }
+
+  /**
+   * Dashboard focus (#10453). Only news panels the registry declares as
+   * filtering follow the focus; the rest (startups, GitHub, …) stay global
+   * and carry the "Not filtered" chip.
+   */
+  public override applyScope(scope: ResolvedScope | null): void {
+    const effective = getPanelScopeBehaviour(this.panelId) === 'filters' ? scope : null;
+    if (!this.scopeFilter.setScope(effective)) return;
+    if (this.showingLoadFailure) return;
+    this.renderScopedNews();
+  }
+
   public renderNews(items: NewsItem[]): void {
+    this.scopeSourceItems = items;
+    this.renderScopedNews();
+  }
+
+  /** Render the retained list through the focus: no fetch, no re-clustering of hidden items. */
+  private renderScopedNews(): void {
+    const items = this.scopeSourceItems;
+    if (!items) return;
+    const resolved = this.scopeFilter.scope;
+    const candidates = resolved ? [...resolved.chosen, ...resolved.neighbours] : [];
+    const view = this.scopeFilter.view(items, (item) => {
+      // Reserve room for the explicit location so a long feed title cannot
+      // push it past headlineCountries' bounded attribution window.
+      const location = item.locationName ? ` ${item.locationName.slice(0, MAX_ATTRIBUTION_CHARS - 1)}` : '';
+      const title = withoutOwnSourceSuffix(item.title, item.source).slice(0, MAX_ATTRIBUTION_CHARS - location.length);
+      return headlineCountries(`${title}${location}`, candidates, item.lang);
+    });
+    this.scopeRows = new Map(view.partition ? view.rows.map((row) => [newsScopeKey(row.item), row]) : []);
+    this.scopeFilter.renderStrip(resolved && items.length > 0 ? view : null);
+    if (view.emptyByFocus) {
+      this.renderFocusedEmpty();
+      return;
+    }
+    this.renderNewsItems(view.rows.map((row) => row.item));
+  }
+
+  /** The focus, not the feed, left nothing: a settled state, distinct from an error. */
+  private renderFocusedEmpty(): void {
+    this.clearSearchReveal();
+    this.renderRequestId += 1;
+    this.lastRawClusters = null;
+    this.lastRawItems = null;
+    this.renderCurrentDataBadge();
+    this.setCount(0);
+    this.relatedAssetContext.clear();
+    this.currentHeadlines = [];
+    this.currentBodies = [];
+    this.updateHeadlineSignature();
+    this.setSafeContent(unsafeRawHtml(focusedEmptyHtml(t('focus.filter.emptyNews')), 'focus empty state: escaped by focusedEmptyHtml'));
+  }
+
+  /** 0 chosen country (or unfocused), 1 neighbour, 2 no country. */
+  private scopeRank(item: NewsIdentity): number {
+    if (this.scopeRows.size === 0) return 0;
+    return this.scopeRows.get(newsScopeKey(item))?.rank ?? 2;
+  }
+
+  private clusterScopeRow(cluster: ClusteredEvent): ScopeRow<NewsItem> | null {
+    if (this.scopeRows.size === 0) return null;
+    let best: ScopeRow<NewsItem> | null = null;
+    for (const item of cluster.allItems) {
+      const row = this.scopeRows.get(newsScopeKey(item));
+      if (row && (!best || row.rank < best.rank)) best = row;
+    }
+    return best;
+  }
+
+  private renderNewsItems(items: NewsItem[]): void {
+    this.clearSearchReveal();
+    this.renderRequestId += 1;
     if (items.length === 0) {
-      this.renderRequestId += 1; // Cancel in-flight clustering from previous renders.
+      this.renderedBadgeState = 'unavailable';
       this.setDataBadge('unavailable');
       this.showError(t('common.noNewsAvailable'));
       return;
     }
 
-    this.setDataBadge('live');
+    this.renderCurrentDataBadge();
 
     // Always show flat items immediately for instant visual feedback,
     // then upgrade to clustered view in the background when ready.
@@ -397,24 +580,31 @@ export class NewsPanel extends Panel {
   }
 
   public renderFilteredEmpty(message: string): void {
+    // The time range, not the focus, emptied the list: no focus counts.
+    this.scopeSourceItems = null;
+    this.scopeRows.clear();
+    this.scopeFilter.hideStrip();
+    this.clearSearchReveal();
     this.renderRequestId += 1; // Cancel in-flight clustering from previous renders.
     this.lastRawClusters = null;
     this.lastRawItems = null;
-    this.setDataBadge('live');
+    this.renderCurrentDataBadge();
     this.setCount(0);
     this.relatedAssetContext.clear();
     this.currentHeadlines = [];
+    this.currentBodies = [];
     this.updateHeadlineSignature();
-    this.setContent(`<div class="panel-empty">${escapeHtml(message)}</div>`);
+    this.setSafeContent(unsafeRawHtml(`<div class="panel-empty">${escapeHtml(message)}</div>`, 'legacy Panel.setContent() migration'));
   }
 
   private async renderClustersAsync(items: NewsItem[]): Promise<void> {
-    const requestId = ++this.renderRequestId;
+    const requestId = this.renderRequestId;
 
     try {
-      const clusters = await analysisWorker.clusterNews(items);
+      const clusters = await this.newsServices.clusterNews(items);
       if (requestId !== this.renderRequestId) return;
       const enriched = await enrichWithVelocityML(clusters);
+      if (requestId !== this.renderRequestId) return;
       this.renderClusters(enriched);
     } catch (error) {
       if (requestId !== this.renderRequestId) return;
@@ -425,50 +615,79 @@ export class NewsPanel extends Panel {
 
   private renderFlat(items: NewsItem[]): void {
     this.lastRawItems = items;
+    this.lastRawClusters = null;
 
     let sorted: NewsItem[];
     if (this.sortMode === 'newest') {
-      sorted = [...items].sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+      sorted = [...items].sort((a, b) => (this.scopeRank(a) - this.scopeRank(b))
+        || effectivePubDateMs(b) - effectivePubDateMs(a));
     } else {
-      sorted = items;
+      // Relevance: sort by importanceScore desc when available, fall back to pubDate.
+      // Under a focus, chosen countries first, then neighbours, then no country.
+      sorted = [...items].sort((a, b) => {
+        const rank = this.scopeRank(a) - this.scopeRank(b);
+        if (rank !== 0) return rank;
+        const sa = a.importanceScore ?? 0;
+        const sb = b.importanceScore ?? 0;
+        if (sb !== sa) return sb - sa;
+        return effectivePubDateMs(b) - effectivePubDateMs(a);
+      });
     }
 
     this.setCount(sorted.length);
-    this.currentHeadlines = sorted
+    const topItems = sorted
       .slice(0, 5)
-      .map(item => item.title)
-      .filter((title): title is string => typeof title === 'string' && title.trim().length > 0);
+      .filter((item) => typeof item.title === 'string' && item.title.trim().length > 0);
+    this.currentHeadlines = topItems.map((item) => item.title);
+    // Paired RSS descriptions for LLM grounding; empty string falls back to
+    // headline-only on the server (R6).
+    this.currentBodies = topItems.map((item) => typeof item.snippet === 'string' ? item.snippet : '');
 
     this.updateHeadlineSignature();
 
     const html = sorted
-      .map(
-        (item) => `
-      <div class="item ${item.isAlert ? 'alert' : ''}" ${item.monitorColor ? `style="border-inline-start-color: ${escapeHtml(item.monitorColor)}"` : ''}>
+      .map((item) => {
+        const provenance = renderPrimarySourceProvenance(item.source);
+        const titleLink = sanitizeUrl(item.link);
+        return `
+      <div class="item ${item.isAlert ? 'alert' : ''}" data-news-id="${escapeHtml(item.link)}" data-news-title="${escapeHtml(item.title)}" data-news-source="${escapeHtml(item.source)}" ${item.monitorColor ? `style="border-inline-start-color: ${escapeHtml(item.monitorColor)}"` : ''}>
         <div class="item-source">
           ${escapeHtml(item.source)}
+          ${renderCredibilityBadge(item.source, item)}
+          ${provenance.riskBadge}
+          ${provenance.facts}
+          ${corroborationFlagHtml(assessCorroboration(evidenceFromItem(item)))}
           ${item.lang && item.lang !== getCurrentLanguage() ? `<span class="lang-badge">${item.lang.toUpperCase()}</span>` : ''}
+          ${item.storyMeta?.phase === 'breaking' ? '<span class="phase-badge breaking">BREAKING</span>' : ''}
+          ${item.storyMeta?.phase === 'developing' ? `<span class="phase-badge developing">DEVELOPING${item.storyMeta.mentionCount > 1 ? ` ×${item.storyMeta.mentionCount}` : ''}</span>` : ''}
+          ${item.storyMeta?.phase === 'sustained' ? '<span class="phase-badge sustained">ONGOING</span>' : ''}
           ${item.isAlert ? '<span class="alert-tag">ALERT</span>' : ''}
+          ${scopeTagHtml(this.scopeRows.get(newsScopeKey(item)))}
         </div>
-        <a class="item-title" href="${sanitizeUrl(item.link)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>
+        ${titleLink ? `<a class="item-title" href="${titleLink}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : `<span class="item-title">${escapeHtml(item.title)}</span>`}
+        ${item.snippet ? `<div class="item-snippet">${escapeHtml(item.snippet.length > 200 ? item.snippet.slice(0, 200).replace(/\s+\S*$/, '') + '…' : item.snippet)}</div>` : ''}
         <div class="item-time">
           ${formatTime(item.pubDate)}
           ${getCurrentLanguage() !== 'en' ? `<button class="item-translate-btn" title="Translate" data-text="${escapeHtml(item.title)}">文</button>` : ''}
         </div>
       </div>
-    `
-      )
+    `;
+      })
       .join('');
 
-    this.setContent(html);
+    this.setSafeContent(unsafeRawHtml(html, 'legacy Panel.setContent() migration'), () => this.revealSearchItem());
   }
 
   private renderClusters(clusters: ClusteredEvent[]): void {
     this.lastRawClusters = clusters;
     this.lastRawItems = null;
 
-    // Sort based on user preference (#107)
+    // Sort based on user preference (#107). Under a focus, chosen countries
+    // first, then neighbours, then no country (#10453).
+    const clusterRank = new Map(clusters.map((c) => [c, this.clusterScopeRow(c)?.rank ?? (this.scopeRows.size ? 2 : 0)]));
     const sorted = [...clusters].sort((a, b) => {
+      const rank = (clusterRank.get(a) ?? 0) - (clusterRank.get(b) ?? 0);
+      if (rank !== 0) return rank;
       if (this.sortMode === 'newest') {
         // Pure chronological, newest first
         return b.lastUpdated.getTime() - a.lastUpdated.getTime();
@@ -486,6 +705,11 @@ export class NewsPanel extends Panel {
 
     // Store headlines for summarization (cap at 5 to reduce entity conflation in small models)
     this.currentHeadlines = sorted.slice(0, 5).map(c => c.primaryTitle);
+    // Cluster objects don't carry a description (news:insights:v1 producer
+    // doesn't plumb it yet). Passing empty bodies preserves today behavior
+    // (R6); when the producer adds a primarySnippet, this falls through to
+    // grounded mode without further code change.
+    this.currentBodies = sorted.slice(0, 5).map(() => '');
 
     this.updateHeadlineSignature();
 
@@ -493,10 +717,22 @@ export class NewsPanel extends Panel {
     let newItemIds: Set<string>;
 
     if (this.isFirstRender) {
-      // First render: mark all items as seen
+      // #4923: returning-user continuity. Stories that first appeared
+      // AFTER the previous visit stay NEW on the first render; everything
+      // older is marked seen. First-ever visits (no persisted state)
+      // keep the old mark-everything-seen behavior. Partition logic lives
+      // in computeNewSinceVisit (pure, unit-tested).
       activityTracker.updateItems(this.panelId, clusterIds);
-      activityTracker.markAsSeen(this.panelId);
-      newItemIds = new Set();
+      const { newIds, seenIds } = computeNewSinceVisit(
+        sorted,
+        activityTracker.getPreviousVisitTime(),
+      );
+      newItemIds = new Set(newIds);
+      // Away-item NEW ribbons persist until actually seen — NOT limited to
+      // the 2-minute arrival window that gates streaming-item tags (the
+      // badge and ribbon would otherwise diverge after 2 minutes).
+      for (const id of newIds) this.newSinceAwayIds.add(id);
+      activityTracker.markItemsSeen(this.panelId, seenIds);
       this.isFirstRender = false;
     } else {
       // Subsequent renders: track new items
@@ -508,7 +744,8 @@ export class NewsPanel extends Panel {
     const prepared: PreparedCluster[] = sorted.map(cluster => {
       const isNew = newItemIds.has(cluster.id);
       const shouldHighlight = activityTracker.shouldHighlight(this.panelId, cluster.id);
-      const showNewTag = activityTracker.isNewItem(this.panelId, cluster.id) && isNew;
+      const showNewTag = isNew
+        && (activityTracker.isNewItem(this.panelId, cluster.id) || this.newSinceAwayIds.has(cluster.id));
 
       return {
         cluster,
@@ -520,14 +757,34 @@ export class NewsPanel extends Panel {
 
     // Use windowed rendering for large lists, direct render for small
     if (this.useVirtualScroll && sorted.length > VIRTUAL_SCROLL_THRESHOLD && this.windowedList) {
+      this.setContentNodes();
+      if (this.isLocked) return;
       this.windowedList.setItems(prepared);
+      this.revealSearchItem();
     } else {
       // Direct render for small lists
       const html = prepared
         .map(p => this.renderClusterHtmlSafely(p.cluster, p.isNew, p.shouldHighlight, p.showNewTag))
         .join('');
-      this.setContent(html);
+      this.setSafeContent(unsafeRawHtml(html, 'legacy Panel.setContent() migration'), () => this.revealSearchItem());
     }
+    this.refreshRelatedAssetsAfterLazyTables(sorted);
+  }
+
+  private refreshRelatedAssetsAfterLazyTables(clusters: ClusteredEvent[]): void {
+    if (this.relatedAssetTableRefreshPending) return;
+    const titles = clusters.flatMap(cluster => cluster.allItems.map(item => item.title));
+    this.relatedAssetTableRefreshPending = true;
+    void preloadRelatedAssetTables(titles)
+      .then((shouldRefresh) => {
+        this.relatedAssetTableRefreshPending = false;
+        if (shouldRefresh && this.lastRawClusters) {
+          this.renderClusters(this.lastRawClusters);
+        }
+      })
+      .catch(() => {
+        this.relatedAssetTableRefreshPending = false;
+      });
   }
 
   private renderClusterHtmlSafely(
@@ -559,8 +816,15 @@ export class NewsPanel extends Panel {
     shouldHighlight: boolean,
     showNewTag: boolean
   ): string {
-    const sourceBadge = cluster.sourceCount > 1
-      ? `<span class="source-count">${t('components.newsPanel.sources', { count: String(cluster.sourceCount) })}</span>`
+    // #6428: "N sources" is a corroboration claim, so it counts PUBLISHERS.
+    // cluster.sourceCount is the article count, which read nine reprints of
+    // one wire across one newsroom's feeds as nine sources. The velocity
+    // badge below keeps sourceCount — velocity IS about article volume.
+    const evidence = evidenceFromCluster(cluster);
+    const corroboration = assessCorroboration(evidence);
+    const publisherCount = badgePublisherCount(corroboration, cluster.uniquePublisherCount ?? 0);
+    const sourceBadge = publisherCount > 1
+      ? `<span class="source-count">${t('components.newsPanel.sources', { count: String(publisherCount) })}</span>`
       : '';
 
     const velocity = cluster.velocity;
@@ -578,33 +842,14 @@ export class NewsPanel extends Panel {
       ? `<span class="lang-badge">${cluster.lang.toUpperCase()}</span>`
       : '';
 
-    // Propaganda risk indicator for primary source
-    const primaryPropRisk = getSourcePropagandaRisk(cluster.primarySource);
-    const primaryPropBadge = primaryPropRisk.risk !== 'low'
-      ? `<span class="propaganda-badge ${primaryPropRisk.risk}" title="${escapeHtml(primaryPropRisk.note || `State-affiliated: ${primaryPropRisk.stateAffiliated || 'Unknown'}`)}">${primaryPropRisk.risk === 'high' ? '⚠ State Media' : '! Caution'}</span>`
-      : '';
+    // Unknown provenance is always visible; "Wire" is reserved for reviewed wire types.
+    const {
+      riskBadge: primaryPropBadge,
+      tierBadge,
+      facts: primaryProvenanceFacts,
+    } = renderPrimarySourceProvenance(cluster.primarySource);
 
-    // Source credibility badge for primary source (T1=Wire, T2=Verified outlet)
-    const primaryTier = getSourceTier(cluster.primarySource);
-    const primaryType = getSourceType(cluster.primarySource);
-    const tierLabel = primaryTier === 1 ? 'Wire' : ''; // Don't show "Major" - confusing with story importance
-    const tierBadge = primaryTier <= 2
-      ? `<span class="tier-badge tier-${primaryTier}" title="${primaryType === 'wire' ? 'Wire Service - Highest reliability' : primaryType === 'gov' ? 'Official Government Source' : 'Verified News Outlet'}">${primaryTier === 1 ? '★' : '●'}${tierLabel ? ` ${tierLabel}` : ''}</span>`
-      : '';
-
-    // Build "Also reported by" section for multi-source confirmation
-    const otherSources = cluster.topSources.filter(s => s.name !== cluster.primarySource);
-    const topSourcesHtml = otherSources.length > 0
-      ? `<span class="also-reported">Also:</span>` + otherSources
-        .map(s => {
-          const propRisk = getSourcePropagandaRisk(s.name);
-          const propBadge = propRisk.risk !== 'low'
-            ? `<span class="propaganda-badge ${propRisk.risk}" title="${escapeHtml(propRisk.note || `State-affiliated: ${propRisk.stateAffiliated || 'Unknown'}`)}">${propRisk.risk === 'high' ? '⚠' : '!'}</span>`
-            : '';
-          return `<span class="top-source tier-${s.tier}">${escapeHtml(s.name)}${propBadge}</span>`;
-        })
-        .join('')
-      : '';
+    const rosterView = describePublisherRoster(corroboration, publisherRoster(evidence));
 
     const assetContext = getClusterAssetContext(cluster);
     if (assetContext && assetContext.assets.length > 0) {
@@ -637,7 +882,20 @@ export class NewsPanel extends Panel {
     const threatVarMap: Record<string, string> = { critical: '--threat-critical', high: '--threat-high', medium: '--threat-medium', low: '--threat-low', info: '--threat-info' };
     const catColor = cluster.threat ? getCSSColor(threatVarMap[cluster.threat.level] || '--text-dim') : '';
     const categoryBadge = catLabel
-      ? `<span class="category-tag" style="color:${catColor};border-color:${catColor}40;background:${catColor}20">${catLabel}</span>`
+      ? `<span class="category-tag" style="--category-color:${catColor};--category-background:${catColor}20">${escapeHtml(catLabel)}</span>`
+      : '';
+
+    // Numeric risk score badge (0-100): from external getter or fallback to threat-level derivation
+    const riskScore = this.riskScoreGetter
+      ? this.riskScoreGetter(cluster)
+      : (() => {
+          if (!cluster.threat) return null;
+          const levelScore: Record<string, number> = { critical: 95, high: 75, medium: 50, low: 25, info: 10 };
+          const base = levelScore[cluster.threat.level] ?? 10;
+          return Math.round(base * (cluster.threat.confidence ?? 1));
+        })();
+    const riskBadge = riskScore !== null && riskScore >= 50
+      ? `<span class="risk-score-badge" style="color:${catColor || getCSSColor('--text-dim')};border-color:${catColor ? catColor + '40' : 'var(--border)'};background:${catColor ? catColor + '15' : 'transparent'}" title="Event risk score">${riskScore}</span>`
       : '';
 
     // Build class list for item
@@ -649,23 +907,29 @@ export class NewsPanel extends Panel {
       isNew ? 'item-new' : '',
     ].filter(Boolean).join(' ');
 
+    const titleLink = sanitizeUrl(cluster.primaryLink);
     return `
       <div class="${itemClasses}" ${cluster.monitorColor ? `style="border-inline-start-color: ${escapeHtml(cluster.monitorColor)}"` : ''} data-cluster-id="${escapeHtml(cluster.id)}" data-news-id="${escapeHtml(cluster.primaryLink)}">
         <div class="item-source">
           ${tierBadge}
           ${escapeHtml(cluster.primarySource)}
+          ${renderCredibilityBadge(cluster.primarySource, cluster.allItems.find(item => item.source === cluster.primarySource) ?? cluster.allItems[0])}
           ${primaryPropBadge}
+          ${primaryProvenanceFacts}
           ${langBadge}
           ${newTag}
           ${sourceBadge}
+          ${corroborationFlagHtml(corroboration)}
           ${velocityBadge}
           ${sentimentBadge}
           ${cluster.isAlert ? '<span class="alert-tag">ALERT</span>' : ''}
           ${categoryBadge}
+          ${riskBadge}
+          ${scopeTagHtml(this.clusterScopeRow(cluster))}
         </div>
-        <a class="item-title" href="${sanitizeUrl(cluster.primaryLink)}" target="_blank" rel="noopener">${escapeHtml(cluster.primaryTitle)}</a>
+        ${titleLink ? `<a class="item-title" href="${titleLink}" target="_blank" rel="noopener">${escapeHtml(cluster.primaryTitle)}</a>` : `<span class="item-title">${escapeHtml(cluster.primaryTitle)}</span>`}
         <div class="cluster-meta">
-          <span class="top-sources">${topSourcesHtml}</span>
+          <div class="cluster-roster">${rosterView ? renderPublisherRosterHtml(rosterView) : ''}</div>
           <span class="item-time">${formatTime(cluster.lastUpdated)}</span>
           ${getCurrentLanguage() !== 'en' ? `<button class="item-translate-btn" title="Translate" data-text="${escapeHtml(cluster.primaryTitle)}">文</button>` : ''}
         </div>
@@ -735,9 +999,83 @@ export class NewsPanel extends Panel {
   }
 
   /**
+   * Returns true if this panel contains a news item with the given link
+   * (either as a cluster primary or secondary article).
+   */
+  public hasNewsItem(link: string, identity?: NewsIdentity): boolean {
+    if (this.lastRawClusters) {
+      return this.lastRawClusters.some(
+        c => (!identity && c.primaryLink === link) || c.allItems.some(item => matchesNewsItem(item, link, identity))
+      );
+    }
+    if (this.lastRawItems) {
+      return this.lastRawItems.some(item => matchesNewsItem(item, link, identity));
+    }
+    return false;
+  }
+
+  /**
+   * Scroll the panel to the item with the given link and flash-highlight it.
+   * For virtual-scrolled panels, renders the containing chunk first.
+   */
+  public scrollToNewsItem(link: string, identity?: NewsIdentity): void {
+    this.clearSearchReveal();
+    if (!this.hasNewsItem(link, identity)) return;
+    this.searchReveal = { link, identity, renderRequestId: this.renderRequestId, expiresAt: Date.now() + 3100 };
+    this.searchRevealTimer = setTimeout(() => this.clearSearchReveal(), 3100);
+    this.revealSearchItem();
+  }
+
+  private clearSearchReveal(): void {
+    if (this.searchRevealTimer !== null) clearTimeout(this.searchRevealTimer);
+    this.searchRevealTimer = null;
+    this.searchReveal = null;
+    this.content.querySelectorAll('.search-highlight').forEach(el => el.classList.remove('search-highlight'));
+  }
+
+  private revealSearchItem(): void {
+    const selection = this.searchReveal;
+    if (!selection || selection.renderRequestId !== this.renderRequestId || this.isLocked) return;
+    if (Date.now() >= selection.expiresAt) {
+      this.clearSearchReveal();
+      return;
+    }
+    const { link, identity } = selection;
+    if (!this.hasNewsItem(link, identity)) return;
+    const cluster = this.lastRawClusters?.find(c =>
+      (!identity && c.primaryLink === link) || c.allItems.some(item => matchesNewsItem(item, link, identity)));
+    const selector = cluster
+      ? `.item.clustered[data-cluster-id="${CSS.escape(cluster.id)}"]`
+      : `.item[data-news-id="${CSS.escape(link)}"]`;
+    const reveal = () => {
+      if (this.searchReveal !== selection || selection.renderRequestId !== this.renderRequestId || Date.now() >= selection.expiresAt) return;
+      const el = identity && !cluster
+        ? [...this.content.querySelectorAll<HTMLElement>(selector)].find(row => row.dataset.newsTitle === identity.title && row.dataset.newsSource === identity.source)
+        : this.content.querySelector(selector);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        this.flashHighlight(el);
+      }
+    };
+    if (cluster && this.useVirtualScroll && this.lastRawClusters && this.lastRawClusters.length > VIRTUAL_SCROLL_THRESHOLD && this.windowedList) {
+      if (this.windowedList.scrollToItem(prepared => prepared.cluster.id === cluster.id)) setTimeout(reveal, 350);
+      return;
+    }
+    reveal();
+  }
+
+  private flashHighlight(el: Element): void {
+    el.classList.remove('search-highlight');
+    void (el as HTMLElement).offsetWidth;
+    el.classList.add('search-highlight');
+  }
+
+  /**
    * Clean up resources
    */
   public destroy(): void {
+    this.clearSearchReveal();
+    this.renderRequestId += 1;
     // Clean up windowed list
     this.windowedList?.destroy();
     this.windowedList = null;

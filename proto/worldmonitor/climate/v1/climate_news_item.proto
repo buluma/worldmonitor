@@ -4,18 +4,18 @@ package worldmonitor.climate.v1;
 
 import "sebuf/http/annotations.proto";
 
-// ClimateNewsItem represents a single climate-related news article.
+// ClimateNewsItem represents a single climate/environment news article.
 message ClimateNewsItem {
-  // Unique item identifier (hash of URL).
+  // Unique identifier (URL hash + publish timestamp).
   string id = 1;
-  // Article title.
+  // Article headline.
   string title = 2;
-  // Article URL.
+  // Canonical article URL.
   string url = 3;
-  // Name of the news source.
+  // Source publication name.
   string source_name = 4;
   // Publication time as Unix epoch milliseconds.
   int64 published_at = 5 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
-  // Short text summary of the article.
+  // Short summary/description (max 300 chars in seed pipeline).
   string summary = 6;
 }

@@ -1,247 +1,4 @@
-/**
- * VirtualList - Efficient virtual scrolling with DOM recycling.
- * Only renders visible items + a small buffer, dramatically reducing DOM nodes.
- */
-
-export interface VirtualListOptions {
-  /** Estimated height of each item in pixels */
-  itemHeight: number;
-  /** Number of items to render above/below viewport as buffer */
-  overscan?: number;
-  /** Container element to render into */
-  container: HTMLElement;
-  /** Callback when an item needs to be rendered */
-  renderItem: (index: number, element: HTMLElement) => void;
-  /** Optional callback when item is recycled (for cleanup) */
-  onRecycle?: (element: HTMLElement) => void;
-}
-
-interface PooledElement {
-  element: HTMLElement;
-  currentIndex: number;
-}
-
-export class VirtualList {
-  private container: HTMLElement;
-  private viewport: HTMLElement;
-  private content: HTMLElement;
-  private topSpacer: HTMLElement;
-  private bottomSpacer: HTMLElement;
-  private itemPool: PooledElement[] = [];
-
-  private itemHeight: number;
-  private overscan: number;
-  private totalItems = 0;
-  private renderItem: (index: number, element: HTMLElement) => void;
-  private onRecycle?: (element: HTMLElement) => void;
-
-  private visibleStart = 0;
-  private visibleEnd = 0;
-  private scrollRAF: number | null = null;
-  private isDestroyed = false;
-  private resizeObserver: ResizeObserver | null = null;
-
-  constructor(options: VirtualListOptions) {
-    this.container = options.container;
-    this.itemHeight = options.itemHeight;
-    this.overscan = options.overscan ?? 3;
-    this.renderItem = options.renderItem;
-    this.onRecycle = options.onRecycle;
-
-    // Create viewport structure
-    this.viewport = document.createElement('div');
-    this.viewport.className = 'virtual-viewport';
-
-    this.content = document.createElement('div');
-    this.content.className = 'virtual-content';
-
-    this.topSpacer = document.createElement('div');
-    this.topSpacer.className = 'virtual-spacer virtual-spacer-top';
-
-    this.bottomSpacer = document.createElement('div');
-    this.bottomSpacer.className = 'virtual-spacer virtual-spacer-bottom';
-
-    this.content.appendChild(this.topSpacer);
-    this.content.appendChild(this.bottomSpacer);
-    this.viewport.appendChild(this.content);
-    this.container.appendChild(this.viewport);
-
-    // Bind scroll handler
-    this.viewport.addEventListener('scroll', this.handleScroll, { passive: true });
-
-    // Handle resize
-    if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => {
-        if (!this.isDestroyed) {
-          this.updateVisibleRange();
-        }
-      });
-      this.resizeObserver.observe(this.viewport);
-    }
-  }
-
-  /**
-   * Set the total number of items
-   */
-  setItemCount(count: number): void {
-    this.totalItems = count;
-    this.updateLayout();
-    this.updateVisibleRange();
-  }
-
-  /**
-   * Force re-render of all visible items
-   */
-  refresh(): void {
-    // Clear all pooled elements' indices to force re-render
-    for (const pooled of this.itemPool) {
-      pooled.currentIndex = -1;
-    }
-    this.updateVisibleRange();
-  }
-
-  /**
-   * Scroll to a specific item index
-   */
-  scrollToIndex(index: number, behavior: ScrollBehavior = 'auto'): void {
-    const offset = index * this.itemHeight;
-    this.viewport.scrollTo({ top: offset, behavior });
-  }
-
-  /**
-   * Get the viewport element (for external scroll listeners)
-   */
-  getViewport(): HTMLElement {
-    return this.viewport;
-  }
-
-  /**
-   * Clean up resources
-   */
-  destroy(): void {
-    this.isDestroyed = true;
-    if (this.scrollRAF !== null) {
-      cancelAnimationFrame(this.scrollRAF);
-    }
-    this.viewport.removeEventListener('scroll', this.handleScroll);
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-      this.resizeObserver = null;
-    }
-    this.itemPool = [];
-    this.container.innerHTML = '';
-  }
-
-  private handleScroll = (): void => {
-    if (this.scrollRAF !== null) return;
-
-    this.scrollRAF = requestAnimationFrame(() => {
-      this.scrollRAF = null;
-      if (!this.isDestroyed) {
-        this.updateVisibleRange();
-      }
-    });
-  };
-
-  private updateLayout(): void {
-    const totalHeight = this.totalItems * this.itemHeight;
-    this.content.style.height = `${totalHeight}px`;
-  }
-
-  private updateVisibleRange(): void {
-    const scrollTop = this.viewport.scrollTop;
-    const viewportHeight = this.viewport.clientHeight;
-
-    // Calculate visible range
-    const startIndex = Math.floor(scrollTop / this.itemHeight);
-    const endIndex = Math.ceil((scrollTop + viewportHeight) / this.itemHeight);
-
-    // Add overscan buffer
-    const visibleStart = Math.max(0, startIndex - this.overscan);
-    const visibleEnd = Math.min(this.totalItems, endIndex + this.overscan);
-
-    // Skip if range hasn't changed
-    if (visibleStart === this.visibleStart && visibleEnd === this.visibleEnd) {
-      return;
-    }
-
-    this.visibleStart = visibleStart;
-    this.visibleEnd = visibleEnd;
-
-    // Update spacers
-    this.topSpacer.style.height = `${visibleStart * this.itemHeight}px`;
-    this.bottomSpacer.style.height = `${Math.max(0, (this.totalItems - visibleEnd) * this.itemHeight)}px`;
-
-    // Determine which items need to be rendered
-    const visibleCount = visibleEnd - visibleStart;
-
-    // Ensure we have enough pooled elements
-    this.ensurePoolSize(visibleCount);
-
-    // Track which pool elements are in use
-    const usedIndices = new Set<number>();
-
-    // First pass: reuse elements that are still visible
-    for (const pooled of this.itemPool) {
-      if (pooled.currentIndex >= visibleStart && pooled.currentIndex < visibleEnd) {
-        usedIndices.add(pooled.currentIndex);
-      }
-    }
-
-    // Second pass: assign new indices to recycled elements
-    let poolIndex = 0;
-    for (let i = visibleStart; i < visibleEnd; i++) {
-      if (usedIndices.has(i)) continue;
-
-      // Find a recyclable element
-      while (poolIndex < this.itemPool.length) {
-        const pooled = this.itemPool[poolIndex]!;
-        if (pooled.currentIndex < visibleStart || pooled.currentIndex >= visibleEnd) {
-          // Recycle this element
-          if (this.onRecycle) {
-            this.onRecycle(pooled.element);
-          }
-          pooled.currentIndex = i;
-          this.renderItem(i, pooled.element);
-          pooled.element.style.transform = `translateY(${i * this.itemHeight}px)`;
-          poolIndex++;
-          break;
-        }
-        poolIndex++;
-      }
-    }
-
-    // Update positions for all visible elements
-    for (const pooled of this.itemPool) {
-      if (pooled.currentIndex >= visibleStart && pooled.currentIndex < visibleEnd) {
-        pooled.element.style.transform = `translateY(${pooled.currentIndex * this.itemHeight}px)`;
-      } else {
-        // Hide off-screen elements
-        pooled.element.style.transform = 'translateY(-9999px)';
-      }
-    }
-  }
-
-  private ensurePoolSize(count: number): void {
-    while (this.itemPool.length < count) {
-      const element = document.createElement('div');
-      element.className = 'virtual-item';
-      element.style.position = 'absolute';
-      element.style.top = '0';
-      element.style.left = '0';
-      element.style.right = '0';
-      element.style.transform = 'translateY(-9999px)';
-
-      // Insert before bottom spacer
-      this.content.insertBefore(element, this.bottomSpacer);
-
-      this.itemPool.push({
-        element,
-        currentIndex: -1,
-      });
-    }
-  }
-}
+import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 
 /**
  * Windowed rendering for variable-height items.
@@ -297,7 +54,7 @@ export class WindowedList<T> {
     this.chunkElements.clear();
 
     // Create container structure
-    this.container.innerHTML = '';
+    setTrustedHtml(this.container, trustedHtml('', "legacy direct innerHTML migration"));
 
     if (items.length === 0) {
       return;
@@ -390,9 +147,30 @@ export class WindowedList<T> {
       .map((item, i) => this.renderItem(item, startIdx + i))
       .join('');
 
-    element.innerHTML = html;
+    setTrustedHtml(element, trustedHtml(html, "legacy direct innerHTML migration"));
     element.classList.add('rendered');
     this.renderedChunks.add(chunkIndex);
+  }
+
+  /**
+   * Scroll to the first item matching the predicate, rendering its chunk if needed.
+   * Returns true if found.
+   */
+  scrollToItem(predicate: (item: T) => boolean): boolean {
+    const index = this.items.findIndex(predicate);
+    if (index === -1) return false;
+
+    const chunkIndex = Math.floor(index / this.chunkSize);
+    const chunkEl = this.chunkElements.get(chunkIndex);
+    if (!chunkEl) return false;
+
+    if (!this.renderedChunks.has(chunkIndex)) {
+      this.renderChunk(chunkIndex);
+      this.onRendered?.();
+    }
+
+    chunkEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
   }
 
   /**

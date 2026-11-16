@@ -1,6 +1,24 @@
 #!/usr/bin/env node
 
 import { createRequire } from 'node:module';
+// #4919: story similarity is delegated to the shared story-identity
+// module (scripts/shared mirror — same rootDirectory=scripts reason as
+// the JSON requires below). The local Jaccard-0.5 matcher this file
+// carried was one of three inconsistent "same story?" answers in the
+// codebase; all three now share ONE definition and threshold.
+import { clusterTexts } from './shared/story-identity.js';
+// #6428: corroboration is a claim about PUBLISHERS, and cluster.sources holds
+// feed labels. Nine BBC editions are one publisher; the resolver collapses
+// them, and fails closed (unmapped label = its own family) so a new feed can
+// never be silently merged into someone else's byline.
+import {
+  MIN_CORROBORATING_PUBLISHERS,
+  countPublisherFamilies,
+  publisherFamiliesFor,
+  publisherFamilyFor,
+} from './shared/publisher-families.js';
+// #9095: outlets outside the curated map that run the same copy count once.
+import { detectSyndication } from './shared/syndication.js';
 
 const require = createRequire(import.meta.url);
 const SOURCE_TIERS = require('./shared/source-tiers.json');
@@ -9,20 +27,8 @@ const SOURCE_TIERS = require('./shared/source-tiers.json');
 // is not in the container. Matches the SOURCE_TIERS pattern above.
 const DIPLOMACY_KEYWORDS_DATA = require('./shared/diplomacy-keywords.json');
 
-const SIMILARITY_THRESHOLD = 0.5;
 const ENTITY_CORROBORATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-const STOP_WORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-  'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
-  'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-  'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'need',
-  'it', 'its', 'this', 'that', 'these', 'those', 'i', 'you', 'he',
-  'she', 'we', 'they', 'what', 'which', 'who', 'whom', 'how', 'when',
-  'where', 'why', 'all', 'each', 'every', 'both', 'few', 'more', 'most',
-  'other', 'some', 'such', 'no', 'not', 'only', 'same', 'so', 'than',
-  'too', 'very', 'just', 'also', 'now', 'new', 'says', 'said', 'after',
-]);
 
 const MILITARY_KEYWORDS = [
   'war', 'armada', 'invasion', 'airstrike', 'strike', 'missile', 'troops',
@@ -57,14 +63,6 @@ const DEMOTE_KEYWORDS = [
   'quarterly', 'profit', 'investor', 'ipo', 'funding', 'valuation',
 ];
 
-function tokenize(text) {
-  const words = text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
-  return new Set(words);
-}
 
 function finiteNumber(value, fallback = 0) {
   const n = Number(value);
@@ -131,59 +129,15 @@ function containsKeywordToken(text, kw) {
   return new RegExp(`(^|\\s)${escaped}`).test(text);
 }
 
-function jaccardSimilarity(a, b) {
-  if (a.size === 0 && b.size === 0) return 0;
-  let intersection = 0;
-  for (const x of a) {
-    if (b.has(x)) intersection++;
-  }
-  const union = a.size + b.size - intersection;
-  return intersection / union;
-}
-
 export function clusterItems(items) {
   if (items.length === 0) return [];
 
-  const tokenList = items.map(item => tokenize(item.title || ''));
-
-  const invertedIndex = new Map();
-  for (let i = 0; i < tokenList.length; i++) {
-    for (const token of tokenList[i]) {
-      const bucket = invertedIndex.get(token);
-      if (bucket) bucket.push(i);
-      else invertedIndex.set(token, [i]);
-    }
-  }
-
-  const clusters = [];
-  const assigned = new Set();
-
-  for (let i = 0; i < items.length; i++) {
-    if (assigned.has(i)) continue;
-
-    const cluster = [i];
-    assigned.add(i);
-    const tokensI = tokenList[i];
-
-    const candidates = new Set();
-    for (const token of tokensI) {
-      const bucket = invertedIndex.get(token);
-      if (!bucket) continue;
-      for (const idx of bucket) {
-        if (idx > i) candidates.add(idx);
-      }
-    }
-
-    for (const j of Array.from(candidates).sort((a, b) => a - b)) {
-      if (assigned.has(j)) continue;
-      if (jaccardSimilarity(tokensI, tokenList[j]) >= SIMILARITY_THRESHOLD) {
-        cluster.push(j);
-        assigned.add(j);
-      }
-    }
-
-    clusters.push(cluster.map(idx => items[idx]));
-  }
+  // #4924 review (maintainability P1): delegate the clustering ALGORITHM
+  // to the shared module too, not just the similarity function — a local
+  // copy of the loop would let clustering semantics drift apart again,
+  // one layer above the drift this PR removed.
+  const clusters = clusterTexts(items.map(item => item.title || ''))
+    .map(indices => indices.map(idx => items[idx]));
 
   return clusters.map(group => {
     const sorted = [...group].sort((a, b) => {
@@ -198,6 +152,7 @@ export function clusterItems(items) {
     const sources = [...new Set(group.map(i => normalizeSourceName(i.source)).filter(Boolean))]
       .sort((a, b) => sourceTierFor(a) - sourceTierFor(b) || a.localeCompare(b));
     const sourceTier = sourceTierForSources(sources);
+    const syndication = detectSyndication(group, item => publisherFamilyFor(normalizeSourceName(item.source)));
     const publishedTimes = group.map(getItemPubMs).filter(ms => ms > 0);
     const lastUpdatedMs = publishedTimes.length > 0 ? Math.max(...publishedTimes) : getItemPubMs(primary);
     const upstreamImportanceScore = group.reduce(
@@ -216,26 +171,63 @@ export function clusterItems(items) {
       pubDate: primary.pubDate,
       sourceCount: group.length,
       sources,
+      // #6428: how many PUBLISHERS `sources` actually represents. `sources`
+      // stays the label list (it is what the UI credits and links); this is
+      // the number any corroboration claim is allowed to quote. Families whose
+      // items carried the same copy count once (#9095).
+      uniquePublisherCount: syndication.publishers,
+      // The families after that merge, for the entity bucket; not published.
+      publisherFamilies: [...new Set(group.map(syndication.familyOf).filter(Boolean))].sort(),
+      ...(syndication.groups.length > 0 ? { sameCopy: syndication.groups.map(g => g.families) } : {}),
       lastUpdated: lastUpdatedMs > 0 ? new Date(lastUpdatedMs).toISOString() : primary.pubDate,
       memberTitles: group.map(i => i.title).filter(Boolean),
       sourceTier,
       upstreamImportanceScore,
       corroborationCount,
+      ...(Number.isFinite(primary.credibilityScore) ? { credibilityScore: primary.credibilityScore } : {}),
       isAlert: group.some(i => i.isAlert),
       threat: threatItem?.threat ? { ...threatItem.threat } : (primary.threat ? { ...primary.threat } : undefined),
     };
   });
 }
 
+/**
+ * Publishers in a cluster's own members: its same-copy-aware
+ * uniquePublisherCount when clusterItems built it, never more than its labels'
+ * families, so a cluster built elsewhere cannot claim more than its labels.
+ */
+function ownPublisherCount(cluster) {
+  const byLabel = countPublisherFamilies(cluster?.sources);
+  const merged = cluster?.uniquePublisherCount;
+  return Number.isFinite(merged) && merged >= 1 ? Math.min(merged, byLabel) : byLabel;
+}
+
 function countMatches(text, keywords) {
   return keywords.filter(kw => text.includes(kw)).length;
 }
 
-function publisherCount(cluster) {
+/**
+ * Distinct PUBLISHERS behind a cluster — the only breadth number a
+ * corroboration gate may reason about.
+ *
+ * #6428 renamed this from `publisherCount`, which counted no publishers: it
+ * took `cluster.sources.length`, a list of deduplicated feed labels.
+ *
+ * The `Math.max` survives the rename because the three terms measure three
+ * different corpora, not three readings of one:
+ *   - `sources` — publishers in THIS cluster's own members;
+ *   - `corroborationSourceCount` — publishers across the entity bucket this
+ *     cluster sits in (computeEntityCorroboration, 24h window);
+ *   - `corroborationCount` — publishers in the digest's story-identity
+ *     cluster, which groups by a different similarity pass upstream.
+ * Each is now a family count, so the max is the widest EVIDENCED publisher
+ * breadth rather than the most generous label arithmetic available.
+ */
+export function publisherFamilyCount(cluster) {
   return Math.max(
-    Array.isArray(cluster.sources) ? cluster.sources.length : 0,
-    finiteNumber(cluster.corroborationSourceCount, 0),
-    finiteNumber(cluster.corroborationCount, 0),
+    ownPublisherCount(cluster),
+    finiteNumber(cluster?.corroborationSourceCount, 0),
+    finiteNumber(cluster?.corroborationCount, 0),
     1,
   );
 }
@@ -245,7 +237,16 @@ function hasStrongNonKeywordSignal(cluster) {
   return isLlmThreatSource(cluster.threat?.source) && (level === 'high' || level === 'critical');
 }
 
-export function scoreImportance(cluster) {
+/**
+ * @param {object} cluster
+ * @param {{ demoteFinance?: boolean }} [opts] #4922 (f): the ×0.35 finance
+ *   demotion is correct for the geopolitical World Brief but backwards for
+ *   a finance-focused ranking surface. Pass demoteFinance:false to rank
+ *   finance neutrally. NOTE: the only live consumer today (seed-insights)
+ *   runs the full variant and keeps the default — this parameter is the
+ *   seam a finance-variant insights run plugs into (tracked in #4922).
+ */
+export function scoreImportance(cluster, opts = {}) {
   let score = 0;
   const titleLower = normalizedMatchText(cluster.primaryTitle);
   const upstream = finiteNumber(cluster.upstreamImportanceScore, 0);
@@ -262,8 +263,8 @@ export function scoreImportance(cluster) {
   const sourceTier = finiteNumber(cluster.sourceTier, sourceTierFor(cluster.primarySource));
   score += sourceTier === 1 ? 35 : sourceTier === 2 ? 20 : sourceTier === 3 ? 8 : 0;
 
-  const sourcesN = publisherCount(cluster);
-  score += Math.min(sourcesN, 6) * 12;
+  const publishersN = publisherFamilyCount(cluster);
+  score += Math.min(publishersN, 6) * 12;
   if (cluster.entityCorroboration) score += 45;
 
   const violenceN = countMatches(titleLower, VIOLENCE_KEYWORDS);
@@ -286,9 +287,8 @@ export function scoreImportance(cluster) {
   if (crisisN > 0) score += 15 + crisisN * 5;
 
   const demoteN = countMatches(titleLower, DEMOTE_KEYWORDS);
-  if (demoteN > 0 && !cluster.entityCorroboration && !hasStrongNonKeywordSignal(cluster)) score *= 0.35;
-
-  if (cluster.isAlert) score += 50;
+  const demoteFinance = opts.demoteFinance !== false;
+  if (demoteFinance && demoteN > 0 && !cluster.entityCorroboration && !hasStrongNonKeywordSignal(cluster)) score *= 0.35;
 
   return score;
 }
@@ -300,11 +300,22 @@ export function recencyWeight(cluster, nowMs = Date.now()) {
   return Math.max(0.5, 1 - ageHours / 16);
 }
 
+/**
+ * How many independent PUBLISHERS a brief lead must carry.
+ *
+ * #6428: this used to be two feed LABELS, which two editions of one newsroom
+ * satisfied. Two publishers is a strictly stronger bar at the same number, so
+ * the threshold was re-measured rather than left at 2 by assumption — see
+ * docs/solutions/best-practices/corroboration-counts-publisher-families.md.
+ *
+ * Re-exported from the shared module so this gate, the entity bucket below,
+ * and the digest's sibling bucket in list-feed-digest.ts cannot drift apart.
+ */
+export { MIN_CORROBORATING_PUBLISHERS };
+
 export function isBriefLeadEligible(cluster) {
-  const uniqueSources = Array.isArray(cluster?.sources)
-    ? cluster.sources.filter(s => typeof s === 'string' && s.trim().length > 0).length
-    : 0;
-  return uniqueSources >= 2 || cluster?.entityCorroboration === true;
+  return ownPublisherCount(cluster) >= MIN_CORROBORATING_PUBLISHERS
+    || cluster?.entityCorroboration === true;
 }
 
 export function isTopStoriesAdmissible(cluster, score) {
@@ -342,15 +353,21 @@ export function computeEntityCorroboration(clusters, nowMs = Date.now()) {
         buckets.set(key, bucket);
       }
       bucket.clusters.push(cluster);
-      for (const source of cluster.sources ?? []) {
-        const normalized = normalizeSourceName(source);
-        if (normalized) bucket.sources.add(normalized);
+      // #6428: publisher families, not labels — otherwise "Reuters World"
+      // and "Reuters US" reporting the same bigram entity-corroborated each
+      // other, and that flag is the second arm of isBriefLeadEligible.
+      // #9095: a same-copy pair inside one cluster is one family here too.
+      const families = Array.isArray(cluster.publisherFamilies)
+        ? cluster.publisherFamilies
+        : publisherFamiliesFor(cluster.sources);
+      for (const family of families) {
+        bucket.sources.add(family);
       }
     }
   }
 
   for (const bucket of buckets.values()) {
-    if (bucket.sources.size < 2) continue;
+    if (bucket.sources.size < MIN_CORROBORATING_PUBLISHERS) continue;
     for (const cluster of bucket.clusters) {
       cluster.entityCorroboration = true;
       cluster.corroborationSourceCount = Math.max(
@@ -364,30 +381,112 @@ export function computeEntityCorroboration(clusters, nowMs = Date.now()) {
 
 // Note: velocity filter omitted (vs frontend selectTopStories) because digest
 // items lack velocity data. Phase B may add velocity when RPC provides it.
-export function selectTopStories(clusters, maxCount = 8) {
+/**
+ * @param {object[]} clusters
+ * @param {number} [maxCount]
+ * @param {{ considered?: number; admissibilityDropped?: number; sourceCapDropped?: number; overflowDropped?: number; briefEligibleConsidered?: number; briefEligiblePromoted?: boolean }} [stats]
+ *   #4920 coverage ledger: when provided, populated with how many clusters
+ *   each gate dropped — previously all three gates were silent.
+ *   #5947 adds `briefEligibleConsidered` (corroborated clusters in the whole
+ *   corpus) and `briefEligiblePromoted` (whether a slot had to be reserved to
+ *   keep one in the list).
+ */
+// biome-ignore lint/style/useDefaultParameterLast: maxCount's default predates the trailing params; reordering would break the (clusters, maxCount, stats) call shape
+export function selectTopStories(clusters, maxCount = 8, stats, opts = {}) {
+  // Positional-arg guard (#4929 external review): a caller passing
+  // { demoteFinance } in the stats slot would silently get default
+  // demotion AND a stats-shaped object mutated with counters. Detect the
+  // opts shape and shift.
+  if (stats && typeof stats === 'object' && 'demoteFinance' in stats
+      && (!opts || Object.keys(opts).length === 0)) {
+    opts = stats;
+    stats = undefined;
+  }
   const nowMs = Date.now();
   computeEntityCorroboration(clusters, nowMs);
-  const scored = clusters
-    .map(c => {
-      const score = scoreImportance(c);
-      return { cluster: c, score, effectiveScore: score * recencyWeight(c, nowMs) };
-    })
-    .filter(({ cluster: c, score }) => isTopStoriesAdmissible(c, score))
-    .sort((a, b) => b.effectiveScore - a.effectiveScore || b.score - a.score);
+  const admissible = [];
+  let admissibilityDropped = 0;
+  for (const c of clusters) {
+    const score = scoreImportance(c, opts);
+    if (isTopStoriesAdmissible(c, score)) {
+      admissible.push({ cluster: c, score, effectiveScore: score * recencyWeight(c, nowMs) });
+    } else {
+      admissibilityDropped++;
+    }
+  }
+  admissible.sort((a, b) => b.effectiveScore - a.effectiveScore || b.score - a.score);
 
-  const selected = [];
-  const sourceCount = new Map();
   const MAX_PER_SOURCE = 3;
 
-  for (const { cluster, score, effectiveScore } of scored) {
-    const source = cluster.primarySource;
-    const count = sourceCount.get(source) || 0;
-    if (count < MAX_PER_SOURCE) {
+  // #4927 review P2: classify EVERY admissible candidate — breaking at
+  // maxCount lumped later same-source candidates into overflow arithmetic
+  // even though the source cap would have rejected them regardless of
+  // room. Cap-first attribution: a candidate whose source already hit the
+  // per-source cap is a sourceCap drop; only genuinely rankable candidates
+  // count as overflow.
+  //
+  // `seed` reserves one slot for a specific candidate before ranking fills
+  // the rest; it still consumes per-source cap budget like any other pick.
+  const fill = (seed) => {
+    const selected = [];
+    const sourceCount = new Map();
+    let sourceCapDropped = 0;
+    let overflowDropped = 0;
+    const take = ({ cluster, score, effectiveScore }) => {
       selected.push({ ...cluster, importanceScore: score, effectiveImportanceScore: effectiveScore });
-      sourceCount.set(source, count + 1);
+      sourceCount.set(cluster.primarySource, (sourceCount.get(cluster.primarySource) || 0) + 1);
+    };
+    if (seed && maxCount > 0) take(seed);
+    for (const entry of admissible) {
+      if (entry === seed) continue;
+      const source = entry.cluster.primarySource;
+      const count = sourceCount.get(source) || 0;
+      if (count >= MAX_PER_SOURCE) {
+        sourceCapDropped++;
+        continue;
+      }
+      if (selected.length >= maxCount) {
+        overflowDropped++;
+        continue;
+      }
+      take(entry);
     }
-    if (selected.length >= maxCount) break;
+    // Keep the emitted list in rank order even when a seed was taken first.
+    selected.sort((a, b) => b.effectiveImportanceScore - a.effectiveImportanceScore
+      || b.importanceScore - a.importanceScore);
+    return { selected, sourceCapDropped, overflowDropped };
+  };
+
+  let result = fill(null);
+
+  // #5947: the brief lead requires a corroborated cluster (>=2 outlets or
+  // entity corroboration), but this ranking admits single-source alerts and
+  // multiplies by recencyWeight — and a cluster only becomes corroborated
+  // once a SECOND outlet publishes, so recency works against exactly the
+  // clusters the brief needs. On an alert-heavy cycle every slot went to a
+  // single-source alert, so pickBriefCluster returned null and seed-insights
+  // rejected the brief with INSIGHTS_SYNTHESIS_MISSING_CLUSTER on every run
+  // (35 consecutive in production) while corroborated clusters sat unused at
+  // rank 9+. Reserve one slot for the highest-ranked corroborated candidate
+  // rather than shipping no brief at all. This does not lower the brief's
+  // corroboration bar — it guarantees selection can satisfy it.
+  // maxCount <= 0 selects nothing, so no slot exists to reserve — guard here
+  // rather than only inside fill(), or the stats below would report a
+  // promotion that never happened.
+  const briefEligible = admissible.filter(entry => isBriefLeadEligible(entry.cluster));
+  const promoted = maxCount > 0 && !result.selected.some(isBriefLeadEligible)
+    ? (briefEligible[0] ?? null)
+    : null;
+  if (promoted) result = fill(promoted);
+
+  if (stats && typeof stats === 'object') {
+    stats.considered = clusters.length;
+    stats.admissibilityDropped = admissibilityDropped;
+    stats.sourceCapDropped = result.sourceCapDropped;
+    stats.overflowDropped = result.overflowDropped;
+    stats.briefEligibleConsidered = briefEligible.length;
+    stats.briefEligiblePromoted = promoted != null;
   }
 
-  return selected;
+  return result.selected;
 }

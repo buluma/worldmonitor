@@ -3,22 +3,26 @@
  * Loaded when the app is opened with ?settings=1 (e.g. from the main window's Settings button).
  */
 import type { PanelConfig } from '@/types';
-import { DEFAULT_PANELS, STORAGE_KEYS, ALL_PANELS, VARIANT_DEFAULTS, getEffectivePanelConfig, isPanelEntitled } from '@/config';
+import {
+  DEFAULT_PANELS,
+  STORAGE_KEYS,
+  ALL_PANELS,
+  VARIANT_DEFAULTS,
+  getEffectivePanelConfig,
+  isPanelEntitled,
+  FREE_MAX_PANELS,
+  countFreePanelCapUsage,
+  userSetPanelEnabled,
+  isFreePanelCapCounted,
+} from '@/config';
+import { isProUser } from '@/services/widget-store';
 import { SITE_VARIANT } from '@/config/variant';
 import { loadFromStorage, saveToStorage } from '@/utils';
 import { t } from '@/services/i18n';
+import { getPanelDisplayName } from '@/services/panel-display-name';
 import { escapeHtml } from '@/utils/sanitize';
 import { isDesktopRuntime } from '@/services/runtime';
-
-function getLocalizedPanelName(panelKey: string, fallback: string): string {
-  if (panelKey === 'runtime-config') {
-    return t('modals.runtimeConfig.title');
-  }
-  const key = panelKey.replace(/-([a-z])/g, (_match, group: string) => group.toUpperCase());
-  const lookup = `panels.${key}`;
-  const localized = t(lookup);
-  return localized === lookup ? fallback : localized;
-}
+import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 
 export function initSettingsWindow(): void {
   const appEl = document.getElementById('app');
@@ -31,6 +35,11 @@ export function initSettingsWindow(): void {
     STORAGE_KEYS.panels,
     DEFAULT_PANELS
   );
+  // Prune stale panel keys not in current registry (e.g. renamed panels)
+  const validPanelKeys = new Set(Object.keys(ALL_PANELS));
+  for (const key of Object.keys(panelSettings)) {
+    if (!validPanelKeys.has(key) && key !== 'runtime-config') delete panelSettings[key];
+  }
   const variantDefaults = new Set(VARIANT_DEFAULTS[SITE_VARIANT] ?? []);
   for (const key of Object.keys(ALL_PANELS)) {
     if (!(key in panelSettings)) {
@@ -42,81 +51,61 @@ export function initSettingsWindow(): void {
 
   function render(): void {
     const panelEntries = Object.entries(panelSettings).filter(
-      ([key]) => key !== 'runtime-config' || isDesktopApp
+      ([key]) => (key !== 'runtime-config' || isDesktopApp) && (!key.startsWith('cw-') || isProUser())
     );
     const panelHtml = panelEntries
       .map(
-        ([key, panel]) => `
-        <div class="panel-toggle-item ${panel.enabled ? 'active' : ''}" data-panel="${key}">
+        ([key, panel]) => {
+          // Preserve saved config for dynamic cw-* panels; unknown keys should
+          // not collapse to getEffectivePanelConfig's disabled synthetic fallback.
+          const resolvedPanel = ALL_PANELS[key] ? getEffectivePanelConfig(key, SITE_VARIANT) : panel;
+          return `
+        <div class="panel-toggle-item ${panel.enabled ? 'active' : ''}" data-panel="${escapeHtml(key)}">
           <div class="panel-toggle-checkbox">${panel.enabled ? '✓' : ''}</div>
-          <span class="panel-toggle-label">${getLocalizedPanelName(key, panel.name)}</span>
+          <span class="panel-toggle-label">${escapeHtml(getPanelDisplayName(key, resolvedPanel.name ?? panel.name))}</span>
         </div>
-      `
+      `;
+        }
       )
       .join('');
 
     const grid = document.getElementById('panelToggles');
     if (grid) {
-      grid.innerHTML = panelHtml;
+      setTrustedHtml(grid, trustedHtml(panelHtml, "legacy direct innerHTML migration"));
       grid.querySelectorAll('.panel-toggle-item').forEach((item) => {
         item.addEventListener('click', () => {
           const panelKey = (item as HTMLElement).dataset.panel!;
           const config = panelSettings[panelKey];
           if (config) {
-            if (!config.enabled && !isPanelEntitled(panelKey, ALL_PANELS[panelKey] ?? config)) return;
-            config.enabled = !config.enabled;
+            // Preserve saved config for dynamic cw-* panels; unknown keys should
+            // not collapse to getEffectivePanelConfig's disabled synthetic fallback.
+            const resolvedConfig = ALL_PANELS[panelKey] ? getEffectivePanelConfig(panelKey, SITE_VARIANT) : config;
+            if (!config.enabled && !isPanelEntitled(panelKey, resolvedConfig, isProUser())) return;
+            if (!config.enabled && !isProUser() && isFreePanelCapCounted(panelKey)) {
+              const enabledCount = countFreePanelCapUsage(panelSettings);
+              if (enabledCount >= FREE_MAX_PANELS) return;
+            }
+            userSetPanelEnabled(config, !config.enabled);
             saveToStorage(STORAGE_KEYS.panels, panelSettings);
             render();
           }
         });
       });
     }
-
-    const selectAllBtn = document.getElementById('settingsWindowSelectAll');
-    selectAllBtn?.addEventListener('click', () => {
-      let changed = false;
-      for (const [key, panel] of panelEntries) {
-        if (panel.enabled) continue;
-        if (!isPanelEntitled(key, ALL_PANELS[key] ?? panel)) continue;
-        panel.enabled = true;
-        changed = true;
-      }
-      if (!changed) return;
-      saveToStorage(STORAGE_KEYS.panels, panelSettings);
-      render();
-    });
-
-    const selectNoneBtn = document.getElementById('settingsWindowSelectNone');
-    selectNoneBtn?.addEventListener('click', () => {
-      let changed = false;
-      for (const [, panel] of panelEntries) {
-        if (!panel.enabled) continue;
-        panel.enabled = false;
-        changed = true;
-      }
-      if (!changed) return;
-      saveToStorage(STORAGE_KEYS.panels, panelSettings);
-      render();
-    });
   }
 
-  appEl.innerHTML = `
+  setTrustedHtml(appEl, trustedHtml(`
     <div class="settings-window-shell">
       <div class="settings-window-header">
         <div class="settings-window-header-text">
           <span class="settings-window-title">${escapeHtml(t('header.settings'))}</span>
           <p class="settings-window-caption">${escapeHtml(t('header.panelDisplayCaption'))}</p>
         </div>
-        <button type="button" class="modal-close" id="settingsWindowClose">×</button>
+        <button type="button" class="modal-close" id="settingsWindowClose" aria-label="${escapeHtml(t('common.close'))}">×</button>
       </div>
       <div class="panel-toggle-grid" id="panelToggles"></div>
-      <div class="panels-footer">
-        <span class="panels-status"></span>
-        <button type="button" class="panels-select-all" id="settingsWindowSelectAll">${escapeHtml(t('common.selectAll'))}</button>
-        <button type="button" class="panels-select-none" id="settingsWindowSelectNone">${escapeHtml(t('common.selectNone'))}</button>
-      </div>
     </div>
-  `;
+  `, "legacy direct innerHTML migration"));
 
   document.getElementById('settingsWindowClose')?.addEventListener('click', () => {
     window.close();

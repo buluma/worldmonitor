@@ -11,51 +11,228 @@ export interface ImportResult {
   error?: string;
 }
 
+import { CLOUD_SYNC_KEYS } from './sync-keys';
+import { invalidatePanelStorageCacheForKeys } from './panel-storage';
+import { safeStorageSnapshot } from './safe-storage';
+import { PINNED_WEBCAMS_KEY, normalizePinnedWebcamsPreference } from '../../shared/pinned-webcams';
+
 const MAX_IMPORT_SIZE_BYTES = 5 * 1024 * 1024;
 
-const SETTINGS_KEY_PREFIXES = [
-  'worldmonitor-panels',
-  'worldmonitor-monitors',
-  'worldmonitor-layers',
-  'worldmonitor-disabled-feeds',
+const SETTINGS_KEYS: readonly string[] = [
+  ...CLOUD_SYNC_KEYS,
+  // device-local / export-only (excluded from cloud sync)
   'worldmonitor-live-channels',
-  'worldmonitor-map-mode',
-  'worldmonitor-variant',
-  'worldmonitor-theme',
-  'worldmonitor-panel-spans',
-  'worldmonitor-panel-order',
+  'worldmonitor-active-channel',
   'worldmonitor-runtime-feature-toggles',
-  'wm-breaking-alerts-v1',
   'wm-globe-render-scale',
   'wm-live-streams-always-on',
-  'wm-font-family',
-  'worldmonitor-active-channel',
   'worldmonitor-webcam-prefs',
-  'wm-map-theme:',
+  'worldmonitor-disabled-feeds-schema',
   'map-height',
+  'map-height-mode',
+  'map-split-height',
+  'map-col-width',
+  'map-side',
   'map-pinned',
   'mobile-map-collapsed',
   'positive-threshold',
 ];
 
-function isSettingsKey(key: string): boolean {
-  return SETTINGS_KEY_PREFIXES.some(prefix => key.startsWith(prefix));
+// src/services/tab-store.ts keeps two per-variant keys: the dashboard tabs
+// (`worldmonitor-tabs-v1:<variant>`) and the panels new tabs start with
+// (`worldmonitor-new-tab-panels-v1:<variant>`). Without this pattern an
+// export/import cycle restored the active layout and silently dropped every
+// other workspace (#9372).
+type TabStoreKeyFamily = 'worldmonitor-tabs-v1' | 'worldmonitor-new-tab-panels-v1';
+const TAB_STORE_KEY_RE =
+  /^(worldmonitor-tabs-v1|worldmonitor-new-tab-panels-v1):(?:full|tech|finance|commodity|energy|happy)$/;
+
+function tabStoreKeyFamily(key: string): TabStoreKeyFamily | null {
+  return (TAB_STORE_KEY_RE.exec(key)?.[1] as TabStoreKeyFamily | undefined) ?? null;
 }
+
+function isSettingsKey(key: string): boolean {
+  return SETTINGS_KEYS.includes(key)
+    || /^(?:worldmonitor-panels|worldmonitor-layers|worldmonitor-disabled-feeds)-(?:full|tech|finance|commodity|energy|happy)$/.test(key)
+    || tabStoreKeyFamily(key) !== null;
+}
+
+// Live state that is only written back to storage lazily must be flushed
+// before an export reads storage. The dashboard tab snapshot is the case that
+// motivated this: the ACTIVE tab's stored snapshot is refreshed only when the
+// user switches away (PanelLayoutManager.snapshotActiveTab), so exporting
+// while on a tab captured the layout as it was at the last switch, not as it
+// is now. Owners register here; the standalone settings window has no owner
+// and exports whatever storage holds.
+const exportFlushHooks = new Map<() => void, ReadonlySet<string>>();
+
+/** Flush live state before export, until an import replaces one of its stored keys. */
+export function registerSettingsExportFlush(flush: () => void, persistedKeys: readonly string[]): () => void {
+  exportFlushHooks.set(flush, new Set(persistedKeys));
+  return () => { exportFlushHooks.delete(flush); };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isMonitorList(value: unknown): boolean {
+  return Array.isArray(value) && value.every(monitor =>
+    isRecord(monitor)
+    && typeof monitor.id === 'string'
+    && typeof monitor.color === 'string'
+    && Array.isArray(monitor.keywords)
+    && monitor.keywords.every(keyword => typeof keyword === 'string')
+    && (monitor.name === undefined || typeof monitor.name === 'string')
+    && (monitor.lat === undefined || (typeof monitor.lat === 'number' && Number.isFinite(monitor.lat)))
+    && (monitor.lon === undefined || (typeof monitor.lon === 'number' && Number.isFinite(monitor.lon))),
+  );
+}
+
+function validateSetting(key: string, raw: string, policies: {
+  MAX_IMPORTED: number; MAX_INSTRUCTIONS_LEN: number;
+  MAP_THEME_OPTIONS: Record<string, { value: string }[]>;
+  STREAM_QUALITY_OPTIONS: readonly { value: string }[];
+}): void {
+  const { MAX_IMPORTED, MAX_INSTRUCTIONS_LEN, MAP_THEME_OPTIONS, STREAM_QUALITY_OPTIONS } = policies;
+  const invalid = (): never => { throw new Error(`Invalid setting: ${key}`); };
+  if (key === 'worldmonitor-theme' && !['auto', 'dark', 'light'].includes(raw)) invalid();
+  if (key === 'wm-map-provider' && !Object.prototype.hasOwnProperty.call(MAP_THEME_OPTIONS, raw)) invalid();
+  if (key === 'wm-stream-quality' && !STREAM_QUALITY_OPTIONS.some(option => option.value === raw)) invalid();
+  if (key.startsWith('wm-map-theme:')) {
+    const provider = key.slice('wm-map-theme:'.length) as keyof typeof MAP_THEME_OPTIONS;
+    if (!MAP_THEME_OPTIONS[provider]?.some(option => option.value === raw)) invalid();
+  }
+  if (key === 'wm-analysis-frameworks') {
+    const frameworks: unknown = JSON.parse(raw);
+    if (!Array.isArray(frameworks) || frameworks.length > MAX_IMPORTED) invalid();
+    if (!Array.isArray(frameworks)) return;
+    for (const fw of frameworks) {
+      if (!isRecord(fw) || typeof fw.id !== 'string' || typeof fw.name !== 'string'
+        || typeof fw.description !== 'string' || typeof fw.systemPromptAppend !== 'string'
+        || fw.systemPromptAppend.length > MAX_INSTRUCTIONS_LEN || fw.isBuiltIn !== false
+        || typeof fw.createdAt !== 'number' || !Number.isFinite(fw.createdAt)) invalid();
+    }
+  }
+  if (key === 'wm-panel-frameworks') {
+    const selections: unknown = JSON.parse(raw);
+    if (!isRecord(selections) || !Object.values(selections).every(value => value === null || typeof value === 'string')) invalid();
+  }
+  if (key === 'worldmonitor-live-channels') {
+    const channels: unknown = JSON.parse(raw);
+    if (!isRecord(channels) || !Array.isArray(channels.order) || !channels.order.every(id => typeof id === 'string')
+      || !Array.isArray(channels.custom)) invalid();
+    if (!isRecord(channels) || !Array.isArray(channels.custom)) return;
+    for (const channel of channels.custom) {
+      if (!isRecord(channel) || typeof channel.id !== 'string' || typeof channel.name !== 'string') invalid();
+      if (channel.handle !== undefined && typeof channel.handle !== 'string') invalid();
+      if (channel.hlsUrl !== undefined) {
+        if (typeof channel.hlsUrl !== 'string' || channel.hlsUrl.length > 2048) invalid();
+        const url = new URL(channel.hlsUrl);
+        if (url.username || url.password || !(url.protocol === 'https:' || (url.protocol === 'http:' && url.hostname === '127.0.0.1'))) invalid();
+      }
+    }
+  }
+}
+
+function normalizeStoredJson(raw: string, normalize: (parsed: unknown) => unknown): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const state = normalize(parsed);
+  return state === null ? null : JSON.stringify(state);
+}
+
+async function parseImportedEntries(parsed: unknown): Promise<Array<[string, string]>> {
+  if (!isRecord(parsed) || !isRecord(parsed.data)) {
+    throw new Error('Invalid format: expected an object with a data property.');
+  }
+  if (parsed.version !== 1) {
+    throw new Error(`Unsupported settings version: ${parsed.version}`);
+  }
+
+  const [frameworks, maps, streams, tabStore] = await Promise.all([
+    import('@/services/analysis-framework-store'), import('@/config/basemap'), import('@/services/ai-flow-settings'),
+    import('@/services/tab-store'),
+  ]);
+  const policies = { ...frameworks, ...maps, ...streams };
+  // A Record so a new tab-store key family cannot be admitted without a parser.
+  const tabStoreNormalizers: Record<TabStoreKeyFamily, (parsed: unknown) => unknown> = {
+    'worldmonitor-tabs-v1': tabStore.normalizeTabsState,
+    'worldmonitor-new-tab-panels-v1': tabStore.normalizeNewTabPanels,
+  };
+  const entries: Array<[string, string]> = [];
+  let decodedBytes = 0;
+  const encoder = new TextEncoder();
+  for (const [key, value] of Object.entries(parsed.data)) {
+    if (!isSettingsKey(key)) continue;
+    // Pinned webcams accept any input shape here and are re-serialized through
+    // the shared normalizer, matching the browser-store write path; every
+    // other setting must already be a stored string.
+    const stored = key === PINNED_WEBCAMS_KEY ? normalizePinnedWebcamsPreference(value) : value;
+    if (typeof stored !== 'string') {
+      throw new Error(`Invalid setting: ${key} must be a string.`);
+    }
+    const size = encoder.encode(stored).length;
+    decodedBytes += size;
+    if (size > 256 * 1024 || decodedBytes > 1024 * 1024) throw new Error('Settings payload is too large.');
+    // Tab-store values are admitted under the same shape rules the app reads
+    // storage with. Unusable ones are skipped, not fatal: the rest of the
+    // backup (panels, layers, monitors, ...) is still worth restoring alone.
+    const family = tabStoreKeyFamily(key);
+    if (family !== null) {
+      const normalized = normalizeStoredJson(stored, tabStoreNormalizers[family]);
+      if (normalized !== null) entries.push([key, normalized]);
+      continue;
+    }
+    validateSetting(key, stored, policies);
+    // The monitor reader trusts the stored JSON and immediately uses array
+    // and string methods. Reject invalid records before changing any settings.
+    if (key === 'worldmonitor-monitors' && !isMonitorList(JSON.parse(stored))) {
+      throw new Error('Invalid setting: worldmonitor-monitors must contain monitor records.');
+    }
+    entries.push([key, stored]);
+  }
+  return entries;
+}
+
+export const __testing__ = { isSettingsKey };
 
 export function exportSettings(): void {
   const data: Record<string, string> = {};
 
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key || !isSettingsKey(key)) continue;
-    const value = localStorage.getItem(key);
-    if (value !== null) data[key] = value;
+  for (const flush of exportFlushHooks.keys()) flush();
+
+  // Storage that cannot be read has no settings to export, and handing the
+  // user a downloadable file anyway is worse than failing: the caller in
+  // preferences-content.ts wraps this in try/catch and shows `exportSuccess`
+  // when it returns, so a silent empty payload becomes a green "Exported"
+  // toast over a backup containing nothing (#7833 review). Stay loud.
+  //
+  // Testing AVAILABILITY is not enough on its own, which an earlier round of
+  // this fix got wrong: a handle can exist while enumeration or an individual
+  // read throws, and the degrading accessors then return `[]`/`null` and
+  // rebuild exactly that empty-but-successful backup. The snapshot reports
+  // whether the reads themselves succeeded, so a partial one fails instead of
+  // shipping a backup the user would only discover was empty when restoring.
+  const snapshot = safeStorageSnapshot();
+  if (!snapshot.ok) {
+    throw new Error('Settings export could not read browser storage.');
+  }
+
+  let variant = 'full';
+  for (const [key, value] of snapshot.entries) {
+    if (key === 'worldmonitor-variant' && value) variant = value;
+    if (isSettingsKey(key)) data[key] = key === PINNED_WEBCAMS_KEY ? normalizePinnedWebcamsPreference(value) : value;
   }
 
   const exportData: ExportedSettings = {
     version: 1,
     timestamp: new Date().toISOString(),
-    variant: localStorage.getItem('worldmonitor-variant') || 'full',
+    variant,
     data,
   };
 
@@ -80,26 +257,23 @@ export function importSettings(file: File): Promise<ImportResult> {
 
     const reader = new FileReader();
 
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const result = e.target?.result as string;
-        const parsed = JSON.parse(result) as ExportedSettings;
+        const entries = await parseImportedEntries(JSON.parse(result));
+        const { applyLocalPreferenceImport } = await import('./cloud-prefs-sync');
+        const { invalidateFrameworkCache } = await import('@/services/analysis-framework-store');
 
-        if (!parsed || typeof parsed.data !== 'object' || Array.isArray(parsed.data)) {
-          throw new Error('Invalid format: expected an object with a data property.');
+        applyLocalPreferenceImport(entries);
+        const importedKeys = entries.map(([key]) => key);
+        // Imported layouts take effect on reload. Their previous live owners
+        // must not replace them if the user exports before reloading.
+        for (const [flush, persistedKeys] of exportFlushHooks) {
+          if (importedKeys.some(key => persistedKeys.has(key))) exportFlushHooks.delete(flush);
         }
-
-        if (parsed.version !== 1) {
-          throw new Error(`Unsupported settings version: ${parsed.version}`);
-        }
-
-        let keysImported = 0;
-        for (const [key, value] of Object.entries(parsed.data)) {
-          if (isSettingsKey(key) && typeof value === 'string') {
-            localStorage.setItem(key, value);
-            keysImported++;
-          }
-        }
+        invalidatePanelStorageCacheForKeys(importedKeys);
+        invalidateFrameworkCache();
+        const keysImported = entries.length;
 
         resolve({ success: true, keysImported });
       } catch (err) {

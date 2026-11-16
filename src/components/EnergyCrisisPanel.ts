@@ -1,9 +1,10 @@
 import { Panel } from './Panel';
 import { getRpcBaseUrl } from '@/services/rpc-client';
 import { getHydratedData } from '@/services/bootstrap';
-import { EconomicServiceClient } from '@/generated/client/worldmonitor/economic/v1/service_client';
+
 import type { GetEnergyCrisisPoliciesResponse, EnergyCrisisPolicy } from '@/generated/client/worldmonitor/economic/v1/service_client';
 import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
+import { EconomicServiceClient } from '@/services/generated-rpc-clients';
 
 type PolicyData = GetEnergyCrisisPoliciesResponse;
 
@@ -38,10 +39,19 @@ export class EnergyCrisisPanel extends Panel {
       id: 'energy-crisis',
       title: 'Energy Crisis Tracker',
       showCount: true,
+      trackActivity: true,
       defaultRowSpan: 2,
       infoTooltip: 'IEA 2026 Energy Crisis Policy Response Tracker. Tracks government measures to conserve energy and support consumers in response to Middle East conflict and Strait of Hormuz supply disruptions.',
     });
     this.showLoading('Loading energy crisis policies...');
+    this.content.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.ecp-filter-btn');
+      if (!btn) return;
+      const filter = btn.dataset.filter || 'all';
+      if (filter === this.activeFilter) return;
+      this.activeFilter = filter;
+      this.render();
+    });
   }
 
   public async fetchData(): Promise<void> {
@@ -108,7 +118,7 @@ export class EnergyCrisisPanel extends Panel {
     }
 
     if (!this.data.policies?.length) {
-      this.setSafeContent(unsafeRawHtml('<div class="panel-empty">No energy crisis policies tracked.</div>', 'static empty state string'));
+      this.setSafeContent(unsafeRawHtml('<div class="panel-empty">No energy crisis policies tracked.</div>', 'legacy Panel.setContent() migration'));
       return;
     }
 
@@ -176,14 +186,6 @@ export class EnergyCrisisPanel extends Panel {
           <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer" class="ecp-source-link">IEA Tracker ↗</a>
         </div>
       </div>
-    `, 'RPC data passed through escapeHtml at each interpolation point'));
-
-    this.content?.querySelectorAll('.ecp-filter-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const filter = (e.currentTarget as HTMLElement).dataset.filter || 'all';
-        this.activeFilter = filter;
-        this.render();
-      });
-    });
+    `, 'legacy Panel.setContent() migration'));
   }
 }

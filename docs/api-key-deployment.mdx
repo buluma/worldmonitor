@@ -1,8 +1,10 @@
-# Desktop API Fallback — Deployment Guide
-
+---
+title: "API Key Gating & Registration — Deployment Guide"
+description: "Deploying WORLDMONITOR_API_KEY gating for the desktop app — cloud fallback, local-only fallback, and Convex-backed registration email capture."
+---
 ## Overview
 
-Desktop cloud fallback is no longer gated on a World Monitor license key. The desktop app tries the sidecar first and falls back to cloud APIs when appropriate. Provider-specific API keys are still configured individually.
+Desktop cloud fallback is gated on a `WORLDMONITOR_API_KEY`. Without a valid key, the [desktop app](/desktop-app) uses its local sidecar and, for cloud fallback, an anonymous session that reaches public routes only. A signed-in Pro desktop forwards its session instead, and Pro and Pro Business subscribers can also use a [desktop key](/api-keys#desktop-keys). A registration form collects emails via Convex DB for future key distribution.
 
 ## Architecture
 
@@ -17,8 +19,8 @@ Desktop App                          Cloud (Vercel)
 │ └──────┬───────┘ │                │ └──────┬───────┘      │
 │   fail │         │                │   401 if invalid      │
 │ ┌──────▼───────┐ │   fallback    │                       │
-│ │ cloud fallback│─┼──────────────►│ ┌──────────────┐      │
-│ │ decision      │ │               │ │ route handler │      │
+│ │ WM key check │─┼──────────────►│ ┌──────────────┐      │
+│ │ (gate)       │ │  +header      │ │ route handler │      │
 │ └──────────────┘ │               │ └──────────────┘      │
 └──────────────────┘               └──────────────────────┘
 ```
@@ -29,7 +31,20 @@ Desktop App                          Cloud (Vercel)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `WORLDMONITOR_VALID_KEYS` | Comma-separated list of valid API keys | `wm_abc123def456,wm_xyz789` |
 | `CONVEX_URL` | Convex deployment URL (from `npx convex deploy`) | `https://xyz-123.convex.cloud` |
+
+### Generating API keys
+
+Keys must be at least 16 characters (validated client-side). Recommended format:
+
+```bash
+# Generate a key
+openssl rand -hex 24 | sed 's/^/wm_/'
+# Example output: wm_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6
+```
+
+Add to `WORLDMONITOR_VALID_KEYS` in Vercel dashboard (comma-separated, no spaces).
 
 ## Convex Setup
 
@@ -80,26 +95,44 @@ Indexed by `normalizedEmail` for duplicate detection.
 
 ### Client-side (desktop app)
 
-- `installRuntimeFetchPatch()` allows cloud fallback for non-local-only endpoints
-- Provider secrets still control whether individual data sources are available
-- Local-only endpoints remain blocked from cloud fallback
+- `installRuntimeFetchPatch()` checks `WORLDMONITOR_API_KEY` before allowing cloud fallback
+- Key must be present AND valid (min 16 chars)
+- `secretsReady` promise ensures secrets are loaded before first fetch (2s timeout)
+- Fail-closed: any error in key check blocks cloud fallback
 
 ### Server-side (Vercel edge)
 
-- Route-level provider auth still applies where upstream APIs require it
-- Desktop origins use the same application routes as web for cloud fallback
+- `api/_api-key.js` validates `X-WorldMonitor-Key` header on sebuf routes
+- **Origin-aware**: desktop origins (`tauri.localhost`, `tauri://`, `asset://`) require a key
+- Web origins (`worldmonitor.app`) pass through without a key
+- Non-desktop origin with key header: key is still validated
+- Invalid key returns `401 { error: "Invalid API key" }`
 
 ### CORS
 
-Standard application headers are allowed in both `server/cors.ts` and `api/_cors.js`.
+`X-WorldMonitor-Key` is allowed in both `server/cors.ts` and `api/_cors.js`.
+
+### Local Vercel env dumps
+
+Do not keep Vercel env exports in the repository root. `.env.vercel-backup`
+and `.env.vercel-export` are ignored by Git, but they are still plaintext
+production secret dumps that local tools, editor agents, backup software, or
+dependency install scripts can read.
+
+The pre-push hook fails when either file exists. Pull environment values only
+when needed, work from a short-lived local env file, and delete the file after
+use. Secret rotation and deletion from developer machines are operational
+tasks; rotate exposed keys through the owning vendor dashboards, prioritizing
+LLM, payment, auth, Redis, and Convex credentials.
 
 ## Verification Checklist
 
 After deployment:
 
+- [ ] Set `WORLDMONITOR_VALID_KEYS` in Vercel
 - [ ] Set `CONVEX_URL` in Vercel
 - [ ] Run `npx convex deploy` to push schema
-- [ ] Desktop without provider keys: feature-specific fallbacks behave correctly
+- [ ] Desktop without key: cloud fallback blocked (console shows `cloud fallback blocked`)
 - [ ] Desktop with invalid key: sebuf requests get `401`
 - [ ] Desktop with valid key: cloud fallback works as before
 - [ ] Web access: no key required, works normally
@@ -111,10 +144,12 @@ After deployment:
 
 | File | Role |
 |------|------|
-| `src/services/runtime.ts` | Desktop local-first fetch with cloud fallback |
-| `src/services/runtime-config.ts` | Provider secret loading, validation, and `secretsReady` |
-| `api/[domain]/v1/[rpc].ts` | Sebuf gateway routing |
-| `api/register-interest.js` | Optional registration endpoint → Convex |
-| `server/cors.ts` / `api/_cors.js` | CORS headers |
+| `src/services/runtime.ts` | Client-side key gate + header attachment |
+| `src/services/runtime-config.ts` | `WORLDMONITOR_API_KEY` type, validation, `secretsReady` |
+| `api/_api-key.js` | Server-side key validation (origin-aware) |
+| `api/[domain]/v1/[rpc].ts` | Sebuf gateway — calls `validateApiKey` |
+| `api/register-interest.js` | Registration endpoint → Convex |
+| `server/cors.ts` / `api/_cors.js` | CORS headers with `X-WorldMonitor-Key` |
+| `src/components/WorldMonitorTab.ts` | Settings UI for key + registration |
 | `convex/schema.ts` | Convex DB schema |
 | `convex/registerInterest.ts` | Convex mutation |

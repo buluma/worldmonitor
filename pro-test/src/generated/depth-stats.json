@@ -1,0 +1,17 @@
+{
+  "mapLayers": 60,
+  "feeds": 470,
+  "providers": 861,
+  "alertOrigins": 5,
+  "chokepoints": 13,
+  "instabilityCountries": 31,
+  "resilienceRanked": 169,
+  "submarineCables": 98,
+  "pipelinesLng": 159,
+  "aiDatacenters": 313,
+  "hotspots": 29,
+  "stockExchanges": 29,
+  "mcpTools": 100,
+  "commands": 626,
+  "languages": 28
+}

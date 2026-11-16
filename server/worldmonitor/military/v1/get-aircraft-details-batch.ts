@@ -6,12 +6,15 @@ import type {
 
 import { getCachedJsonBatch, cachedFetchJson } from '../../../_shared/redis';
 import { toUniqueSortedLimited } from '../../../_shared/normalize-list';
+import { AIRCRAFT_DETAILS_BATCH_LIMIT } from '../../../_shared/aircraft-details-batch';
 import {
   AIRCRAFT_DETAILS_CACHE_KEY,
   AIRCRAFT_DETAILS_CACHE_TTL,
+  isValidAircraftIcao24,
   type CachedAircraftDetails,
   fetchWingbitsAircraftDetails,
 } from './_wingbits-aircraft-details';
+import { getTrackedAircraftIcao24s } from './_tracked-aircraft';
 
 export async function getAircraftDetailsBatch(
   _ctx: ServerContext,
@@ -24,17 +27,48 @@ export async function getAircraftDetailsBatch(
     const normalized = req.icao24s
       .map((id) => id.trim().toLowerCase())
       .filter((id) => id.length > 0);
-    const limitedList = toUniqueSortedLimited(normalized, 10);
+    const limitedList = toUniqueSortedLimited(normalized, AIRCRAFT_DETAILS_BATCH_LIMIT);
+    // Shape filter applies to what we LOOK UP, not to the `requested` count
+    // below. A malformed address must never reach a Redis key or the Wingbits
+    // URL, but `requested` is a prefix length over the caller's own sorted
+    // keys (src/services/wingbits.ts negative-caches `batchKeys.slice(0,
+    // requested)`), so shortening it by this filter would shift that boundary
+    // and leave a VALID key past it re-fetched from the paid provider on every
+    // refresh.
+    let lookupList = limitedList.filter((id) => isValidAircraftIcao24(id));
+
+    // The single-aircraft route is Pro-gated because a cache miss spends the
+    // Wingbits credential. This route stays anonymous for the map, so it only
+    // handles aircraft in the published flight snapshot; otherwise any caller
+    // could look up arbitrary addresses on the server's key.
+    //
+    // The gate runs BEFORE the cache read, not only on misses: the cache keys
+    // are shared with the Pro route, so a hit is not proof the map can show
+    // the aircraft, and a hit-vs-miss difference in `requested` would reveal
+    // whether a non-snapshot address had been looked up.
+    //
+    // A skipped address is not a negative result: an aircraft that entered the
+    // snapshot after the tracked set was read is looked up on a later refresh.
+    // So `requested` stops before the first skipped address.
+    let requested = limitedList.length;
+    if (lookupList.length > 0 && process.env.LOCAL_API_MODE !== 'tauri-sidecar') {
+      const tracked = await getTrackedAircraftIcao24s();
+      const skipped = new Set(lookupList.filter((id) => !tracked?.has(id)));
+      if (skipped.size > 0) {
+        requested = limitedList.findIndex((id) => skipped.has(id));
+        lookupList = lookupList.filter((id) => !skipped.has(id));
+      }
+    }
 
     // Redis shared cache — batch GET all keys in a single pipeline round-trip
     const results: Record<string, NonNullable<CachedAircraftDetails['details']>> = {};
     const toFetch: string[] = [];
 
-    const cacheKeys = limitedList.map((icao24) => `${AIRCRAFT_DETAILS_CACHE_KEY}:${icao24}`);
+    const cacheKeys = lookupList.map((icao24) => `${AIRCRAFT_DETAILS_CACHE_KEY}:${icao24}`);
     const cachedMap = await getCachedJsonBatch(cacheKeys);
 
-    for (let i = 0; i < limitedList.length; i++) {
-      const icao24 = limitedList[i]!;
+    for (let i = 0; i < lookupList.length; i++) {
+      const icao24 = lookupList[i]!;
       const cached = cachedMap.get(cacheKeys[i]!);
       if (cached && typeof cached === 'object' && 'details' in cached) {
         const details = (cached as { details?: CachedAircraftDetails['details'] }).details;
@@ -68,7 +102,7 @@ export async function getAircraftDetailsBatch(
     return {
       results,
       fetched: Object.keys(results).length,
-      requested: limitedList.length,
+      requested,
       configured: true,
     };
   } catch {

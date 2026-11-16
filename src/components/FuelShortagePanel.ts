@@ -1,8 +1,10 @@
+import { CountrySectionError } from '@/services/country-brief-error';
 import { Panel } from './Panel';
 import { escapeHtml, sanitizeUrl, unsafeRawHtml } from '@/utils/sanitize';
+import { iso2ToCountryName, toIso2 } from '@/utils/country-codes';
 import { createLazyClient, getRpcBaseUrl, rpcFetch } from '@/services/rpc-client';
 import { attributionFooterHtml, ATTRIBUTION_FOOTER_CSS } from '@/utils/attribution-footer';
-import { SupplyChainServiceClient } from '@/generated/client/worldmonitor/supply_chain/v1/service_client';
+
 import type {
   ListFuelShortagesResponse,
   FuelShortageEntry,
@@ -18,16 +20,23 @@ import {
   setCachedFuelShortageRegistry,
   type RawFuelShortageRegistry,
 } from '@/shared/fuel-shortage-registry-store';
+import { SupplyChainServiceClient } from '@/services/generated-rpc-clients';
+import { bindActivationKeys } from '@/utils/activation';
+import { t } from '@/services/i18n';
+import type { ResolvedScope } from '@/services/tab-focus';
+import { PanelScopeFilter, focusedEmptyHtml, scopeTagHtml, type ScopeRow } from './panel-scope-filter';
 
 const getSupplyChainClient = createLazyClient(() => new SupplyChainServiceClient(getRpcBaseUrl(), {
   fetch: rpcFetch,
 }));
 
 const SEVERITY_COLOR: Record<string, string> = {
-  confirmed: '#e74c3c',
-  watch:     '#f39c12',
+  confirmed: '#c0392b',
+  watch:     '#af601a',
 };
 
+// Single unicode glyph per product. Used in the table row so readers can
+// scan by product type without the column having to widen.
 const PRODUCT_GLYPH: Record<string, string> = {
   petrol:      '⛽',
   diesel:      '🛢️',
@@ -42,7 +51,7 @@ const QUALITY_DOT: Record<EvidenceQuality, string> = {
 };
 
 function severityChip(severity: string): string {
-  const color = SEVERITY_COLOR[severity] ?? '#7f8c8d';
+  const color = SEVERITY_COLOR[severity] ?? '#5d6d7e';
   const label = severity.charAt(0).toUpperCase() + severity.slice(1);
   return `<span class="fs-badge" style="background:${color}">${escapeHtml(label)}</span>`;
 }
@@ -87,6 +96,7 @@ function projectRawShortage(raw: unknown): FuelShortageEntry | null {
     severity: str(r.severity, 'watch'),
     firstSeen: str(r.firstSeen),
     lastConfirmed: str(r.lastConfirmed),
+    // `resolvedAt: null` in seed → empty string in proto. Handle both.
     resolvedAt: typeof r.resolvedAt === 'string' ? r.resolvedAt : '',
     impactTypes: Array.isArray(r.impactTypes)
       ? (r.impactTypes as unknown[]).map(t => str(t)).filter(s => s.length > 0)
@@ -122,32 +132,73 @@ export class FuelShortagePanel extends Panel {
   private selectedId: string | null = null;
   private detail: GetFuelShortageDetailResponse | null = null;
   private detailLoading = false;
+  private detailError: string | null = null;
+  // Dashboard focus (#10453): each entry carries the ISO code of its country.
+  private readonly scopeFilter: PanelScopeFilter;
+  /** A refresh is in flight: the loading indicator must stay until data lands. */
+  private refreshing = false;
   private openDetailHandler = (ev: Event): void => {
     const id = (ev as CustomEvent<{ shortageId?: string }>).detail?.shortageId;
     if (!id || !this.element?.isConnected) return;
     void this.loadDetail(id);
   };
 
-  constructor() {
+  constructor(private readonly detailSource?: Pick<ReturnType<typeof getSupplyChainClient>, 'getFuelShortageDetail'>) {
     super({
       id: 'fuel-shortages',
       title: 'Global Fuel Shortage Registry',
       defaultRowSpan: 2,
       infoTooltip:
         'Global fuel-shortage alert registry (petrol, diesel, jet, heating oil). Severity ' +
-        '(confirmed / watch) is a classifier output. Every row carries the full evidence ' +
-        'source list.',
+        '(confirmed / watch) is a classifier output, not a client derivation. Every row ' +
+        'carries the full evidence source list — see /docs/methodology/shortages for the ' +
+        'threshold spec + classifier version.',
     });
+    this.scopeFilter = new PanelScopeFilter({ content: this.content, onChange: () => this.render() });
     if (typeof window !== 'undefined') {
       window.addEventListener('energy:open-fuel-shortage-detail', this.openDetailHandler);
     }
+    this.content.addEventListener('click', this.handleContentClick);
+    bindActivationKeys(this.content, '.fs-row');
   }
+
+  private handleContentClick = (e: Event): void => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('.fs-drawer-close')) {
+      this.closeDetail();
+      return;
+    }
+    const row = target.closest<HTMLTableRowElement>('tr.fs-row');
+    if (!row || !this.content.contains(row)) return;
+    const id = row.dataset.shortageId;
+    if (id) void this.loadDetail(id);
+  };
 
   public destroy(): void {
     if (typeof window !== 'undefined') {
       window.removeEventListener('energy:open-fuel-shortage-detail', this.openDetailHandler);
     }
     super.destroy?.();
+  }
+
+  public override applyScope(scope: ResolvedScope | null): void {
+    if (!this.scopeFilter.setScope(scope)) return;
+    // The next successful load draws with the new focus; redrawing now would
+    // erase a load failure or the loading state.
+    if (this.data && !this.showingLoadFailure && !this.refreshing) this.render();
+  }
+
+  public override showLoading(message?: string): void {
+    this.refreshing = true;
+    this.scopeFilter?.hideStrip();
+    super.showLoading(message);
+  }
+
+  public override showError(message?: string, onRetry?: () => void, autoRetrySeconds?: number): void {
+    this.refreshing = false;
+    this.scopeFilter.hideStrip();
+    super.showError(message, onRetry, autoRetrySeconds);
   }
 
   public async fetchData(): Promise<void> {
@@ -194,21 +245,28 @@ export class FuelShortagePanel extends Panel {
     }
   }
 
+  public async presentDetail(data: ListFuelShortagesResponse, id: string): Promise<void> {
+    this.data = data;
+    await this.loadDetail(id);
+  }
+
   private async loadDetail(shortageId: string): Promise<void> {
     this.selectedId = shortageId;
     this.detailLoading = true;
+    this.detailError = null;
     this.render();
     try {
-      const d = await getSupplyChainClient().getFuelShortageDetail({ shortageId });
+      const d = await (this.detailSource ?? getSupplyChainClient()).getFuelShortageDetail({ shortageId });
       if (!this.element?.isConnected || this.selectedId !== shortageId) return;
       this.detail = d;
       this.detailLoading = false;
       this.render();
-    } catch {
+    } catch (error) {
       if (!this.element?.isConnected) return;
       if (this.selectedId !== shortageId) return;
       this.detailLoading = false;
       this.detail = null;
+      this.detailError = error instanceof CountrySectionError ? error.message : null;
       this.render();
     }
   }
@@ -221,9 +279,24 @@ export class FuelShortagePanel extends Panel {
 
   private render(): void {
     if (!this.data) return;
+    this.refreshing = false;
 
-    const rows = [...this.data.shortages]
-      .sort((a, b) => {
+    // The focus narrows first (chosen countries, then neighbours); the
+    // summary counts the focused set.
+    const view = this.scopeFilter.view(this.data.shortages, (s) => toIso2(s.country));
+    if (this.data.shortages.length === 0) this.scopeFilter.hideStrip();
+    else this.scopeFilter.renderStrip(view);
+    const scoped = view.rows.map((row) => row.item);
+
+    // Sort confirmed before watch; within each tier, strongest evidence first,
+    // then most recently confirmed. Readers scan high-impact + high-trust rows
+    // first — the classifier's confidence ordering is the tie-breaker. Under a
+    // focus, chosen countries come before neighbours.
+    const rows = [...view.rows]
+      .sort((rowA, rowB) => {
+        if (rowA.rank !== rowB.rank) return rowA.rank - rowB.rank;
+        const a = rowA.item;
+        const b = rowB.item;
         const aConf = a.severity === 'confirmed' ? 0 : 1;
         const bConf = b.severity === 'confirmed' ? 0 : 1;
         if (aConf !== bConf) return aConf - bConf;
@@ -233,11 +306,12 @@ export class FuelShortagePanel extends Panel {
         if (qualityRank[aQ] !== qualityRank[bQ]) return qualityRank[aQ] - qualityRank[bQ];
         return b.lastConfirmed.localeCompare(a.lastConfirmed);
       })
-      .map(s => this.renderRow(s))
+      .map(row => this.renderRow(row.item, row))
       .join('');
 
-    const confirmed = this.data.shortages.filter(s => s.severity === 'confirmed').length;
-    const watch = this.data.shortages.filter(s => s.severity === 'watch').length;
+    const confirmed = scoped.filter(s => s.severity === 'confirmed').length;
+    const watch = scoped.filter(s => s.severity === 'watch').length;
+    const summary = `${confirmed} confirmed · ${watch} watch`;
 
     const attribution = attributionFooterHtml({
       sourceType: 'classifier',
@@ -252,74 +326,82 @@ export class FuelShortagePanel extends Panel {
 
     const drawer = this.selectedId ? this.renderDrawer() : '';
 
-    this.setSafeContent(unsafeRawHtml(`
+    const html = unsafeRawHtml(`
       <div class="fs-wrap">
-        <div class="fs-summary">${confirmed} confirmed · ${watch} watch</div>
-        <table class="fs-table">
-          <thead>
-            <tr>
-              <th>Country · Product</th>
-              <th>Since</th>
-              <th>Evidence</th>
-              <th>Severity</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
+        <div class="fs-summary">${escapeHtml(summary)}</div>
+        ${view.emptyByFocus ? focusedEmptyHtml(t('focus.filter.emptyFuelShortages')) : `<div class="table-scroll" role="group" tabindex="${this.selectedId ? '-1' : '0'}" aria-labelledby="${this.panelId}Title">
+          <table class="wm-table fs-table" role="table">
+            <thead role="rowgroup">
+              <tr role="row">
+                <th scope="col" role="columnheader">Country · Product</th>
+                <th scope="col" role="columnheader">Since</th>
+                <th scope="col" role="columnheader">Evidence</th>
+                <th scope="col" role="columnheader">Severity</th>
+              </tr>
+            </thead>
+            <tbody role="rowgroup">${rows}</tbody>
+          </table>
+        </div>`}
         ${attribution}
         ${drawer}
       </div>
       ${ATTRIBUTION_FOOTER_CSS}
       <style>
-        .fs-wrap { position: relative; font-size: 11px; }
-        .fs-summary { font-size: 10px; color: var(--text-dim, #888); text-transform: uppercase; letter-spacing: 0.04em; margin: 4px 0 6px 0; }
-        .fs-table { width: 100%; border-collapse: collapse; }
-        .fs-table th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim, #888); padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-        .fs-table td { padding: 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .fs-wrap { position: relative; font-size: calc(11px * var(--wm-panel-effective-scale, 1)); container: fs-wrap / inline-size; }
+        .fs-summary { font-size: calc(10px * var(--wm-panel-effective-scale, 1)); color: var(--text-dim, #888); text-transform: uppercase; letter-spacing: 0.04em; margin: 4px 0 6px 0; }
         .fs-table tr.fs-row { cursor: pointer; }
         .fs-table tr.fs-row:hover td { background: rgba(255,255,255,0.03); }
-        .fs-name { font-weight: 600; color: var(--text, #eee); }
-        .fs-sub  { font-size: 9px; color: var(--text-dim, #888); text-transform: uppercase; letter-spacing: 0.04em; }
-        .fs-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 700; color: #fff; text-transform: uppercase; letter-spacing: 0.04em; }
-        .fs-quality { font-family: monospace; font-size: 10px; color: var(--text-dim, #888); }
+        .fs-name { font-weight: 600; color: var(--text, #eee); overflow-wrap: break-word; }
+        .fs-table .fs-val { white-space: nowrap; }
+        .fs-sub  { font-size: calc(9px * var(--wm-panel-effective-scale, 1)); color: var(--text-dim, #888); text-transform: uppercase; letter-spacing: 0.04em; overflow-wrap: anywhere; }
+        /* Four columns cannot fit a narrow column without splitting values, so each
+           row stacks: the name takes the full width, the values share one line below.
+           The breakpoint is in em of the scaled wrap text (31em is 341px at 100%), so
+           a larger font-size setting stacks the rows in a wider column too. */
+        @container fs-wrap (max-width: 31em) {
+          .fs-table, .fs-table tbody { display: block; }
+          .fs-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+          .fs-table tr.fs-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px; border-bottom: 1px solid var(--border-subtle); }
+          .fs-table tr.fs-row td { padding: 0; border: 0; }
+          .fs-table tr.fs-row td:first-child { flex: 1 0 100%; }
+          .fs-table tr.fs-row td:last-child { margin-left: auto; }
+          .fs-table tr.fs-row:hover { background: rgba(255,255,255,0.03); }
+          .fs-table tr.fs-row:hover td { background: none; }
+          .fs-table .fs-val[data-label]::before { content: attr(data-label) ' '; color: var(--text-dim, #888); }
+        }
+        .fs-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: calc(9px * var(--wm-panel-effective-scale, 1)); font-weight: 700; color: #fff; text-transform: uppercase; letter-spacing: 0.04em; }
+        .fs-quality { font-family: monospace; font-size: calc(10px * var(--wm-panel-effective-scale, 1)); color: var(--text-dim, #888); }
         .fs-drawer { position: absolute; inset: 0; background: var(--panel-bg, #0f1218); padding: 12px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; }
-        .fs-drawer-close { position: absolute; top: 8px; right: 10px; background: transparent; border: 0; color: var(--text-dim, #888); cursor: pointer; font-size: 14px; }
-        .fs-drawer h3 { margin: 0 0 6px 0; font-size: 13px; color: var(--text, #eee); }
-        .fs-drawer .fs-kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 10px; font-size: 10px; margin-bottom: 10px; }
-        .fs-drawer .fs-kv-key { color: var(--text-dim, #888); text-transform: uppercase; letter-spacing: 0.04em; font-size: 9px; padding-top: 2px; }
+        .fs-drawer-close { position: absolute; top: 8px; right: 10px; background: transparent; border: 0; color: var(--text-dim, #888); cursor: pointer; font-size: calc(14px * var(--wm-panel-effective-scale, 1)); }
+        .fs-drawer h3 { margin: 0 0 6px 0; font-size: calc(13px * var(--wm-panel-effective-scale, 1)); color: var(--text, #eee); }
+        .fs-drawer .fs-kv { display: grid; grid-template-columns: 120px 1fr; gap: 4px 10px; font-size: calc(10px * var(--wm-panel-effective-scale, 1)); margin-bottom: 10px; }
+        .fs-drawer .fs-kv-key { color: var(--text-dim, #888); text-transform: uppercase; letter-spacing: 0.04em; font-size: calc(9px * var(--wm-panel-effective-scale, 1)); padding-top: 2px; }
         .fs-source-list { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); }
-        .fs-src-item { font-size: 10px; color: var(--text, #eee); margin-bottom: 6px; }
+        .fs-src-item { font-size: calc(10px * var(--wm-panel-effective-scale, 1)); color: var(--text, #eee); margin-bottom: 6px; }
         .fs-src-item a { color: #4ade80; text-decoration: none; }
         .fs-src-item a:hover { text-decoration: underline; }
-        .fs-src-type { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; background: rgba(255,255,255,0.08); color: var(--text-dim, #aaa); margin-right: 4px; }
+        .fs-src-type { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: calc(8px * var(--wm-panel-effective-scale, 1)); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; background: rgba(255,255,255,0.08); color: var(--text-dim, #aaa); margin-right: 4px; }
         .fs-src-type-regulator { background: #2980b9; color: #fff; }
         .fs-src-type-operator { background: #27ae60; color: #fff; }
         .fs-src-type-press { background: #555; color: #ccc; }
       </style>
-    `, 'legacy Panel.setContent() migration'));
-
-    const table = this.element?.querySelector('.fs-table') as HTMLTableElement | null;
-    table?.querySelectorAll<HTMLTableRowElement>('tr.fs-row').forEach(tr => {
-      const id = tr.dataset.shortageId;
-      if (!id) return;
-      tr.addEventListener('click', () => void this.loadDetail(id));
-    });
-    const closeBtn = this.element?.querySelector<HTMLButtonElement>('.fs-drawer-close');
-    closeBtn?.addEventListener('click', () => this.closeDetail());
+    `, 'legacy Panel.setContent() migration');
+    if (this.detailSource) this.setSafeContentImmediate(html);
+    else this.setSafeContent(html);
   }
 
-  private renderRow(s: FuelShortageEntry): string {
+  private renderRow(s: FuelShortageEntry, row?: ScopeRow<FuelShortageEntry>): string {
     const glyph = PRODUCT_GLYPH[s.product] ?? '•';
     const quality = deriveShortageEvidenceQuality(s.evidence);
     return `
-      <tr class="fs-row" data-shortage-id="${escapeHtml(s.id)}">
-        <td>
-          <div class="fs-name">${glyph} ${escapeHtml(s.country)} · ${escapeHtml(s.product)}</div>
+      <tr class="fs-row" role="row" data-shortage-id="${escapeHtml(s.id)}" tabindex="${this.selectedId ? '-1' : '0'}">
+        <td role="cell">
+          <div class="fs-name">${glyph} ${escapeHtml(s.country)} · ${escapeHtml(s.product)} ${scopeTagHtml(row)}</div>
           <div class="fs-sub">${escapeHtml(s.causeChain.join(' · ') || '—')}</div>
         </td>
-        <td>${escapeHtml(s.firstSeen.slice(0, 10))}</td>
-        <td><span class="fs-quality" title="Evidence quality: ${escapeHtml(quality)}">${QUALITY_DOT[quality]}</span></td>
-        <td>${severityChip(s.severity)}</td>
+        <td role="cell" class="fs-val" data-label="Since">${escapeHtml(s.firstSeen.slice(0, 10))}</td>
+        <td role="cell"><span class="fs-quality" title="Evidence quality: ${escapeHtml(quality)}">${QUALITY_DOT[quality]}</span></td>
+        <td role="cell">${severityChip(s.severity)}</td>
       </tr>`;
   }
 
@@ -329,7 +411,7 @@ export class FuelShortagePanel extends Panel {
     }
     const s = this.detail?.shortage;
     if (!s) {
-      return `<div class="fs-drawer"><button class="fs-drawer-close" aria-label="Close">✕</button>Shortage detail unavailable.</div>`;
+      return `<div class="fs-drawer"><button class="fs-drawer-close" aria-label="Close">✕</button>${escapeHtml(this.detailError ?? 'Shortage detail unavailable.')}</div>`;
     }
 
     const ev = s.evidence;
@@ -352,7 +434,7 @@ export class FuelShortagePanel extends Panel {
     return `
       <div class="fs-drawer">
         <button class="fs-drawer-close" aria-label="Close">✕</button>
-        <h3>${escapeHtml(s.country)} · ${escapeHtml(s.product)} ${severityChip(s.severity)}</h3>
+        <h3>${escapeHtml(iso2ToCountryName(s.country))} · ${escapeHtml(s.product)} ${severityChip(s.severity)}</h3>
         <div class="fs-kv">
           <div class="fs-kv-key">Description</div>  <div>${escapeHtml(s.shortDescription)}</div>
           <div class="fs-kv-key">First seen</div>   <div>${escapeHtml(s.firstSeen.slice(0, 10))}</div>

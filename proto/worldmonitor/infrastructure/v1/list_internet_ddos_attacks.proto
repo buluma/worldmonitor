@@ -2,42 +2,22 @@ syntax = "proto3";
 
 package worldmonitor.infrastructure.v1;
 
-// DdosAttackSummaryEntry represents a labeled share of DDoS attack traffic.
-message DdosAttackSummaryEntry {
-  // Category label (e.g. protocol or vector name).
-  string label = 1;
-  // Share of attack traffic as a percentage.
-  double percentage = 2;
-}
+import "sebuf/http/annotations.proto";
+import "worldmonitor/infrastructure/v1/infrastructure.proto";
 
-// DdosLocationHit represents a country's share of DDoS attack targeting.
-message DdosLocationHit {
-  // ISO 3166-1 alpha-2 country code.
-  string country_code = 1;
-  // Country name.
-  string country_name = 2;
-  // Share of attack traffic targeting this country, as a percentage.
-  double percentage = 3;
-  // Country centroid latitude.
-  double latitude = 4;
-  // Country centroid longitude.
-  double longitude = 5;
-}
+// ListInternetDdosAttacksRequest specifies filters for retrieving DDoS attack summaries.
+message ListInternetDdosAttacksRequest {}
 
-// ListInternetDdosAttacksRequest has no filters -- returns the latest global DDoS summary.
-message ListInternetDdosAttacksRequest {
-}
-
-// ListInternetDdosAttacksResponse contains Cloudflare Radar's global DDoS attack summary.
+// ListInternetDdosAttacksResponse contains DDoS attack protocol and vector breakdowns.
 message ListInternetDdosAttacksResponse {
-  // Attack share by protocol.
+  // Protocol distribution (TCP, UDP, ICMP, GRE).
   repeated DdosAttackSummaryEntry protocol = 1;
-  // Attack share by vector.
+  // Attack vector distribution.
   repeated DdosAttackSummaryEntry vector = 2;
-  // Reporting window start date.
+  // ISO 8601 start of the data window.
   string date_range_start = 3;
-  // Reporting window end date.
+  // ISO 8601 end of the data window.
   string date_range_end = 4;
-  // Countries most targeted by attack traffic.
+  // Top DDoS target locations with geo coordinates.
   repeated DdosLocationHit top_target_locations = 5;
 }

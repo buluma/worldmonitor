@@ -1,0 +1,139 @@
+.header {
+  contain: layout;
+}
+
+.pro-banner-slot {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+html.wm-pro-banner-reserved .pro-banner-slot {
+  min-height: var(--wm-pro-banner-slot-height, 40px);
+}
+
+.pro-banner-slot .pro-banner {
+  box-sizing: border-box;
+  min-height: var(--wm-pro-banner-slot-height, 40px);
+  width: 100%;
+}
+
+.header-right {
+  --header-auth-slot-width: 200px;
+  --header-findings-slot-width: 72px;
+
+  /* Grow into leftover header space; min-width:0 lets the auth slot shrink
+     before Sign In clips the viewport on tablet widths (#10464). */
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+  padding-left: calc(var(--header-findings-slot-width) + 12px);
+  position: relative;
+}
+
+.header-right > .intel-findings-badge {
+  box-sizing: border-box;
+  justify-content: center;
+  left: 0;
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  width: var(--header-findings-slot-width);
+}
+
+#missionPresetMount,
+#unifiedSettingsMount,
+#authWidgetMount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#missionPresetMount,
+#unifiedSettingsMount {
+  contain: layout;
+  flex: 0 0 auto;
+}
+
+#missionPresetMount {
+  min-width: 86px;
+  min-height: 24px;
+}
+
+#unifiedSettingsMount {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+/* Prefer the 200px Sign In + free-reason cluster, but shrink before the
+   rightmost control clips the viewport on tablet widths (#10464). */
+#authWidgetMount {
+  container-type: inline-size;
+  flex: 0 1 var(--header-auth-slot-width);
+  max-width: var(--header-auth-slot-width);
+  min-width: 72px;
+  min-height: 32px;
+}
+
+.auth-header-widget-pending {
+  width: 100%;
+  max-width: var(--header-auth-slot-width);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.auth-header-skeleton {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text) 7%, transparent),
+      color-mix(in srgb, var(--text) 13%, transparent),
+      color-mix(in srgb, var(--text) 7%, transparent)
+    );
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 6px;
+  display: block;
+  height: 32px;
+  pointer-events: none;
+}
+
+.auth-header-skeleton-signin {
+  flex: 0 0 72px;
+}
+
+/* Prefer ~120px, but shrink inside a compressed auth slot so the pending
+   placeholders cannot spill past #authWidgetMount during Clerk load. */
+.auth-header-skeleton-reason {
+  flex: 1 1 0;
+  max-width: 120px;
+  min-width: 0;
+}
+
+/* Sign In skeleton is 72px + 8px gap. Below ~160px there is not enough room
+   for a useful reason placeholder — collapse it (and its flex gap). */
+@container (max-width: 160px) {
+  .auth-header-skeleton-reason {
+    display: none;
+  }
+}
+
+/* When left-side chrome returns (variant switcher at >980px) and before the
+   header is wide enough again, the free-reason ellipsis collapses to an empty
+   gap. Hide it and keep the single Sign In action fully on screen. */
+@media (min-width: 981px) and (max-width: 1199px) {
+  #authWidgetMount {
+    flex-basis: 80px;
+    max-width: 90px;
+  }
+
+  #authWidgetMount .auth-free-reason,
+  #authWidgetMount .auth-header-skeleton-reason {
+    display: none;
+  }
+}
+
+#missionPresetMount:empty,
+#unifiedSettingsMount:empty,
+#authWidgetMount:empty {
+  visibility: hidden;
+}

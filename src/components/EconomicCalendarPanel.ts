@@ -1,17 +1,11 @@
-import type { EconomicServiceClient } from '@/generated/client/worldmonitor/economic/v1/service_client';
 import { Panel } from './Panel';
+import { createLazyClient, getRpcBaseUrl, rpcFetch } from '@/services/rpc-client';
+import { EconomicServiceClient } from '@/services/generated-rpc-clients';
+import { addLocalDays, localYmd } from '@/utils/local-date';
 import { t } from '@/services/i18n';
 import { escapeHtml, unsafeRawHtml } from '@/utils/sanitize';
 
-let _client: EconomicServiceClient | null = null;
-async function getEconomicClient(): Promise<EconomicServiceClient> {
-  if (!_client) {
-    const { EconomicServiceClient } = await import('@/generated/client/worldmonitor/economic/v1/service_client');
-    const { getRpcBaseUrl } = await import('@/services/rpc-client');
-    _client = new EconomicServiceClient(getRpcBaseUrl(), { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) });
-  }
-  return _client;
-}
+const getEconomicClient = createLazyClient(() => new EconomicServiceClient(getRpcBaseUrl(), { fetch: rpcFetch }));
 
 const COUNTRY_FLAGS: Record<string, string> = {
   US: '🇺🇸',
@@ -105,10 +99,12 @@ export class EconomicCalendarPanel extends Panel {
   public async fetchData(): Promise<boolean> {
     this.showLoading('Loading economic calendar...');
     try {
-      const client = await getEconomicClient();
+      const client = getEconomicClient();
       const today = new Date();
-      const fromDate = today.toISOString().slice(0, 10);
-      const toDate = new Date(today.getTime() + 30 * 86400_000).toISOString().slice(0, 10);
+      // Local-time day keys: toISOString() is UTC-based and shifted the
+      // window a day for users far from UTC, dropping their local "today".
+      const fromDate = localYmd(today);
+      const toDate = localYmd(addLocalDays(today, 30));
       const resp = await client.getEconomicCalendar({ fromDate, toDate });
 
       if (resp.unavailable || !resp.events || resp.events.length === 0) {
@@ -143,7 +139,7 @@ export class EconomicCalendarPanel extends Panel {
       tabs.map(({ key, label }) => {
         const active = this._region === key;
         return `<button data-region="${key}" style="
-          padding:3px 10px;font-size:10px;font-weight:600;letter-spacing:0.04em;
+          padding:3px 10px;font-size:calc(10px * var(--wm-panel-effective-scale, 1));font-weight:600;letter-spacing:0.04em;
           border-radius:3px;border:none;cursor:pointer;
           background:${active ? 'rgba(255,255,255,0.15)' : 'transparent'};
           color:${active ? 'var(--text)' : 'rgba(255,255,255,0.35)'};
@@ -161,21 +157,9 @@ export class EconomicCalendarPanel extends Panel {
     const filtered = this._filterEvents();
     const grouped = groupByDate(filtered);
     let bodyRows = '';
-    let isFirstGroup = true;
 
     for (const [date, events] of grouped) {
-      const borderTop = isFirstGroup ? '' : 'border-top:1px solid rgba(255,255,255,0.06);';
-      isFirstGroup = false;
-
-      bodyRows += `<tr>
-        <td colspan="3" style="
-          padding:10px 0 3px;
-          font-size:10px;font-weight:600;
-          color:rgba(255,255,255,0.35);
-          text-transform:uppercase;letter-spacing:0.06em;
-          ${borderTop}
-        ">${escapeHtml(formatDateGroup(date))}</td>
-      </tr>`;
+      bodyRows += `<tr class="ec-date-row"><td colspan="3">${escapeHtml(formatDateGroup(date))}</td></tr>`;
 
       for (const ev of events) {
         const impact = (ev.impact || 'low').toLowerCase();
@@ -185,23 +169,23 @@ export class EconomicCalendarPanel extends Panel {
 
         // Right column: actual value when released, countdown otherwise
         let rightLabel: string;
-        let rightStyle: string;
+        let rightClass: string;
         if (ev.actual) {
           rightLabel = escapeHtml(fmtVal(ev.actual, ev.unit));
-          rightStyle = 'color:var(--text);font-weight:600';
+          rightClass = 'ec-actual';
         } else {
           rightLabel = escapeHtml(countdown(ev.date));
-          rightStyle = 'color:rgba(255,255,255,0.35);font-style:italic';
+          rightClass = 'ec-countdown';
         }
 
-        bodyRows += `<tr style="font-size:12px;line-height:1.2">
-          <td style="padding:4px 8px 4px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0">
+        bodyRows += `<tr>
+          <td class="ec-event">
             <span style="margin-right:5px">${flag}</span><span style="font-weight:${isHigh ? 600 : 400}">${escapeHtml(ev.event)}</span>
           </td>
-          <td style="padding:4px 6px;text-align:center;vertical-align:middle">
+          <td class="ec-impact">
             <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${impactColor};vertical-align:middle"></span>
           </td>
-          <td style="padding:4px 0;text-align:right;font-variant-numeric:tabular-nums;${rightStyle};white-space:nowrap">${rightLabel}</td>
+          <td class="ec-value ${rightClass}">${rightLabel}</td>
         </tr>`;
       }
     }
@@ -210,27 +194,27 @@ export class EconomicCalendarPanel extends Panel {
       ? 'No upcoming economic events'
       : 'No events for selected region';
     const emptyMsg = filtered.length === 0
-      ? `<tr><td colspan="3" style="padding:20px 0;text-align:center;color:rgba(255,255,255,0.3);font-size:12px">${escapeHtml(emptyMsgText)}</td></tr>`
+      ? `<tr><td colspan="3" class="ec-empty">${escapeHtml(emptyMsgText)}</td></tr>`
       : '';
 
-    const html = `${this._renderRegionTabs()}<div style="padding:0 14px 12px;max-height:440px;overflow-y:auto">
-      <table style="width:100%;border-collapse:collapse;table-layout:fixed">
+    const html = `${this._renderRegionTabs()}<div style="padding:0 14px 12px;">
+      <table class="wm-table ec-table">
         <colgroup>
           <col style="width:auto">
-          <col style="width:20px">
-          <col style="width:64px">
+          <col style="width:24px">
+          <col style="width:72px">
         </colgroup>
         <thead>
-          <tr style="font-size:9px;font-weight:600;color:rgba(255,255,255,0.25);text-transform:uppercase;letter-spacing:0.06em">
-            <th style="text-align:left;padding:0 8px 8px 0;font-weight:600">EVENT</th>
-            <th style="padding:0 0 8px;font-weight:600"></th>
-            <th style="text-align:right;padding:0 0 8px;font-weight:600"></th>
+          <tr>
+            <th scope="col">EVENT</th>
+            <th scope="col"></th>
+            <th scope="col"></th>
           </tr>
         </thead>
         <tbody>${emptyMsg}${bodyRows}</tbody>
       </table>
     </div>`;
 
-    this.setSafeContent(unsafeRawHtml(html, 'RPC data escaped at each interpolation point via escapeHtml'));
+    this.setSafeContent(unsafeRawHtml(html, 'legacy Panel.setContent() migration'));
   }
 }

@@ -1,0 +1,288 @@
+---
+title: "Notifications & Integrations"
+description: "Notification channels, webhook delivery, and Telegram, Slack, Discord, Microsoft Teams, and YouTube integration endpoints for pushing World Monitor alerts."
+---
+
+## Notification channels
+
+Users can register multiple delivery channels (webhook, Telegram, Slack, Discord, Microsoft Teams, email, browser push) and bind alert rules to them.
+
+Digest and brief notifications use the same story pool and editorial guardrails
+documented in [News Digest and Briefing Methodology](/methodology/news-digest-and-briefing).
+
+### `GET /api/notification-channels`
+
+Lists the caller's registered channels and alert rules.
+
+```json
+{
+  "channels": [
+    { "id": "chn_01", "type": "webhook", "url": "https://hooks.example.com/...", "active": true },
+    { "id": "chn_02", "type": "telegram", "chatId": "@alerts_xyz", "active": true }
+  ],
+  "alertRules": [
+    { "id": "rul_01", "channelId": "chn_01", "trigger": "brief_ready", "filter": null }
+  ]
+}
+```
+
+### `POST /api/notification-channels`
+
+Action-dispatched writer. The body's `action` field selects the mutation:
+
+| action | Purpose |
+|--------|---------|
+| `create-pairing-token` | Mint a one-time pairing token (optional `variant`) for the mobile / Tauri client to bind a push channel. |
+| `set-channel` | Register or update a channel. For `webhook` channels the `webhookEnvelope` URL is validated HTTPS-only, must not resolve to a private/loopback address, and is AES-256-GCM encrypted before storage. For `teams` channels the URL must also be a Microsoft Workflows webhook (see [Microsoft Teams](#microsoft-teams)). Optional `email`, `webhookLabel` (truncated to 100 chars). |
+| `set-web-push` | Register a browser Web Push subscription for the signed-in user. |
+| `send-test` | Queue a test card to the caller's connected `teams` channel. Other channel types return `400`. |
+| `delete-channel` | Remove a channel by type (`email`, `webhook`, `telegram`, `web-push`, etc.). |
+| `set-alert-rules` | Replace the caller's alert-rules set in one shot. |
+| `set-quiet-hours` | Set do-not-disturb windows. |
+| `set-digest-settings` | Configure digest cadence and channel routing. |
+| `set-notification-config` | Per-variant notification config: `variant` (required), `enabled`, `eventTypes`, `sensitivity` (`all`/`high`/`critical`), `channels`, `aiDigestEnabled`, `digestMode` (`realtime`/`daily`/`twice_daily`/`weekly`), `digestHour`, `digestTimezone`, `countries`, `tickers`, `chokepoints`, `orbitalSites`, `reservoirAlert`. Validation errors return structured 400 codes (e.g. `COUNTRIES_MUST_BE_ARRAY`, `TICKERS_LIMIT_EXCEEDED`, `CHOKEPOINTS_MUST_BE_ARRAY`, `CHOKEPOINTS_INVALID`, `ORBITAL_SITES_INVALID`, `RESERVOIR_ALERT_INVALID`). |
+
+All actions require Clerk bearer + PRO, and PRO here specifically means a **billed entitlement row** at `tier >= 1`. A Clerk session whose role is `pro` but which has no entitlement row does **not** qualify, unlike the gateway's tier-1 REST gate: notification delivery is enforced a second time inside Convex (`assertProEntitlement`), so the edge gate returns the clean `403 pro_required` rather than letting the request fail deeper with a less useful error. Invalid actions return `400 Unknown action`. Requests are forwarded to Convex via `RELAY_SHARED_SECRET`.
+
+A caller without a billed row gets `403 pro_required` only when the entitlement is confirmed non-Pro. When entitlement verification is itself in doubt the gate follows the shared billing-verification contract instead: `503` with `Retry-After` and `X-Billing-Verification` for `entitlement_verification_unavailable` / `renewal_verification_pending` / `renewal_verification_failed`, and `403 subscription_lapsed` for a confirmed lapse. See [Error handling](/usage-errors).
+
+Clients should honor that `503` with at least one retry at the advertised `Retry-After` before surfacing a failure — the dashboard's own service layer (`src/services/notification-channels.ts`) makes exactly one bounded retry. For `entitlement_verification_unavailable` specifically, retrying earlier than `Retry-After` is wasted: that answer is briefly negative-cached server-side, so an early retry is served the same result. The two `renewal_verification_*` codes are not negative-cached, but their delay reflects a real provider re-check or cooldown, so retrying early is still answered from the same state.
+
+- **Idempotency**: optional `Idempotency-Key` supported on `POST /api/notification-channels`. Retrying the same key with an identical body replays the original response instead of applying the channel action again. The exception is a successful webhook `set-channel`: its response carries a one-time signing secret, so it is never cached, and a retry registers the URL again with a new secret.
+
+## Chokepoint disruption alerts
+
+A rule receives `chokepoint_disruption` only when its `eventTypes` lists it. A rule with an empty `eventTypes` list, which otherwise means every event type, does not receive it. Listing it does not narrow the rule's other alerts.
+
+- **When it fires**: checked after each 6-minute chokepoint refresh. A chokepoint's `disruptionScore` is its standing threat level (war zone 70, critical 40, high 30, elevated 15, normal 0) plus live signals: navigational warnings, AIS disruption and a transit drop. An alert fires when the score is at least 50, the red band on the dashboard, and the live signals add at least 15 points. A war-zone chokepoint such as Hormuz therefore alerts on new activity, not on its standing level.
+- **Re-arming**: after an alert, the chokepoint can alert again only once the score drops below 40 or the live signals drop below 5 points, in a reading where the navigational-warning and AIS sources (and transit data, if a transit drop was part of the alert) were available. A chokepoint alerts at most once every 12 hours.
+- **Severity**: always `critical`. Like other queue events, it is delivered to real-time rules only, not digests.
+- **Scope**: `chokepoints` takes ids from the [chokepoint registry](/methodology/chokepoints) (`suez`, `hormuz_strait`, `bab_el_mandeb`, `panama`, and so on). Unknown ids are dropped, and a list with no known id is rejected with `400 CHOKEPOINTS_INVALID`. An empty or absent list means every chokepoint. A `countries` scope does not filter this event, because it carries no country.
+- **Payload**: `title`, `source` (`Chokepoint Monitor`), `chokepointId`, `chokepointName`, `disruptionScore`, `status` (`red`), `activeWarnings`, `congestionLevel`, `triggeredAt`, and `coalesceKey`, which names one alert and stays the same if the relay re-sends it. Webhook deliveries also carry `link`, the dashboard URL.
+
+`POST /api/notify` rejects this event type: only the relay publishes it.
+
+## Watched-site satellite alerts
+
+Two event types tell a user about the watched sites they list: `orbital_imaging_window` and `orbital_site_change`. A rule receives each one only when its `eventTypes` lists it, and only for sites in its `orbitalSites` list. An empty or absent `orbitalSites` list means no watched-site alerts. Listing either type does not narrow the rule's other alerts.
+
+- **Imaging windows**: after each daily watched-site refresh, a site alerts for the open optical and radar satellite passes (Sentinel-2, Landsat, Sentinel-1 and the other open archives) that will image it within the next 24 hours. Commercial, weather and military satellites never alert. Each pass alerts once. All new passes of one site in one refresh arrive as one alert, and a site sends at most one imaging-window alert every 12 hours.
+- **Confirmed changes**: a site alerts when its radar change flag moves to confirmed, meaning a later pass repeated a change in the imagery statistics. A flag that is only raised does not alert, and a flag that stays confirmed does not alert again. A site sends at most one change alert every 24 hours, and a confirmation older than seven days never alerts. While change detection is in its review period, no change alerts are sent.
+- **Severity**: always `critical`. Like other queue events, they are delivered to real-time rules only, not digests.
+- **Scope**: `orbitalSites` takes watched-site ids such as `chokepoint:hormuz_strait` or `conflict-zone:sudan`, at most 25 per rule. A longer list or a malformed id is rejected with `400 ORBITAL_SITES_INVALID`. Asking for either event type, or listing a site, needs a Pro entitlement and otherwise returns `402 PRO_REQUIRED`. A `countries` scope does not filter these events.
+- **Payload**: `title`, `source` (`Orbital Watch`), `siteId`, `siteName`, `triggeredAt` and `coalesceKey`, which names one alert and stays the same if the relay re-sends it. Imaging-window alerts add `windows`, up to five passes with `noradId`, `name`, `profileId`, `category` and `time`. Change alerts add `itemId`, the archive scene that confirmed the change, and `platform`.
+
+`POST /api/notify` rejects both event types: only the watched-site seeder publishes them.
+
+## Reservoir water level alerts
+
+A Pro rule receives `reservoir_level_alert` only when its `eventTypes` lists it. A rule with an empty `eventTypes` list does not receive it, and listing it does not narrow the rule's other alerts. The rule's `reservoirAlert` object says which reservoirs it follows and when to alert.
+
+- **Settings**: `reservoirAlert` is `{ reservoirs, belowPercent?, seasonalDrop? }`. `reservoirs` holds registry ids such as `nasser` or `gerd`, at most 50. An empty or absent list means no reservoir alerts. `belowPercent` is a whole number from 1 to 50: alert when the latest measured level is below that percent of the reservoir's own measured range (0 is the lowest level measured, 100 the highest). `seasonalDrop: true` alerts when the latest measured level is beyond the reservoir's seasonal baseline on the low side. A rule may set either or both; with neither it never fires. A reservoir with too little history for a measured range or a seasonal baseline cannot trigger the matching criterion.
+- **Measurement dates**: levels come from NASA ICESat-2 lidar and reach the dashboard about two months after the pass. One alert is sent when a reservoir gets a new measurement date, never on a clock, and its title and `measuredAt` give that date. An event without a valid measurement date matches no rule. The first seed run after launch only records the current measurements, so nobody is alerted about history.
+- **Baseline**: the seasonal baseline is the one the Strategic Water Levels seeder already computes (`seasonalBaseline` in `scripts/_reservoir-levels.mjs`); the alert carries its verdict and adds no second baseline.
+- **Severity**: `medium`. A level measured days ago is never urgent, so the alert does not break through quiet hours: the default critical-only override silences it, `silence_all` silences it, and `batch_on_wake` holds it and sends it in the batch when quiet hours end. Outside quiet hours it reaches real-time rules even when sensitivity is critical only, because the per-reservoir opt-in and the rule's own threshold are the filters. It is delivered to real-time rules only, not digests.
+- **Scope**: a `countries` scope does not filter this event. Invalid settings return `400 RESERVOIR_ALERT_INVALID`. Asking for the event type, or listing a reservoir, needs a Pro entitlement. A confirmed non-Pro caller gets `403 pro_required` from the public endpoint; `402 PRO_REQUIRED` is the answer of the Convex layer behind it.
+- **Payload**: `title`, `source` (`NASA ICESat-2 lidar`), `reservoirId`, `reservoirName`, `reservoirCountry`, `measuredAt` (`YYYY-MM-DD`), `levelM` (metres above the EGM2008 geoid), `percentOfRange`, `seasonalAnomalyM`, `seasonalZ`, `beyondSeasonalBaseline`, and `coalesceKey`, which names one measurement and stays the same if the relay re-sends it.
+
+`POST /api/notify` rejects this event type: only the reservoir seeder publishes it.
+
+## National air traffic collapse alerts
+
+`aviation_traffic_collapse` tells a user that airline departures have collapsed across a country, as in a national ground stop or an air traffic control system failure, and again when they recover. It covers the US, the UK, France, Germany, Spain and Italy. It is a broadcast type: a rule whose `eventTypes` is empty receives it, and a rule that lists event types receives it only when the list includes it.
+
+- **When it fires in the US**: checked every 5 minutes against the OpenSky air traffic series. The signal is the number of airline aircraft climbing out at low altitude over the contiguous US, which counts departures. Each 5-minute bin is compared with the median of the same New York local-time bin on the four prior weeks, or with the most recent of those weeks when it is lower, and at least two of those weeks must be recorded, so alerts start two weeks after the series begins. A collapse fires when two bins in a row read below 40% of that median. Bins whose median is under a quarter of the day's busiest bin are skipped, because overnight counts are too small for a ratio to mean anything.
+- **Feed checks**: before a collapse fires, OpenSky must still be alive (Europe's airborne count at least 30% of its own same-time median) and must still see the US (its US aircraft count at least 80% of Wingbits' count for the same bin, or 60% of its own median when no Wingbits point exists). A failing feed blocks the alert instead of raising one.
+- **Europe**: each European country counts airline aircraft climbing out within 48 km of its main airports (for the UK: Heathrow, Gatwick, Manchester, Stansted, Edinburgh, Birmingham, Glasgow and Bristol). A country has a few to about 17 departures per 5 minutes, so it is compared over a 20-minute window, in its own local time, and fires below 30% rather than 40%. A window under 30 departures is skipped as quiet, so Italy is checked only around its daily peaks. The feed check uses the US airborne count, and the coverage check needs 40% of the country's usual aircraft near its airports. The Netherlands has too few departures to check. The most-recent-week cap matters most here: after the 2026-10-25 winter timetable, German departures wound down earlier in the evening and started later in the morning, and against a median still made of summer weeks two ordinary days read as collapses.
+- **Recovery**: once two bins in a row read above 70% of the median, a recovery event follows with the onset of the drop it closes.
+- **Severity**: the collapse is `critical`, so it reaches real-time rules and breaks through quiet hours under the default critical-only override. The recovery is `high`. It is delivered to real-time rules even when sensitivity is critical only, but quiet hours treat it as non-critical: the default override and `silence_all` silence it, and `batch_on_wake` holds it for the batch when quiet hours end. Neither event is delivered to digests.
+- **Scope**: each event carries the country it is about in `countryCode` (`US`, `GB`, `FR`, `DE`, `ES` or `IT`). A rule with a `countries` scope receives it only when the list includes that country.
+- **Validation**: replaying 111 days of the adsb.lol archive for the US, holidays and the 2026-11-01 DST change included, raises one collapse, for the 2026-11-13 national ground stop, 16 minutes after the official stop. Replaying 97 European days (2026-08-10 to 2026-11-14) raises one collapse, for the UK NATS flight-plan failure of 2026-09-08, and nothing in France, Germany, Spain or Italy, including Italy's partial air traffic control strike of 2026-09-30 and the weeks after the winter timetable change.
+- **Payload**: `title`, `source` (`WorldMonitor air traffic (OpenSky)`), `countryCode`, `kind` (`collapse` or `recovery`), `ratio` (departures as a share of the median, three decimals), `onset` (ISO time of the first low bin), and `coalesceKey`, which names one event and stays the same if the relay re-sends it.
+
+`POST /api/notify` rejects this event type: only the relay publishes it.
+
+## Webhook delivery contract
+
+When an alert fires, registered webhook URLs receive:
+
+- **Method**: `POST`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-WM-Delivery-Id: <uuid>`, unique per delivery attempt
+  - `X-WM-Event: <eventType>`, the same value as the body's `eventType`
+  - `X-WM-Timestamp: <unix seconds>`
+  - `X-WM-Signature: sha256=<hex HMAC-SHA256(signingSecret, timestamp + "." + deliveryId + "." + rawBody)>`
+- **Body** (envelope v1). Realtime alerts from the notification relay:
+  ```json
+  {
+    "version": "1",
+    "eventType": "rss_alert",
+    "severity": "high",
+    "timestamp": 1776578400000,
+    "payload": {
+      "title": "...", "source": "...", "link": "https://...",
+      "corroborationCount": 1,
+      "corroboration": { "state": "single-publisher", "publishers": 1 }
+    },
+    "variant": "full"
+  }
+  ```
+  `corroboration` is present on news alerts whose story the digest counted. `state` is `single-publisher` or `corroborated`, and `publishers` is the number of distinct publisher families carrying the story. It describes coverage, not accuracy: `corroborated` means independent publishers report the story, not that it is confirmed. Text channels (Telegram, Slack, Discord, email, browser push) show the same verdict as one token, for example `Source: Reuters · Coverage: single publisher`.
+  A chokepoint disruption alert:
+  ```json
+  {
+    "version": "1",
+    "eventType": "chokepoint_disruption",
+    "severity": "critical",
+    "timestamp": 1776578400000,
+    "payload": {
+      "title": "Strait of Hormuz: disruption score 72/100",
+      "source": "Chokepoint Monitor",
+      "chokepointId": "hormuz_strait",
+      "chokepointName": "Strait of Hormuz",
+      "disruptionScore": 72,
+      "status": "red",
+      "activeWarnings": 2,
+      "congestionLevel": "elevated",
+      "triggeredAt": "2026-10-17T12:00:00.000Z",
+      "coalesceKey": "chokepoint_disruption:hormuz_strait:2026-10-17T12:00:00.000Z",
+      "link": "https://worldmonitor.app/"
+    }
+  }
+  ```
+  Digests from the digest producer:
+  ```json
+  {
+    "version": "1",
+    "eventType": "digest",
+    "stories": [{ "title": "...", "severity": "high", "phase": "...", "sources": ["..."], "corroboration": { "state": "corroborated", "publishers": 3 } }],
+    "summary": "...",
+    "storyCount": 12
+  }
+  ```
+  Each story's `corroboration` is the verdict the dashboard showed for it: `state` is `single-publisher`, `corroborated` or `tier4-only` (every publisher is a declared tier-4 aggregator or blog). It is omitted when unknown. Chat and email digests show it on each item as `Coverage: …`.
+
+### Signing secret
+
+Each time a webhook URL is saved through `set-channel`, the response includes a new `signingSecret` (`whsec_...`). It is returned only once and stored encrypted. Saving the URL again issues a new secret and invalidates the old one, which is also how to rotate it.
+
+### Verifying a delivery
+
+1. Read the raw request body before parsing it.
+2. Compute `hex(HMAC-SHA256(signingSecret, X-WM-Timestamp + "." + X-WM-Delivery-Id + "." + rawBody))`.
+3. Reject the delivery unless `X-WM-Signature` is `sha256=` followed by exactly 64 hex characters, then compare those bytes with yours using a constant-time comparison.
+4. Reject deliveries whose `X-WM-Timestamp` is more than 5 minutes from your clock, and deduplicate on `X-WM-Delivery-Id`.
+
+```js
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function verify(rawBody, headers, signingSecret) {
+  const ts = headers['x-wm-timestamp'];
+  const id = headers['x-wm-delivery-id'];
+  const sig = headers['x-wm-signature'] ?? '';
+  if (!ts || !id || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+  const match = /^sha256=([0-9a-f]{64})$/.exec(sig);
+  if (!match) return false;
+  const expected = createHmac('sha256', signingSecret).update(`${ts}.${id}.${rawBody}`).digest();
+  return timingSafeEqual(Buffer.from(match[1], 'hex'), expected);
+}
+```
+
+Webhooks registered before signing was introduced have no secret and arrive without `X-WM-Signature`. The settings page marks them **Unsigned**; remove and re-add the URL to get a secret.
+
+<Warning>
+The envelope version is **shared across two producers** (`notification-relay`, `seed-digest-notifications`). Bumping it requires coordinated updates.
+</Warning>
+
+### `POST /api/notify`
+
+Authenticated event-publish endpoint for PRO callers. Requires Clerk bearer auth and an active PRO entitlement, then enqueues the accepted event into the notification queue. Relay-internal control events such as `flush_quiet_held` and `channel_welcome` are reserved and rejected.
+
+Errors: 401 (missing/invalid JWT), 403 `pro_required` — and, like every Pro-gated endpoint here, the shared billing-verification contract when entitlement verification is itself in doubt: `503` with `Retry-After` and `X-Billing-Verification` for `entitlement_verification_unavailable` / `renewal_verification_pending` / `renewal_verification_failed`, and `403 subscription_lapsed` for a confirmed lapse. See [Error handling](/usage-errors).
+
+- **Idempotency**: optional `Idempotency-Key` supported. Retrying the same key with an identical body replays the original enqueue response instead of publishing the notification again.
+- **Unknown outcome**: if the queue write times out, the endpoint answers `503 publish_outcome_unknown` with `Retry-After: 180`, because the event may already be queued. Retry only if a duplicate event is acceptable. When the server stored the `Idempotency-Key`, the key stays locked for up to 180 seconds, and a keyed retry in that time gets `409 idempotency_conflict` instead of a second publish. If the server could not store the key, it still publishes and holds no lock. After the lock expires, or when there was none, a retry runs again and can duplicate the event. See [Error handling](/usage-errors).
+
+#### Caller-submitted field policy
+
+`payload.title`, `payload.source`, `payload.link`, `payload.url` and `payload.description` reach the email subject and body, the Telegram/Slack/Discord text, and the web-push click target, so they are shaped at this boundary before the event is queued (issue #8397). Fields are neutralised individually — an event is never rejected for its content:
+
+- **`title`** — control characters, newlines and invisible formatting are stripped, the value is truncated to 200 characters, clickable URL tokens are replaced with `[link removed]`, and the result is prefixed `Community alert: ` so caller copy is never rendered as WorldMonitor's own.
+- **`source`** — preserved as submitted, unless it impersonates a first-party identity (matched after Unicode normalisation, confusable folding and punctuation stripping), in which case it becomes the neutral label `Community alert`. Real publisher attribution such as `Reuters` is kept.
+- **`link` / `url`** — must be `https` with no embedded credentials; anything else becomes the dashboard URL. An off-origin article link is delivered to text channels with its destination host disclosed inline (`<url> (source: <host>)`), and is never used as the web-push click target, which stays first-party.
+- **`description`** — same shaping as `title`, truncated to 400 characters.
+- `importanceScore` and `corroborationCount` are stripped; they are computed server-side.
+
+A `200` response carries `warnings` when any field was rewritten, so a caller can detect the change instead of discovering it from a malformed notification:
+
+```json
+{ "ok": true, "warnings": ["source_rewritten", "link_rewritten"] }
+```
+
+The field is omitted entirely when nothing was rewritten, so callers that ignore unknown keys are unaffected.
+
+## Telegram
+
+### `GET /api/telegram-feed`
+
+First-party browser path for the topic-tabbed Telegram Intel panel. Accepts `limit`, `topic`, and `channel`; there is no per-user (`userId`) form. Requires the dashboard session credential (`wms_`) and responds `private, max-age=30` — it is not publicly cacheable, and an uncredentialed request returns `401` with `no-store`. Message text is R4.
+
+For programmatic and partner access use the authenticated RPC [`GET /api/intelligence/v1/list-telegram-feed`](/panels/telegram-intel) instead.
+
+## YouTube
+
+### `GET /api/youtube/embed?videoId=...`
+
+Hosted YouTube iframe wrapper retained for compatibility. The current web app embeds YouTube directly; the desktop app uses the local sidecar's `/api/youtube-embed` route to handle WKWebView autoplay restrictions. Neither uses this hosted route.
+
+`origin` (the YouTube player origin) accepts enumerated app origins, team-pinned Vercel previews, localhost / `127.0.0.1`, and `tauri://localhost`. `parentOrigin` (the iframe `postMessage` target) accepts that same list plus `http(s)://tauri.localhost` and matching single-label `*.tauri.localhost` hosts. Vendor subdomains such as `clerk.worldmonitor.app` and `abacus.worldmonitor.app` remain excluded. A parent-only Tauri URL supplied as `origin` is rejected and falls back to the apex origin (`worldmonitor.app`).
+
+### `GET /api/youtube/live?channel=<handle>` or `?videoId=<11-char-id>`
+
+Names a YouTube video for channel management. `videoId` (11-char YouTube id) returns the video's `title` and author (`channelName`) from YouTube oEmbed, fetched directly; the response is cached 1 hour. If oEmbed fails, the response is `200` with null `title` and `channelName` and is not cached. When both params are sent, the `videoId` lookup answers.
+
+Channel live detection is retired. A valid `channel` (handle with or without `@`, or a `UC…` channel id) without `videoId` returns `410 {"error":"channel_live_detection_retired"}`, cached 1 day, with no request to YouTube or the Railway relay. At least one of the two params is required; returns `400 Missing channel or videoId parameter` otherwise, and `400` for a malformed handle, channel id or video id.
+
+## Slack integration
+
+### `POST /api/slack/oauth/start`
+
+Authenticated (Clerk JWT + PRO). Body is empty. Server generates a one-time CSRF state token, stores the caller's userId in Upstash keyed by that state (10-min TTL), and returns the Slack authorize URL for the frontend to open in a popup.
+
+```json
+{ "oauthUrl": "https://slack.com/oauth/v2/authorize?client_id=...&scope=incoming-webhook&..." }
+```
+
+Errors: 401 (missing/invalid JWT), 403 `pro_required`, 503 (OAuth not configured or Upstash unavailable). A 503 here can **also** be the retryable billing-verification denial — `entitlement_verification_unavailable` / `renewal_verification_pending` / `renewal_verification_failed`, carrying `Retry-After` and `X-Billing-Verification`; a confirmed lapse is `403 subscription_lapsed`. Branch on the `code` field rather than the status alone, since the misconfiguration 503 is not retryable. See [Error handling](/usage-errors).
+
+### `GET /api/slack/oauth/callback`
+
+Unauthenticated — the popup lands here after Slack redirects. Validates the state token, exchanges `code` for an incoming-webhook URL, AES-256-GCM encrypts the webhook, and stores it in Convex. Returns a tiny HTML page that `postMessage`s the opener and closes.
+
+## Discord integration
+
+### `POST /api/discord/oauth/start`
+
+Authenticated (Clerk JWT + PRO). Same shape as the Slack start route — returns `{ oauthUrl }` for a popup, and the same error set, including the billing-verification 503/403 codes described there.
+
+### `GET /api/discord/oauth/callback`
+
+Unauthenticated. Exchanges `code`, stores the guild webhook, and `postMessage`s the opener.
+
+## Microsoft Teams
+
+Teams has no OAuth flow. The user creates a webhook workflow in Teams (channel **Workflows** → **Send webhook alerts to a channel**, which uses the **When a Teams webhook request is received** trigger) and registers its URL with `set-channel` and `channelType: "teams"`.
+
+The gateway accepts the URL only when it passes the webhook checks above and is a Microsoft Workflows webhook:
+
+| Host | Path prefix |
+|------|-------------|
+| `*.environment.api.powerplatform.com` | `/powerautomate/automations/direct/` |
+| `*.logic.azure.com` | `/workflows/` |
+
+It must use the default HTTPS port and carry no credentials. Office 365 connector URLs (`*.webhook.office.com`) are refused: Microsoft retired those connectors in May 2026. The relay repeats the host check and the private-address check at every delivery, pins the connection to the vetted address, and does not follow redirects. A `404` or `410` from the workflow deactivates the channel.
+
+Realtime alerts, quiet-hours batches and digests are posted as an Adaptive Card (`type: "message"` with one `application/vnd.microsoft.card.adaptive` attachment). An alert card carries the title, severity, country, source, coverage (the same `Coverage:` token as the text channels, when the relay knows it) and an **Open original report** button that names the destination host. A digest card carries the executive summary, the stories with their sources and coverage, and the brief link, and drops stories from the end to stay under Teams' 28 KB message limit. The workflow must allow **Anyone** to trigger it; a workflow restricted to tenant users rejects the unauthenticated POST. A workflow keeps running when its creator leaves only if another owner remains, and steps that use the departed user's connections can fail ([Microsoft: share a cloud flow](https://learn.microsoft.com/en-us/power-automate/create-team-flows)); give the workflow a second owner.
+
+Microsoft references: [Create incoming webhooks with Workflows](https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498), [Teams webhook trigger](https://learn.microsoft.com/en-us/connectors/teams/#microsoft-teams-webhook), [trigger URL changes](https://learn.microsoft.com/en-us/troubleshoot/power-platform/power-automate/flow-run-issues/triggers-troubleshoot).

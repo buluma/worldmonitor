@@ -15,7 +15,6 @@
    - [MapContainer (Adapter)](#mapcontainer)
    - [MapPopup (Popup Builder)](#mappopup)
 4. [Virtual Scrolling](#virtual-scrolling)
-   - [VirtualList](#virtuallist)
    - [WindowedList\<T\>](#windowedlistt)
 5. [Search](#search)
    - [SearchModal](#searchmodal)
@@ -57,7 +56,7 @@ communicates through method calls, callbacks, and a handful of
 |---|---|
 | Panel subclasses | ~35 |
 | Map components | 4 (DeckGLMap, MapComponent, MapContainer, MapPopup) |
-| Virtual scrolling | 2 (VirtualList, WindowedList) |
+| Virtual scrolling | 1 (WindowedList) |
 | Search | 1 (SearchModal) |
 | Modals & widgets | ~9 |
 | **Total** | **~51** |
@@ -109,7 +108,6 @@ const panel = new Panel(options);
 | `toggle()` | `(): void` | Toggles between show/hide. |
 | `setNewBadge()` | `(): void` | Adds the "NEW" pill next to the title. |
 | `clearNewBadge()` | `(): void` | Removes the "NEW" pill. |
-| `getId()` | `(): string` | Returns the panel id. |
 | `resetHeight()` | `(): void` | Clears any user-set height override. |
 | `destroy()` | `(): void` | Removes element, cleans up listeners. |
 
@@ -214,7 +212,7 @@ const map = new DeckGLMap(container, initialState);
 #### Rendering Stack
 
 Built on **MapLibre GL JS** (`maplibregl.Map`) with a **deck.gl** overlay
-(`MapboxOverlay` from `@deck.gl/mapbox`). The following deck.gl layer types
+(`MapLibreOverlay` from `@deck.gl/maplibre`). The following deck.gl layer types
 are used:
 
 - `GeoJsonLayer` — country polygons, cables, pipelines, waterways
@@ -414,50 +412,7 @@ returns sanitized HTML.
 
 **File:** `src/components/VirtualList.ts`
 
-Two complementary strategies for rendering large lists without creating
-thousands of DOM nodes.
-
-### VirtualList
-
-Fixed-height, DOM-recycling virtual scroller.
-
-#### Constructor
-
-```ts
-interface VirtualListOptions {
-  itemHeight: number;          // px height per row
-  overscan?: number;           // extra rows above/below viewport (default 3)
-  container: HTMLElement;      // parent element
-  renderItem: (index: number, el: HTMLElement) => void;
-  onRecycle?: (el: HTMLElement) => void;
-}
-
-const vl = new VirtualList(options);
-```
-
-#### Methods
-
-| Method | Signature | Description |
-|---|---|---|
-| `setItemCount()` | `(n: number): void` | Total number of items. |
-| `refresh()` | `(): void` | Re-render visible items from current scroll position. |
-| `scrollToIndex()` | `(i: number): void` | Programmatic scroll. |
-| `getViewport()` | `(): { start: number; end: number }` | Currently visible range. |
-| `destroy()` | `(): void` | Cleanup. |
-
-#### DOM Structure
-
-```
-div.virtual-viewport
- └─ div.virtual-content           ← total height = itemHeight × itemCount
-     ├─ (spacer top)
-     ├─ div.virtual-item          ← pooled, reused via renderItem()
-     ├─ div.virtual-item
-     ├─ ...
-     └─ (spacer bottom)
-```
-
----
+`WindowedList` renders large lists in chunks so a panel does not create a DOM node for every row.
 
 ### WindowedList\<T\>
 
@@ -590,12 +545,12 @@ domain-specific markup.
 
 | Field | Detail |
 |---|---|
-| **File** | `src/components/CIIPanel.ts` (150 lines) |
+| **File** | `src/components/CIIPanel.ts` |
 | **Panel ID** | `cii` |
-| **Purpose** | Ranks countries by a composite instability score (U/C/S/I sub-scores). |
-| **Key methods** | `setShareStoryHandler()`, `refresh(forceLocal?)`, `getScores()` |
+| **Purpose** | Renders server-authoritative CII v14 scores for 31 Tier-1 countries from cached risk-score ingestion, with local fallback scoring when forced or no cached data is available. |
+| **Key methods** | `setShareStoryHandler()`, `setCountryClickHandler()`, `refresh(forceLocal?)`, `renderFromCached(cached)`, `getScores()` |
 | **DOM** | `.cii-list` → `.cii-country` each with header (emoji flag, name, score, trend arrow, share button), colour bar, sub-score row (U/C/S/I). |
-| **Services** | `calculateCII()`, `getCSSColor` |
+| **Services** | `toCountryScore()`, `calculateCII()` fallback path, `getCSSColor` |
 | **Variant** | `full` only |
 
 #### GdeltIntelPanel
@@ -679,8 +634,8 @@ domain-specific markup.
 | **Panel ID** | `live-news` |
 | **Purpose** | Embedded YouTube live-stream player with channel switching. |
 | **DOM** | YouTube IFrame player, channel switcher bar, mute/live buttons. |
-| **Services** | `fetchLiveVideoId`, `isDesktopRuntime`, `getRemoteApiBaseUrl` |
-| **Variant channels** | `tech` → `TECH_LIVE_CHANNELS` (Bloomberg, Yahoo Finance, CNBC, NASA TV). `world` / `full` → `FULL_LIVE_CHANNELS` (Bloomberg, Sky, Euronews, DW, CNBC, France24, Al Arabiya, Al Jazeera). |
+| **Services** | `openLiveVideo` (`src/services/live-video/session.ts`, streams from `src/config/live-video-sources.ts`), `isDesktopRuntime` |
+| **Variant channels** | `tech` → `TECH_LIVE_CHANNELS` (Bloomberg, Yahoo Finance, NASA TV). `world` / `full` → `FULL_LIVE_CHANNELS` (Bloomberg, Sky, Euronews, DW, France24, Al Arabiya, Al Jazeera). |
 | **Notes** | Idle pause after 5 minutes of inactivity. |
 
 #### PredictionPanel
@@ -953,11 +908,11 @@ domain-specific markup.
 
 | Field | Detail |
 |---|---|
-| **File** | `src/components/StatusPanel.ts` (251 lines) |
+| **File** | `src/components/StatusPanel.ts` |
 | **Panel ID** | `status` |
-| **Purpose** | Internal feed & API health status dashboard. |
-| **Key methods** | `updateFeed(name, status)`, `updateApi(name, status)`, `setFeedDisabled(name)` |
-| **DOM** | `div.status-panel-container` with toggle button, sections: `feeds-list`, `apis-list`, `storage-info`. |
+| **Purpose** | Write-only feed & API status model plus the digest coverage row (#7085) — its historical rendering (feed/API lists, storage info, toggle) was removed. |
+| **Key methods** | `updateFeed(name, status)`, `updateApi(name, status)`, `updateDigestCoverage(coverage)` |
+| **DOM** | `div.status-panel-container` holding only `div.digest-coverage-row` (`role="status"`, `aria-live="polite"`); self-mounts into `footer.site-footer` on the first coverage update. Feed/API maps have no DOM — nothing reads `getFeeds()`/`getApis()`. |
 | **Variant data** | `tech` → `TECH_FEEDS` / `TECH_APIS`. `world` / `full` → `WORLD_FEEDS` / `WORLD_APIS`. |
 
 #### RuntimeConfigPanel
@@ -999,14 +954,6 @@ small UI affordances.
 | **Methods** | `show(signals)`, `showSignal(signal)`, `showAlert(alert)`, `setLocationClickHandler()`, `hide()` |
 | **Audio** | Inline base64-encoded WAV notification sound. |
 | **Types** | `CorrelationSignal`, `UnifiedAlert` |
-
-### CountryIntelModal
-
-| Field | Detail |
-|---|---|
-| **File** | `src/components/CountryIntelModal.ts` |
-| **Purpose** | AI-generated country intelligence briefing modal. |
-| **Services** | `getCSSColor`, `country-instability` types. |
 
 ### CountryBriefPage
 
@@ -1053,15 +1000,6 @@ small UI affordances.
 | **Exported** | `maybeShowDownloadBanner()` |
 | **Platform detection** | `macos-arm64`, `macos-x64`, `windows`, `linux` |
 
-### CommunityWidget
-
-| Field | Detail |
-|---|---|
-| **File** | `src/components/CommunityWidget.ts` |
-| **Purpose** | Small floating widget linking to GitHub Discussions. |
-| **Exported** | `mountCommunityWidget()` |
-| **Notes** | Dismissible via `localStorage`. |
-
 ### PizzIntIndicator
 
 | Field | Detail |
@@ -1080,15 +1018,6 @@ small UI affordances.
 | **Key methods** | `setOnSignalClick()`, `setOnAlertClick()` |
 | **Notes** | Audio notification for new findings. `full` variant only. |
 
-### VerificationChecklist
-
-| Field | Detail |
-|---|---|
-| **File** | `src/components/VerificationChecklist.ts` |
-| **Purpose** | Bellingcat-style open-source verification checklist (8 checks). |
-| **Framework** | **Preact** component (`extends Component`) — the only Preact component in the codebase. |
-| **Notes** | Verdict scoring based on completed checks. |
-
 ---
 
 ## Variant Visibility Matrix
@@ -1100,7 +1029,7 @@ small UI affordances.
 | MapComponent | ✅ | ✅ | ✅ |
 | MapContainer | ✅ | ✅ | ✅ |
 | MapPopup | ✅ | ✅ | ✅ |
-| VirtualList / WindowedList | ✅ | ✅ | ✅ |
+| WindowedList | ✅ | ✅ | ✅ |
 | SearchModal | ✅ | ✅ | ✅ |
 | NewsPanel | ✅ | ✅ | ✅ |
 | LiveNewsPanel | ✅ | ✅ | — |
@@ -1138,16 +1067,13 @@ small UI affordances.
 | LanguageSelector | ✅ | ✅ | ✅ |
 | PlaybackControl | ✅ | ✅ | ✅ |
 | SignalModal | ✅ | ✅ | ✅ |
-| CountryIntelModal | ✅ | ✅ | — |
 | CountryBriefPage | ✅ | ✅ | — |
 | CountryTimeline | ✅ | ✅ | — |
 | StoryModal | ✅ | ✅ | ✅ |
 | MobileWarningModal | ✅ | ✅ | ✅ |
 | DownloadBanner | ✅ | ✅ | ✅ |
-| CommunityWidget | ✅ | ✅ | ✅ |
 | PizzIntIndicator | ✅ | — | — |
 | IntelligenceFindingsBadge | ✅ | — | — |
-| VerificationChecklist | ✅ | ✅ | — |
 
 ---
 
@@ -1228,7 +1154,6 @@ graph TD
 
     subgraph Modals["Modals & Widgets"]
         SIG[SignalModal]
-        CIM[CountryIntelModal]
         CBP[CountryBriefPage]
         CTL[CountryTimeline]
         STM[StoryModal]
@@ -1338,19 +1263,17 @@ export { MapComponent } from './Map';
 export { MapContainer } from './MapContainer';
 
 // Scrolling
-export { VirtualList, WindowedList } from './VirtualList';
+export { WindowedList } from './VirtualList';
 
 // Search
 export { SearchModal } from './SearchModal';
 
 // Modals & widgets
 export { SignalModal } from './SignalModal';
-export { CountryIntelModal } from './CountryIntelModal';
 export { CountryBriefPage } from './CountryBriefPage';
 export { CountryTimeline } from './CountryTimeline';
 export { PlaybackControl } from './PlaybackControl';
 export { LanguageSelector } from './LanguageSelector';
-export { VerificationChecklist } from './VerificationChecklist';
 // ... and standalone functions
 ```
 

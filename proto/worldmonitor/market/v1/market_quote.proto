@@ -3,6 +3,7 @@ syntax = "proto3";
 package worldmonitor.market.v1;
 
 import "buf/validate/validate.proto";
+import "sebuf/http/annotations.proto";
 
 // MarketQuote represents a stock or index quote from Finnhub or Yahoo Finance.
 message MarketQuote {
@@ -21,6 +22,44 @@ message MarketQuote {
   double change = 5;
   // Sparkline data points (recent price history).
   repeated double sparkline = 6;
+}
+
+// Requested symbols are resolved seed-first: the fixed Railway seed snapshot
+// answers without any upstream call, and only the remaining symbols are looked
+// up through the bounded, Redis-cached quote provider. (Detached: kept out of
+// the public spec.)
+
+// MarketQuoteUnavailableReason explains why a requested symbol produced no
+// quote. Every symbol that survives normalization gets either a quote or one
+// of these reasons.
+enum MarketQuoteUnavailableReason {
+  // Unspecified reason.
+  MARKET_QUOTE_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  // The symbol is absent from the seed snapshot and the provider has no quote for it.
+  MARKET_QUOTE_UNAVAILABLE_REASON_NOT_FOUND = 1;
+  // The provider lookup failed. Transient, and deliberately not cached.
+  MARKET_QUOTE_UNAVAILABLE_REASON_PROVIDER_ERROR = 2;
+  // The provider rate-limited the lookup.
+  MARKET_QUOTE_UNAVAILABLE_REASON_PROVIDER_RATE_LIMITED = 3;
+  // No credentials are configured for the quote provider, so the gap was not filled.
+  MARKET_QUOTE_UNAVAILABLE_REASON_PROVIDER_NOT_CONFIGURED = 4;
+  // Dropped by the per-request symbol cardinality bound before any lookup.
+  MARKET_QUOTE_UNAVAILABLE_REASON_REQUEST_LIMIT_EXCEEDED = 5;
+  // A seed miss the request's bounded upstream budget (count or deadline) could not cover.
+  MARKET_QUOTE_UNAVAILABLE_REASON_UPSTREAM_BUDGET_EXHAUSTED = 6;
+  // The seed snapshot could not be read, so no symbol was resolved and no upstream was contacted.
+  MARKET_QUOTE_UNAVAILABLE_REASON_SEED_UNAVAILABLE = 7;
+}
+
+// MarketQuoteUnavailable reports a requested symbol that produced no quote.
+message MarketQuoteUnavailable {
+  // The requested ticker symbol, normalized.
+  string symbol = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // Why the symbol produced no quote.
+  MarketQuoteUnavailableReason reason = 2;
 }
 
 // CryptoQuote represents a cryptocurrency quote from CoinGecko.
@@ -42,7 +81,7 @@ message CryptoQuote {
   double change7d = 6;
 }
 
-// CommodityQuote represents a commodity price quote from Yahoo Finance.
+// CommodityQuote represents a commodity price observation.
 message CommodityQuote {
   // Commodity symbol (e.g., "CL=F" for crude oil).
   string symbol = 1 [
@@ -57,8 +96,19 @@ message CommodityQuote {
   double price = 4;
   // Percentage change from previous close.
   double change = 5;
-  // Sparkline data points.
+  // Sparkline closes, oldest first. Bars with no trades are left out.
   repeated double sparkline = 6;
+  // Observed price provider, when known for Brent and WTI.
+  optional string price_source = 7;
+  // "futures" for a futures quote, "spot" for a daily spot observation.
+  optional string price_basis = 8;
+  // Provider observation time in Unix epoch milliseconds, with daily spot dates represented at midnight UTC
+  optional int64 price_at = 9 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
+  // Width of each sparkline bar in seconds: 300 for the 24-hour intraday series, 86400 for daily closes.
+  optional int32 sparkline_interval_seconds = 10;
+  // Start of the first sparkline bar in Unix epoch milliseconds. Later bars follow in trading order with
+  // closed periods left out, so only the first point's time is defined.
+  optional int64 sparkline_start_at = 11 [(sebuf.http.int64_encoding) = INT64_ENCODING_NUMBER];
 }
 
 // SectorPerformance represents performance data for a market sector.

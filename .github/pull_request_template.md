@@ -30,7 +30,22 @@
 - [ ] New RSS feed domains added to `api/rss-proxy.js` allowlist (if adding feeds)
 - [ ] No API keys or secrets committed
 - [ ] TypeScript compiles without errors (`npm run typecheck`)
+- [ ] New or repointed health probes have a completed Railway-side pre-seed or a one-way durable activation marker (if applicable)
+
+## Documentation Alignment Checklist
+
+<!-- Required for documentation-alignment PRs that touch methodology, API/MCP contracts, generated docs, examples, Redis keys, CII, CRI, news, digest, or briefing. Mark N/A only when this PR does not publish or change documentation claims. -->
+
+- [ ] Claim ledger attached or linked
+- [ ] All required Audit Council role signoffs attached
+- [ ] Generated docs regenerated from proto where applicable
+- [ ] Fixture-backed examples recomputed
+- [ ] Redis writers/readers enumerated for every documented key
 
 ## Screenshots
 
 <!-- If applicable, add screenshots or screen recordings -->
+
+## Bundle budget provenance
+
+<!-- Required when scripts/shared/bundle-budgets.json, scripts/shared/bundle-budgets-pro.json, or scripts/shared/bundle-budgets-embed.json changes: list each raised budget, old/new byte limits, measured growth, and the commit SHA(s) responsible for that growth. Attribute all growth, including growth already on main. Link the responsible commits and explain why their cost is accepted; do not absorb unattributed growth from other PRs. Otherwise write N/A. -->

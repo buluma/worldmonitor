@@ -6,9 +6,10 @@
 
 import type { HappyContentCategory } from './positive-classifier';
 import { getRpcBaseUrl } from '@/services/rpc-client';
-import { PositiveEventsServiceClient } from '@/generated/client/worldmonitor/positive_events/v1/service_client';
+
 import { inferGeoHubsFromTitle } from './geo-hub-index';
 import { createCircuitBreaker } from '@/utils';
+import { PositiveEventsServiceClient } from '@/services/generated-rpc-clients';
 
 export interface PositiveGeoEvent {
   lat: number;
@@ -44,7 +45,7 @@ export async function fetchPositiveGeoEvents(): Promise<PositiveGeoEvent[]> {
       count: event.count,
       timestamp: event.timestamp,
     }));
-  }, []);
+  }, [], { shouldCache: (r) => r.length > 0 });
 }
 
 /**

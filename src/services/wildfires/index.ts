@@ -1,14 +1,12 @@
 import { getRpcBaseUrl } from '@/services/rpc-client';
-import {
-  WildfireServiceClient,
-  type FireDetection,
-  type FireConfidence,
-  type ListFireDetectionsResponse,
-} from '@/generated/client/worldmonitor/wildfire/v1/service_client';
-import { createCircuitBreaker } from '@/utils';
+import type { FireDetection, FireConfidence, ListFireDetectionsResponse } from '@/generated/client/worldmonitor/wildfire/v1/service_client';
+import { createCircuitBreaker } from '@/utils/circuit-breaker';
 import { getHydratedData } from '@/services/bootstrap';
+import { WildfireServiceClient } from '@/services/generated-rpc-clients';
+import { resolveFireDetectionTotalCount } from './payload';
 
 export type { FireDetection };
+export { resolveFireDetectionTotalCount } from './payload';
 
 // -- Types --
 
@@ -18,6 +16,7 @@ export interface FireRegionStats {
   fireCount: number;
   totalFrp: number;
   highIntensityCount: number;
+  possibleExplosionCount: number;
 }
 
 export interface FetchResult {
@@ -36,6 +35,11 @@ export interface MapFire {
   region: string;
   acq_date: string;
   daynight: string;
+  /** Detection time in epoch milliseconds, for the popup of a satellite detection. */
+  detected_at?: number;
+  satellite?: string;
+  /** `firms` for satellite detections; agency-reported fires name their agency. */
+  source?: string;
 }
 
 // -- Client --
@@ -43,28 +47,49 @@ export interface MapFire {
 const client = new WildfireServiceClient(getRpcBaseUrl(), { fetch: (...args) => globalThis.fetch(...args) });
 const breaker = createCircuitBreaker<ListFireDetectionsResponse>({ name: 'Wildfires', cacheTtlMs: 30 * 60 * 1000, persistCache: true });
 
-const emptyFallback: ListFireDetectionsResponse = { fireDetections: [] };
+const emptyFallback: ListFireDetectionsResponse = { fireDetections: [], fetchedAt: 0, dataAvailable: false };
+
+const MAX_FIRE_AGE_MS = 6 * 60 * 60 * 1000;
+
+function hasCurrentFireData(response: ListFireDetectionsResponse): boolean {
+  const now = Date.now();
+  return response.dataAvailable === true
+    && Array.isArray(response.fireDetections)
+    && response.fireDetections.length > 0
+    && Number.isFinite(response.fetchedAt)
+    && response.fetchedAt > 0
+    && response.fetchedAt <= now
+    && now - response.fetchedAt <= MAX_FIRE_AGE_MS;
+}
 
 // -- Public API --
 
 export async function fetchAllFires(_days?: number): Promise<FetchResult> {
   const hydrated = getHydratedData('wildfires') as ListFireDetectionsResponse | undefined;
-  const response = (hydrated?.fireDetections?.length ? hydrated : null) ?? await breaker.execute(async () => {
-    return client.listFireDetections({ start: 0, end: 0, pageSize: 0, cursor: '', neLat: 0, neLon: 0, swLat: 0, swLon: 0 });
-  }, emptyFallback);
-  const detections = response.fireDetections;
-
-  if (detections.length === 0) {
-    return { regions: {}, totalCount: 0, skipped: true, reason: 'no_data' };
+  let response: ListFireDetectionsResponse;
+  if (hydrated && hasCurrentFireData(hydrated)) {
+    breaker.recordSuccess(hydrated);
+    response = hydrated;
+  } else {
+    response = await breaker.execute(async () => {
+      return client.listFireDetections(
+        { start: 0, end: 0, pageSize: 0, cursor: '', neLat: 0, neLon: 0, swLat: 0, swLon: 0 },
+        { signal: AbortSignal.timeout(20_000) },
+      );
+    }, emptyFallback, { shouldCache: hasCurrentFireData });
+  }
+  if (!hasCurrentFireData(response)) {
+    return { regions: {}, totalCount: 0, skipped: true, reason: Array.isArray(response.fireDetections) && response.fireDetections.length > 0 ? 'stale_data' : 'no_data' };
   }
 
+  const detections = response.fireDetections;
   const regions: Record<string, FireDetection[]> = {};
   for (const d of detections) {
     const r = d.region || 'Unknown';
     (regions[r] ??= []).push(d);
   }
 
-  return { regions, totalCount: detections.length };
+  return { regions, totalCount: resolveFireDetectionTotalCount(response) };
 }
 
 export function computeRegionStats(regions: Record<string, FireDetection[]>): FireRegionStats[] {
@@ -74,12 +99,14 @@ export function computeRegionStats(regions: Record<string, FireDetection[]>): Fi
     const highIntensity = fires.filter(
       f => f.brightness > 360 && f.confidence === 'FIRE_CONFIDENCE_HIGH',
     );
+    const possibleExplosions = fires.filter(f => f.possibleExplosion);
     stats.push({
       region,
       fires,
       fireCount: fires.length,
       totalFrp: fires.reduce((sum, f) => sum + (f.frp || 0), 0),
       highIntensityCount: highIntensity.length,
+      possibleExplosionCount: possibleExplosions.length,
     });
   }
 
@@ -96,16 +123,20 @@ export function flattenFires(regions: Record<string, FireDetection[]>): FireDete
   return all;
 }
 
-export function toMapFires(fires: FireDetection[]): MapFire[] {
-  return fires.map(f => ({
-    lat: f.location?.latitude ?? 0,
-    lon: f.location?.longitude ?? 0,
+export function toMapFires(fires: Array<Pick<FireDetection, 'location' | 'brightness' | 'frp' | 'confidence' | 'region' | 'detectedAt' | 'dayNight'> & Partial<Pick<FireDetection, 'satellite' | 'source'>>>): MapFire[] {
+  // A detection with no position cannot be placed; defaulting it to 0°, 0° drew a fire off West Africa.
+  return fires.filter(f => f.location != null).map(f => ({
+    lat: f.location!.latitude,
+    lon: f.location!.longitude,
     brightness: f.brightness,
     frp: f.frp,
     confidence: confidenceToNumber(f.confidence),
     region: f.region,
     acq_date: new Date(f.detectedAt).toISOString().slice(0, 10),
     daynight: f.dayNight,
+    detected_at: f.detectedAt,
+    satellite: f.satellite,
+    source: f.source,
   }));
 }
 

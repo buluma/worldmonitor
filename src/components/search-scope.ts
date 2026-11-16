@@ -1,7 +1,3 @@
-// Ported from koala73/main's src/components/search-scope.ts. Pure, no
-// premium/tier logic — trimmed of the 'flight' result type (this fork has
-// no flight-callsign search source) but otherwise unchanged.
-
 export const SEARCH_SCOPES = ['all', 'signals', 'map', 'panels', 'actions'] as const;
 
 export type SearchScope = (typeof SEARCH_SCOPES)[number];
@@ -43,6 +39,7 @@ const SIGNAL_RESULT_TYPES = new Set([
   'earthquake',
   'outage',
   'nuclear',
+  'flight',
 ]);
 
 const MAP_RESULT_TYPES = new Set([
@@ -67,6 +64,7 @@ const MAP_RESULT_TYPES = new Set([
   'financialcenter',
   'centralbank',
   'commodityhub',
+  'flight',
 ]);
 
 export function commandMatchesSearchScope(scope: SearchScope, category: SearchCommandCategory): boolean {
@@ -106,6 +104,7 @@ export const ALL_CHANNEL_TIP_KEYS = [
   'commands.tips.layers',
   'commands.tips.time',
   'commands.tips.settings',
+  'commands.tips.flight',
 ] as const;
 
 /**

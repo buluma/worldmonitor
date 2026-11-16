@@ -2,160 +2,83 @@ import type {
   ServerContext,
   GetPizzintStatusRequest,
   GetPizzintStatusResponse,
-  PizzintStatus,
-  PizzintLocation,
-  GdeltTensionPair,
-  TrendDirection,
-  DataFreshness,
+  TensionEvidence,
 } from '../../../../src/generated/server/worldmonitor/intelligence/v1/service_server';
 
-import { UPSTREAM_TIMEOUT_MS } from './_shared';
-import { CHROME_UA } from '../../../_shared/constants';
-import { cachedFetchJson } from '../../../_shared/redis';
+import { readCachedJson, logCacheReadError } from '../../../_shared/redis';
+import { markNoCacheResponse, markNoStoreFallbackResponse } from '../../../_shared/response-headers';
+import pairs from '../../../../shared/gdelt-tension-pairs.json';
 
-const REDIS_CACHE_KEY = 'intel:pizzint:v1';
-const REDIS_CACHE_TTL = 600; // 10 min
+const SEED_KEY = 'intelligence:pizzint:seed:v1';
+const TENSION_KEY = 'gdelt:bulk:dyad-tension:v1';
+// Written by scripts/seed-tension-evidence.mjs every 15 minutes.
+const EVIDENCE_KEY = 'intelligence:tension-evidence:v1';
+const MAX_AGE_MS = 45 * 60_000;
+const EVIDENCE_CHANNELS = new Set(['strikes', 'airports', 'military_aircraft', 'pla_aircraft', 'pla_ships', 'sanctions']);
+const AIRPORT_STATUSES = new Set(['closed', 'halted', 'restricted']);
+const ISO2 = /^[A-Z]{2}$/;
 
-// ========================================================================
-// Constants
-// ========================================================================
+const isFresh = (updatedAt: unknown): boolean => typeof updatedAt === 'number'
+  && updatedAt <= Date.now() && Date.now() - updatedAt <= MAX_AGE_MS;
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
-const PIZZINT_API = 'https://www.pizzint.watch/api/dashboard-data';
-const GDELT_BATCH_API = 'https://www.pizzint.watch/api/gdelt/batch';
-const DEFAULT_GDELT_PAIRS = 'usa_russia,russia_ukraine,usa_china,china_taiwan,usa_iran,usa_venezuela';
-
-// ========================================================================
-// RPC handler
-// ========================================================================
+function toEvidence(item: unknown): TensionEvidence | null {
+  const stored = item as Record<string, unknown> | null;
+  if (!stored || stored.notable !== true || !EVIDENCE_CHANNELS.has(stored.channel as string)) return null;
+  const { value, baseline, countries, airports, observedAt } = stored;
+  if (!isCount(value) || !(baseline == null || isCount(baseline)) || !isCount(observedAt)) return null;
+  if (!Array.isArray(countries) || !countries.every(cc => typeof cc === 'string' && ISO2.test(cc))) return null;
+  if (!Array.isArray(airports) || !airports.every(airport => typeof airport?.name === 'string'
+    && AIRPORT_STATUSES.has(airport.status))) return null;
+  return {
+    channel: stored.channel as string,
+    value,
+    ...(baseline == null ? {} : { baseline }),
+    countries,
+    airports: airports.map(({ name, status }) => ({ name, status })),
+    observedAt,
+  };
+}
 
 export async function getPizzintStatus(
-  _ctx: ServerContext,
+  ctx: ServerContext,
   req: GetPizzintStatusRequest,
 ): Promise<GetPizzintStatusResponse> {
-  const cacheKey = `${REDIS_CACHE_KEY}:${req.includeGdelt ? 'gdelt' : 'base'}`;
-
-  let result: GetPizzintStatusResponse | null = null;
-  try {
-    result = await cachedFetchJson<GetPizzintStatusResponse>(cacheKey, REDIS_CACHE_TTL, async () => {
-      let pizzint: PizzintStatus | undefined;
-      try {
-        const resp = await fetch(PIZZINT_API, {
-          headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
-          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-        });
-        if (!resp.ok) throw new Error(`PizzINT API returned ${resp.status}`);
-
-        const raw = (await resp.json()) as {
-          success?: boolean;
-          data?: Array<{
-            place_id: string;
-            name: string;
-            address: string;
-            current_popularity: number;
-            percentage_of_usual: number | null;
-            is_spike: boolean;
-            spike_magnitude: number | null;
-            data_source: string;
-            recorded_at: string;
-            data_freshness: string;
-            is_closed_now?: boolean;
-            lat?: number;
-            lng?: number;
-          }>;
-        };
-        if (raw.success && raw.data) {
-          const locations: PizzintLocation[] = raw.data.map((d) => ({
-            placeId: d.place_id,
-            name: d.name,
-            address: d.address,
-            currentPopularity: d.current_popularity,
-            percentageOfUsual: d.percentage_of_usual ?? 0,
-            isSpike: d.is_spike,
-            spikeMagnitude: d.spike_magnitude ?? 0,
-            dataSource: d.data_source,
-            recordedAt: d.recorded_at,
-            dataFreshness: (d.data_freshness === 'fresh' ? 'DATA_FRESHNESS_FRESH' : 'DATA_FRESHNESS_STALE') as DataFreshness,
-            isClosedNow: d.is_closed_now ?? false,
-            lat: d.lat ?? 0,
-            lng: d.lng ?? 0,
-          }));
-
-          const openLocations = locations.filter((l) => !l.isClosedNow);
-          const activeSpikes = locations.filter((l) => l.isSpike).length;
-          const avgPop = openLocations.length > 0
-            ? openLocations.reduce((s, l) => s + l.currentPopularity, 0) / openLocations.length
-            : 0;
-
-          // DEFCON calculation
-          let adjusted = avgPop;
-          if (activeSpikes > 0) adjusted += activeSpikes * 10;
-          adjusted = Math.min(100, adjusted);
-          let defconLevel = 5;
-          let defconLabel = 'Normal Activity';
-          if (adjusted >= 85) { defconLevel = 1; defconLabel = 'Maximum Activity'; }
-          else if (adjusted >= 70) { defconLevel = 2; defconLabel = 'High Activity'; }
-          else if (adjusted >= 50) { defconLevel = 3; defconLabel = 'Elevated Activity'; }
-          else if (adjusted >= 25) { defconLevel = 4; defconLabel = 'Above Normal'; }
-
-          const hasFresh = locations.some((l) => l.dataFreshness === 'DATA_FRESHNESS_FRESH');
-
-          pizzint = {
-            defconLevel,
-            defconLabel,
-            aggregateActivity: Math.round(avgPop),
-            activeSpikes,
-            locationsMonitored: locations.length,
-            locationsOpen: openLocations.length,
-            updatedAt: Date.now(),
-            dataFreshness: (hasFresh ? 'DATA_FRESHNESS_FRESH' : 'DATA_FRESHNESS_STALE') as DataFreshness,
-            locations,
-          };
-        }
-      } catch (_) { /* PizzINT unavailable — continue to GDELT */ }
-
-      // Fetch GDELT tension pairs
-      let tensionPairs: GdeltTensionPair[] = [];
-      if (req.includeGdelt) {
-        try {
-          const url = `${GDELT_BATCH_API}?pairs=${encodeURIComponent(DEFAULT_GDELT_PAIRS)}&method=gpr`;
-          const resp = await fetch(url, {
-            headers: { Accept: 'application/json', 'User-Agent': CHROME_UA },
-            signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-          });
-          if (resp.ok) {
-            const raw = (await resp.json()) as Record<string, Array<{ t: number; v: number }>>;
-            tensionPairs = Object.entries(raw).map(([pairKey, dataPoints]) => {
-              const countries = pairKey.split('_');
-              const latest = dataPoints[dataPoints.length - 1]!;
-              const prev = dataPoints.length > 1 ? dataPoints[dataPoints.length - 2]! : latest;
-              const change = prev.v > 0 ? ((latest.v - prev.v) / prev.v) * 100 : 0;
-              const trend: TrendDirection = change > 5
-                ? 'TREND_DIRECTION_RISING'
-                : change < -5
-                  ? 'TREND_DIRECTION_FALLING'
-                  : 'TREND_DIRECTION_STABLE';
-
-              return {
-                id: pairKey,
-                countries,
-                label: countries.map((c) => c.toUpperCase()).join(' - '),
-                score: latest?.v ?? 0,
-                trend,
-                changePercent: Math.round(change * 10) / 10,
-                region: 'global',
-              };
-            });
-          }
-        } catch { /* gdelt unavailable */ }
+  // Recheck the source clock on every request; the route's shared cache tier
+  // would otherwise keep numeric scores beyond the source freshness budget.
+  if (req.includeGdelt) markNoCacheResponse(ctx.request);
+  let failed = false;
+  async function readKey(key: string): Promise<unknown> {
+    try {
+      const read = await readCachedJson(key, true);
+      if (read.status === 'error') {
+        logCacheReadError(key, read.error);
+        failed = true;
       }
-
-      // Only cache if PizzINT data was retrieved
-      if (!pizzint) return null;
-      return { pizzint, tensionPairs };
-    });
-  } catch {
-    return { pizzint: undefined, tensionPairs: [] };
+      return read.status === 'hit' ? read.value : null;
+    } catch { failed = true; return null; }
   }
-
-  return result || { pizzint: undefined, tensionPairs: [] };
+  // Read alongside the scores; a missing or failed evidence read leaves the
+  // scores as they are.
+  const [pizza, tensions, evidence] = await Promise.all([
+    readKey(SEED_KEY),
+    req.includeGdelt ? readKey(TENSION_KEY) : null,
+    req.includeGdelt ? readKey(EVIDENCE_KEY) : null,
+  ]);
+  const seed = tensions as { updatedAt?: number; tensionPairs?: GetPizzintStatusResponse['tensionPairs'] } | null;
+  const stored = evidence as { updatedAt?: number; live?: unknown } | null;
+  const live = isFresh(stored?.updatedAt) && stored?.live && typeof stored.live === 'object' && !Array.isArray(stored.live)
+    ? stored.live as Record<string, unknown>
+    : {};
+  const evidenceFor = (id: string): TensionEvidence[] => (Array.isArray(live[id]) ? live[id] : [])
+    .map(toEvidence)
+    .filter((item): item is TensionEvidence => item !== null);
+  const response: GetPizzintStatusResponse = {
+    pizzint: (pizza as GetPizzintStatusResponse | null)?.pizzint,
+    tensionPairs: isFresh(seed?.updatedAt) && Array.isArray(seed?.tensionPairs) ? seed.tensionPairs.filter(pair =>
+      pair && pairs.some(config => config.id === pair.id)
+      && Number.isFinite(pair.score) && pair.score >= 0 && pair.score <= 100
+      && Number.isFinite(pair.changePercent)).map(pair => ({ ...pair, evidence: evidenceFor(pair.id) })) : [],
+  };
+  return failed ? markNoStoreFallbackResponse(ctx.request, response) : response;
 }

@@ -14,7 +14,7 @@ const BASE_URL = process.argv.includes('--base-url')
   ? process.argv[process.argv.indexOf('--base-url') + 1]
   : 'https://api.worldmonitor.app';
 
-const ORIGIN = 'https://wm.opsio.space';
+const ORIGIN = 'https://worldmonitor.app';
 
 // ========================================================================
 // Test definitions — one per migrated handler
@@ -49,6 +49,13 @@ const TESTS = [
     validate: (d) => Array.isArray(d.anomalies) && d.anomalies.length > 0,
     minRecords: 1,
     field: 'anomalies',
+  },
+  {
+    name: 'Climate News',
+    endpoint: '/api/climate/v1/list-climate-news',
+    validate: (d) => Array.isArray(d.items) && d.items.length > 0,
+    minRecords: 1,
+    field: 'items',
   },
 
   // Phase 2 — Parameterized endpoints
